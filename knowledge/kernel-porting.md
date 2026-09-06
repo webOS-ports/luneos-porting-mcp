@@ -414,8 +414,14 @@ Tier A kernel; the rest are behavioral.
   the same genksyms-CRC class as SYSVIPC, and net_device is touched by every
   vendor wifi module.** The tenderloin mainline port instead bakes
   `netconsole=6665@172.16.42.2/usb0,6666@172.16.42.1/` into `CONFIG_CMDLINE`
-  for true pre-userspace logging — possible only when the kernel owns the
-  gadget from boot (mainline `g_ether`-style), not on configfs-gadget devices.
+  for true pre-userspace logging — possible only because it also sets
+  `CONFIG_USB_ETH=y` (built-in `g_ether` creates `usb0` at kernel boot).
+  **Never put `netconsole=` on the cmdline of a configfs-gadget kernel:**
+  verified in the athena 4.19 source, a target whose device doesn't exist at
+  init makes `init_netconsole()` unwind entirely, taking the dynamic configfs
+  interface down with it. Use dynamic attach from the initramfs plus the
+  dmesg replay instead (see debugging.md), and put `printk.devkmsg=on` on the
+  cmdline so the replay isn't ratelimited.
 - **pstore/ramoops needs config to exist**: `CONFIG_PSTORE=y`,
   `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_RAM=y`,
   `CONFIG_PSTORE_RAM_ANNOTATION_APPEND=y` (Droidian `debug.config`). Our
