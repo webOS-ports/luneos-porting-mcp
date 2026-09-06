@@ -402,10 +402,20 @@ Tier A kernel; the rest are behavioral.
   mapping: "stuck at the glowing logo and RNDIS is not working → check
   CONFIG_USB_CONFIGFS_RNDIS" (Droidian docs). Measured device split: stock GKI
   6.1 (bluejay/panther) has RNDIS **off** but `CONFIG_USB_CONFIGFS_ECM=y`;
-  mindphone's 4.14 has RNDIS **on** and ECM off. The LuneOS initramfs debug
-  network tries both gadget functions, so neither needs adding to a fragment
-  just for telnet — but a host talking to an ECM gadget must be Linux/macOS
-  (no native Windows driver).
+  mindphone's 4.14 has RNDIS **on** and ECM off; athena's 4.19 defconfig has
+  RNDIS on. The LuneOS initramfs debug network tries both gadget functions, so
+  neither needs adding to a fragment just for telnet — but a host talking to
+  an ECM gadget must be Linux/macOS (no native Windows driver).
+- **`CONFIG_NETCONSOLE=y` + `CONFIG_NETCONSOLE_DYNAMIC=y` — Tier B only.**
+  Streams kmsg to the host over UDP (the initramfs attaches a dynamic target
+  after the gadget network is up; listen with `nc -ul 6666`), surviving
+  switch_root. In the athena and mindphone fragments. **KMI-poison on Tier A:
+  NETCONSOLE selects NETPOLL, which adds `npinfo` to `struct net_device` —
+  the same genksyms-CRC class as SYSVIPC, and net_device is touched by every
+  vendor wifi module.** The tenderloin mainline port instead bakes
+  `netconsole=6665@172.16.42.2/usb0,6666@172.16.42.1/` into `CONFIG_CMDLINE`
+  for true pre-userspace logging — possible only when the kernel owns the
+  gadget from boot (mainline `g_ether`-style), not on configfs-gadget devices.
 - **pstore/ramoops needs config to exist**: `CONFIG_PSTORE=y`,
   `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_RAM=y`,
   `CONFIG_PSTORE_RAM_ANNOTATION_APPEND=y` (Droidian `debug.config`). Our
