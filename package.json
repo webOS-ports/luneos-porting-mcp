@@ -1,0 +1,36 @@
+{
+  "name": "luneos-mcp",
+  "version": "1.0.0",
+  "description": "MCP server with LuneOS GSI/GKI porting, device bring-up and debugging knowledge",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "luneos-mcp": "index.js"
+  },
+  "files": [
+    "index.js",
+    "knowledge/",
+    "templates/",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "luneos",
+    "webos",
+    "halium",
+    "gsi",
+    "gki",
+    "mcp",
+    "modelcontextprotocol"
+  ],
+  "author": "Herman van Hazendonk <Github.com@herrie.org>",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
