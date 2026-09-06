@@ -400,7 +400,12 @@ Tier A kernel; the rest are behavioral.
 - **`CONFIG_USB_CONFIGFS_RNDIS=y`** enables the RNDIS USB-networking debug
   channel (SSH into a half-booted device — see debugging.md). Droidian's symptom
   mapping: "stuck at the glowing logo and RNDIS is not working → check
-  CONFIG_USB_CONFIGFS_RNDIS" (Droidian docs).
+  CONFIG_USB_CONFIGFS_RNDIS" (Droidian docs). Measured device split: stock GKI
+  6.1 (bluejay/panther) has RNDIS **off** but `CONFIG_USB_CONFIGFS_ECM=y`;
+  mindphone's 4.14 has RNDIS **on** and ECM off. The LuneOS initramfs debug
+  network tries both gadget functions, so neither needs adding to a fragment
+  just for telnet — but a host talking to an ECM gadget must be Linux/macOS
+  (no native Windows driver).
 - **pstore/ramoops needs config to exist**: `CONFIG_PSTORE=y`,
   `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_RAM=y`,
   `CONFIG_PSTORE_RAM_ANNOTATION_APPEND=y` (Droidian `debug.config`). Our
