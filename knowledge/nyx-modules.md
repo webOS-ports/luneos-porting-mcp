@@ -109,6 +109,14 @@ which the touchscreen) and `ls /sys/class/power_supply/` on the running device. 
 0022's `/etc/nyx.conf` runtime override lets you correct values on-device before
 rebuilding.
 
+A better measuring tool than raw `evtest`: **`evdev_trace -i`** (from mce-tools, used by
+SFOS porters — https://sailfishos.wiki/books/hardware/page/hadk-hot) enumerates every
+input device *with capability decoding*, so the node identifies itself: the vibrator is
+the device advertising `EV_FF`/`FF_RUMBLE`, the headphone jack the one with
+`SW_HEADPHONE_INSERT`/`SW_MICROPHONE_INSERT`, and touchscreen/keypad nodes show their
+event types instead of you triggering events by hand. Fill `TOUCHPANEL_DEVICE`/keypad
+values from that output — measured, not copy-pasted.
+
 Concrete mindphone outcomes of that verification: the keypad really was `mtk-kpd` on
 event1, but udev tagged it `ID_INPUT_KEY` only — Qt's evdevkeyboard discovery needs
 `ID_INPUT_KEYBOARD`, promoted via a udev rule (a device bring-up fix, not a nyx one, but

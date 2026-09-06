@@ -310,6 +310,125 @@ deploys `zImage-mindphone.fastboot` (= boot.img) under
 header fields (see boot-images.md). Kernel changes should eventually land on
 shr-distribution `dnim/4.14.186` instead of living as layer files.
 
+### Recurring vendor-kernel patch classes (from the other distros' Tier B experience)
+
+Before inventing fixes, check whether the failure matches a documented class.
+UBports' porting-notes GSI wiki
+(https://github.com/ubports/porting-notes/wiki/Generic-system-image-(GSI))
+catalogues recurring *code* patches for vendor kernels:
+
+- **Samsung Qualcomm devices:** disable RKP (control-flow protection) configs and
+  Samsung's file-integrity verifier — otherwise early crashes **with no logs at
+  all**.
+- **Revert tty workqueue changes** to avoid fastboot bootloops.
+- **Revert binder security-context patches** for hwbinder HAL stability.
+- **Module "magic mismatch ignore" patches** to load vendor-partition kernel
+  modules — their cousin of our `CONFIG_MODULE_FORCE_LOAD=y` route on mindphone.
+- **synx driver PID overflow** on msm-4.19+ kernels.
+- **`skip_initramfs` revert** on A8–A10 kernels — without it a repacked boot.img
+  never runs your init at all; see boot-images.md for the full trap.
+
+Two calibration tricks worth trying before a mindphone-style six-round source-patch
+series:
+
+- **Match the toolchain to the Android generation** (Droidian docs): Droidian
+  packages clang for Android 6.0/9.0/10.0/12.0/14.0 with a gcc-4.9 fallback, and
+  their rule of thumb is that 4.4+ kernels should compile with clang. An era-matched
+  compiler sidesteps most of the -Werror/new-keyword breakage that a modern host
+  toolchain provokes (our `constexpr`/`#alloc`/`-Werror` rounds were all
+  new-toolchain artifacts).
+- **`ARCH=<arch> make savedefconfig`** (UBports docs) minimizes a full extracted
+  config (IKCONFIG or `/proc/config.gz`) back into a defconfig — useful when the
+  BSP drop doesn't name its defconfig as conveniently as mindphone's IKCONFIG did.
+
+---
+
+## Cross-distro config lists — use with care
+
+Both UBports and Droidian publish "required kernel config" lists for Halium-style
+ports. They are good references — **and both directly contradict our Tier A
+KMI-poison list.** Know why before copying anything.
+
+UBports' minimal `halium.config`
+(https://docs.ubports.com/en/latest/porting/build_and_boot/standalone_kernel_build.html):
+
+```
+CONFIG_DEVTMPFS=y
+CONFIG_FHANDLE=y
+CONFIG_SYSVIPC=y
+CONFIG_IPC_NS=y
+CONFIG_NET_NS=y
+CONFIG_PID_NS=y
+CONFIG_USER_NS=y
+CONFIG_UTS_NS=y
+CONFIG_VT=y
+```
+
+Droidian's requirements (docs + their 5.10 fragments) likewise mandate
+`SYSVIPC`, `IPC_NS`, `PID_NS`, `NET_NS`, `UTS_NS` (FANOTIFY commented out).
+
+**`SYSVIPC` + `IPC_NS` are on our KMI-poison list.** The conflict is
+architectural, not an error on either side: UBports and Droidian build a
+**per-device kernel package** and do not reload the *stock* vendor modules
+against it, so KMI preservation is not a constraint they have. LuneOS Tier A
+depends on exactly that property. The rule:
+
+> Cross-distro fragments are good **Tier B** starting points. They must never be
+> applied to a **Tier A** GKI kernel without re-running `kmi-crc-check.py` —
+> they will break the "stock vendor_dlkm still loads" property.
+
+Maintained fragment source worth watching: **`droidian-devices/common_fragments`**
+(https://github.com/droidian-devices/common_fragments) — branches
+`4.14-android`, `4.19-android`, `5.10-android-common` (shared 5.10/5.15), each
+with `halium.config`, `droidian.config`, `container.config` (Docker/cgroup set)
+and `debug.config`, plus `5.10-android12.config`/`5.10-android13.config` deltas.
+
+### Config facts from the other distros (fold into your fragment thinking)
+
+Each item marked (KMI-check) must go through `kmi-crc-check.py` before use on a
+Tier A kernel; the rest are behavioral.
+
+- **`CONFIG_ANDROID_PARANOID_NETWORK` must stay ON** — disabling it for normal
+  Linux networking breaks rild on hybris-12.1+ bases. SFOS wraps the capability
+  checks in `#ifdef CONFIG_ANDROID_PARANOID_NETWORK` instead of removing the
+  option (SFOS hadk-faq).
+- **`CONFIG_BT_HCIVHCI=y` is bluebinder's kernel prerequisite** — bluebinder
+  feeds the Android BT HAL into a virtual HCI. mindphone's working hci0 (vhci)
+  depended on this; we never recorded the config until now (SFOS hadk-hot).
+  Legacy Qualcomm `hci_smd` is `CONFIG_BT_HCISMD` — already flagged elsewhere as
+  copy-paste to delete.
+- **`CONFIG_USB_CONFIGFS_RNDIS=y`** enables the RNDIS USB-networking debug
+  channel (SSH into a half-booted device — see debugging.md). Droidian's symptom
+  mapping: "stuck at the glowing logo and RNDIS is not working → check
+  CONFIG_USB_CONFIGFS_RNDIS" (Droidian docs).
+- **pstore/ramoops needs config to exist**: `CONFIG_PSTORE=y`,
+  `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_RAM=y`,
+  `CONFIG_PSTORE_RAM_ANNOTATION_APPEND=y` (Droidian `debug.config`). Our
+  playbook's first debug step assumes ramoops works — on a device that lacks it,
+  these options (KMI-check on Tier A) are what create it.
+- **Binder device models differ**: Droidian's baseline wants
+  `CONFIG_ANDROID_BINDERFS=n` with a static
+  `CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder,anbox-binder,anbox-hwbinder,anbox-vndbinder"`
+  — the `anbox-*` triple exists for Waydroid. LuneOS instead mounts **binderfs on
+  the host** and binds it into the container. Either model works, but Waydroid
+  needs its own binder trio whichever way the nodes are created, plus
+  `CONFIG_VETH=y` and `CONFIG_NETFILTER_XT_TARGET_CHECKSUM=y` for its networking
+  (Droidian common_fragments).
+- **Recent-kernel toggles** seen in Droidian's 5.10 fragments (each KMI-check
+  before Tier A use): `CONFIG_LTO_CLANG_FULL=n` + `CONFIG_LTO_CLANG_THIN=y`,
+  `CONFIG_ARM64_BTI=n`, `CONFIG_NULL_TTY=y`.
+- **Their GKI cmdline example** (in-fragment `CONFIG_CMDLINE`, Droidian):
+  `stack_depot_disable=on kasan.stacktrace=off kvm-arm.mode=protected
+  cgroup_disable=pressure cgroup.memory=nokmem selinux=0 droidian.lvm.prefer
+  console=tty0` — notably `selinux=0` and `cgroup_disable=pressure`; `console=tty0`
+  also doubles as a boot-hang fix (see boot-images.md/debugging.md).
+
+### Vendor floor for the oldest GSI generation
+
+The Halium 9 GSI requires an **Android 9 vendor** as its base — Android 8.0/8.1
+vendors are only "experimental" (UBports porting-notes). Record this next to the
+vendor-API-level table when triaging very old devices.
+
 ---
 
 ## mer-kernel-check usage (both tiers)

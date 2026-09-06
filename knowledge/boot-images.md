@@ -114,6 +114,18 @@ Regenerate the userdata image after a rootfs rebuild with:
 `android-rootfs.img` must sit **next to** rootfs.img on userdata (halium
 file_layout), not only inside the rootfs.
 
+### The `skip_initramfs` trap (Android 8–10 vendor kernels)
+
+Many A8–A10 vendor kernels honor a `skip_initramfs` cmdline option (set by the
+bootloader for normal boot) and **bypass the packed ramdisk entirely** — a
+repacked boot.img then never runs your init, with nothing to show why. Fix in
+kernel source: revert the "Add skip_initramfs command line option" / "call
+free_initrd() when skipping init" patches in `init/initramfs.c`, or force
+`do_skip_initramfs = 0` (SFOS hadk-hot,
+https://sailfishos.wiki/books/hardware/page/hadk-hot). mindphone (A11) never hit
+this, but any A8–A10 Tier B device will — check for it *before* concluding the
+kernel or ramdisk is broken.
+
 ---
 
 ## Class 2 — A12-launch GKI (bluejay, Pixel 6a)
@@ -199,6 +211,13 @@ changed files (later cpio entries win). The bluejay ramdisk = base
 (`overlay/init-gki-modules.diff` in the build repo) is verified to reproduce the
 patched init byte-exact.
 
+An alternative shape worth knowing: Droidian kernels can ship boot-time hook
+functions in `debian/initramfs-overlay/scripts/halium-hooks`, executed before
+the rootfs loads (documented use cases: encryption and display fixups). That is
+a first-class **per-device hook file** doing the same job as our init-overlay
+patches — a cleaner home for device quirks than growing the shared `init`
+(https://docs.droidian.org/porting-guide/kernel-compilation/).
+
 ### Init patch history — three hardware-diagnosed bugs, keep all fixes
 
 **v2 — fixpoint module loader.** The stock LuneOS initramfs loads no early
@@ -261,6 +280,15 @@ shell. On Pixels, `fastboot boot boot-<dev>-luneos-debug.img` runs it without
 flashing — that is the push/rescue channel. If boot hangs on any halium device,
 the initramfs panics into an adb gadget named "Halium initrd — Failed to boot";
 `adb shell` then and read `/dev/kmsg`.
+
+Heritage note: hybris-boot (the ancestor of Halium's initramfs) signals the boot
+*stage* through its debug channel — telnet on port **23** means still in the
+initrd (pre-switch_root), port **2323** means post-switch_root, and marker files
+(`init_enter_debug` / `init_enter_debug2` on the data partition) halt boot at a
+chosen point deliberately (https://github.com/mer-hybris/hybris-boot). Both
+ideas — a stage marker visible from the host, and a halt-boot-here flag file —
+are worth porting to the LuneOS initramfs; the full debug flow is in
+debugging.md.
 
 ---
 

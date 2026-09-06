@@ -123,6 +123,10 @@ stock 13/58; bluejay shipped config 5 errors, all accounted for.
   when set =y;
 - wants `DUMMY=n` while stock Android ships =y (contradicting its own stock run).
 
+**Syntax note:** a rule prefixed with `!` is downgraded to *optional* (SFOS's
+documented example is the obsolete `NETFILTER_XT_MATCH_QTAGUID`) — use it to
+quiet rules for options that no longer exist rather than deleting them.
+
 **Location:** `gsigki/mer-kernel-check/` (Makefile, `mer_verify_kernel_config`,
 `mer_verify_kernel_spec`).
 
@@ -162,6 +166,72 @@ mindphone a flags=2 vbmeta replaces the enforcing stock one (whose descriptors
 chain boot/vbmeta_system/vbmeta_vendor). Optionally add an unsigned hash footer
 to a self-built boot.img so footer-expecting tooling stays happy — not required
 once verification is off.
+
+## lxc-checkconfig
+
+**Purpose:** one-shot validation, on the booted device, that the running kernel
+has every namespace/cgroup option LXC needs — a post-hoc complement to
+`mer_verify_kernel_config` (which checks a config file pre-build). Everything
+except the User namespace should show enabled. Pair with `lxc-ls --fancy` for
+container state at a glance (Halium/Droidian docs).
+
+## parse-android-dynparts (host-side inspection)
+
+**Purpose:** map a `super` image's logical partitions on a workstation — read the
+vendor fstab/manifest of a factory image *before* ever flashing the device. The
+image must be raw (`simg2img` a sparse one first):
+
+```
+losetup -r /dev/loop0 super.img
+dmsetup create --concise "$(parse-android-dynparts /dev/loop0)"
+# partitions appear at /dev/mapper/dynpart-<NAME>
+# teardown:
+dmsetup remove /dev/mapper/dynpart-*
+losetup -d /dev/loop0
+```
+
+Drop `-r` for write access. Build: cmake + OpenSSL
+(https://github.com/droidian/parse-android-dynparts). On-device usage (mounting
+the real super at boot) is covered in architecture.md/debugging.md.
+
+## libhybris test binaries & binder-list
+
+libhybris ships per-subsystem smoke tests usable before any middleware exists:
+`test_hwcomposer`, `test_egl`, `test_vibrator`, `test_gps`, `test_audio`
+(`test_sensors` is legacy-HAL era, Android ≤7). From libgbinder (which LuneOS
+ships): `binder-list -d /dev/hwbinder` / `-d /dev/binder` verifies HAL
+registration; an empty listing can mean the gbinder **API level** in
+`/etc/gbinder.conf` is wrong for the Android base. Usage and the escalation
+order live in debugging.md (Stages 3–4).
+
+## evdev_trace
+
+**Purpose:** enumerate input devices *with capability decoding* (mce-tools):
+`evdev_trace -i`. A device with `EV_FF`/`FF_RUMBLE` is the vibrator; one with
+`SW_HEADPHONE_INSERT`/`SW_MICROPHONE_INSERT` is the jack; touchscreen and keypad
+nodes identify themselves the same way. Use it to fill nyx-modules cmake values
+(`TOUCHPANEL_DEVICE`, keypad node, …) with **measured** event nodes instead of
+copy-pasted ones — the capability-decoding upgrade over the raw `evtest` used on
+mindphone (SFOS hadk-faq/hadk-hot).
+
+## HGABT (halium-generic-adaptation-build-tools)
+
+UBports' standalone kernel/boot-image builder, driven by a `deviceinfo` file —
+entry point `./build.sh -b workdir` (downloads toolchains, clones the kernel
+from deviceinfo vars, builds, packs the boot image). Script inventory:
+`build-kernel.sh`, `make-bootimage.sh`, `make-dtboimage.sh`,
+`build-tarball-mainline.sh`, `build-ufdt-apply-overlay.sh`,
+`setup_repositories.sh`, `prepare-fake-ota.sh`, `fetch-and-prepare-latest-ota.sh`,
+`system-image-from-ota.sh`, plus a `gsi-port-ci.yml` GitLab CI template
+(https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools).
+The full `deviceinfo` variable reference is in deviceinfo-reference.md.
+
+## scp-in-place GSI testing
+
+To iterate on a system image without a reflash loop: `simg2img` the build
+output and `scp` it straight over `/var/lib/lxc/android/android-rootfs.img` on
+a running device, then restart the container (Droidian docs). Applies directly
+to testing rebuilt Halium GSIs.
 
 ## The bitbake route (preferred once a machine exists)
 

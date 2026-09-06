@@ -1,6 +1,8 @@
 # LuneOS GSI/GKI Bring-up Debugging Playbook
 
-A stage-by-stage playbook for "the device doesn't come up", distilled from real bring-ups: Pixel 3a (sargo, Halium 9→14/16 GSI), Pixel 6a (bluejay, GKI Tier A), Pixel 7 (panther), and a MediaTek MT6739 32-bit device (mindphone). Every failure mode here was hit on hardware and diagnosed; the fixes named are the ones that shipped. Work through the stages in order — each stage's failures are only visible once the previous stage is cleared, and several of these bugs hide behind one another.
+A stage-by-stage playbook for "the device doesn't come up", distilled from real bring-ups: Pixel 3a (sargo, Halium 9→14/16 GSI), Pixel 6a (bluejay, GKI Tier A), Pixel 7 (panther), and a MediaTek MT6739 32-bit device (mindphone). Every failure mode in the core text was hit on hardware and diagnosed; the fixes named are the ones that shipped. The playbook also folds in cross-checked material from the UBports, Droidian and SFOS porting guides (attributed inline with sources) — that material is other distros' documented experience, not LuneOS-verified; SFOS-derived command spellings in particular were extracted from summarized pages, so verify against the cited source if one fails. Work through the stages in order — each stage's failures are only visible once the previous stage is cleared, and several of these bugs hide behind one another.
+
+**Log-collection discipline** (SFOS hadk-hot, <https://sailfishos.wiki/books/hardware/page/hadk-hot>): collect evidence before changing anything. `dmesg -w` live; boot with `audit=0` (kills audit spam) and `printk.devkmsg=on` (unthrottled userspace → kmsg — the stock bluejay cmdline already carries it); `journalctl -b-1` reads the previous boot once the persistent journal is enabled; logcat output differs run as root vs user.
 
 **The install/boot model these stages assume:** `fastboot flash vbmeta --disable-verity --disable-verification`, our `boot.img` (and `init_boot.img` on A13-launch devices), stock `vendor_boot`/`vendor`/`super` untouched, `rootfs.img` + `android-rootfs.img` (the Halium GSI system image) as files inside an unencrypted ext4 `userdata`. The LuneOS initramfs loop-mounts `rootfs.img` as `/`, and the Android container mounts the GSI at `/android` with the device's real `/vendor` bound in.
 
@@ -26,6 +28,39 @@ cat /dev/kmsg        # live kernel log, includes every initramfs message
 ```
 
 The same shell appears automatically (without the debug image) when the initramfs itself fails to boot — e.g. `rootfs.img` not found on userdata. If you get the gadget, the kernel and initramfs core are fine; read kmsg to see where boot stopped.
+
+### The telnet / USB-networking ladder (UBports/Halium, SFOS hybris-boot)
+
+The Halium-family initramfs also exposes a telnet path that works when adb doesn't, and the USB gadget itself tells you how far boot got. (UBports: <https://docs.halium.org/en/latest/porting/debug-build/early-init.html>, <https://docs.ubports.com/en/latest/porting/build_and_boot/Boot_debug.html>; SFOS: <https://github.com/mer-hybris/hybris-boot>)
+
+- **Watch the boot stage from the host** via the gadget's iSerial string:
+
+  ```
+  while : ; do lsusb -v 2>/dev/null | grep -Ee 'iSerial +[0-9]+ +[^ ]' ; done | uniq
+  ```
+
+  The stages announce themselves: `"Mer Debug setting up (DONE_SWITCH=no)"` → `"Mer Debug telnet on port 23 on usb0 192.168.2.15"` (boot failed in the initrd) or `"GNU/Linux device on rndis0 10.15.19.82"` (booted).
+- **Initramfs failure → telnet:** `telnet 192.168.2.15` (**port 23** = still in the initrd, pre-switch_root; **port 2323** = post-switch_root debug in the hybris-boot scheme). Host side: configure yourself as `192.168.2.1`, and give the interface a MAC if it shows `00:00:00:00:00:00`. First commands: `cat diagnosis.log` (the initramfs writes its failure reason there) and check `/init.log`.
+- **Reading the silence:** no USB device at all = the kernel or initramfs never ran (unpack and inspect the flashed image); port 23 answering = kernel + initrd fine, the rootfs transition failed.
+- **Halt boot deliberately:** hybris-boot honours marker files (`init_enter_debug` before switch_root, `init_enter_debug2` after) and `fastboot boot boot.img -c bootmode=debug`; the UBports recovery flow waits with a shell until `echo continue > /init-ctl/stdin`. These are the telnet-world analogs of our `enable_adb` debug image — the stage-marker and halt-here ideas are worth porting to the LuneOS initramfs.
+
+### RNDIS + SSH — a debug channel that survives past the initramfs (Droidian)
+
+Our `enable_adb` shell ends when the initramfs hands over; Droidian's primary channel is RNDIS + SSH into the booted (or half-booted) rootfs (<https://docs.droidian.org/porting-guide/debugging-tips/>):
+
+- Kernel needs `CONFIG_USB_CONFIGFS_RNDIS=y`. Their symptom mapping: "stuck at the glowing logo and RNDIS is not working → check CONFIG_USB_CONFIGFS_RNDIS".
+- Device comes up at `10.15.19.82`; host takes `10.15.19.100/24`, then `ssh <user>@10.15.19.82`. "Nothing on screen ≠ boot failure" — remote access determines actual status.
+- Forward internet from the host over the USB link:
+
+  ```sh
+  sudo sysctl net.ipv4.ip_forward=1
+  sudo iptables -t nat -A POSTROUTING -o $INTERNET -j MASQUERADE
+  sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  sudo iptables -A FORWARD -i $USB -o $INTERNET -j ACCEPT
+  # on device:  ip route add default via 10.15.19.100 ; nameserver 8.8.8.8
+  ```
+
+- UBports adds an emergency mechanism worth stealing: flag files `/userdata/.force-ssh` and `/userdata/.force-adb` enable SSH/ADB at boot regardless of config (<https://docs.ubports.com/en/latest/porting/configure_test_fix/USBModed.html>) — a flag file on userdata is writable from recovery or fastboot when nothing else is.
 
 ---
 
@@ -73,6 +108,35 @@ UFS (`ufs-exynos-gs.ko`) probes asynchronously, and `mountroot` has no retry —
 - mdev hotplug writes `/sys/kernel/uevent_helper`, which needs `CONFIG_UEVENT_HELPER=y` — not in stock GKI configs. Without it, late hotplug events are lost; if by-partlabel links come up empty, this is why. (Added to the LuneOS kernel fragment; KMI-safe.)
 - Old forked `machine.conf` files with hardcoded `mmcblk0p*` partition numbers: the modern initramfs discovers partitions by name — stale copy-pasted numbers are mostly harmless (panic path only) but should be deleted.
 
+### 1.6 Cmdline-level fixes (Droidian porting guide)
+
+Three documented failure → cmdline fixes (<https://docs.droidian.org/porting-guide/debugging-tips/>):
+
+| Symptom | Fix |
+|---|---|
+| Device reboots immediately after flashing boot | remove a stale `systempart=` from the cmdline |
+| Initramfs stuck / can't find data | add `datapart=/dev/disk/by-partlabel/userdata` |
+| Initramfs refuses to exec `/init` | replace `console=ttyMSM0,115200n8` with `console=tty0` |
+
+The `console=` one is worth remembering: a serial console on a dead UART can hang init's stdio — Droidian appends `console=tty0` as standard practice.
+
+### 1.7 The `skip_initramfs` trap — your init never ran at all (SFOS hadk-hot)
+
+On many Android 8–10 vendor kernels the bootloader passes `skip_initramfs` for normal boot and the kernel **bypasses the packed ramdisk entirely** — a repacked boot.img flashes fine but your init simply never executes (no gadget, no logs, stock-looking behaviour). Fix is in kernel source: revert the "Add skip_initramfs command line option" patches or force `do_skip_initramfs = 0` (details belong to the Tier B kernel work; <https://sailfishos.wiki/books/hardware/page/hadk-hot>). We have not hit this yet (mindphone is A11), but it is the first suspect when a Tier B device ignores a repacked ramdisk.
+
+### 1.8 Recovery as a debug environment (Droidian)
+
+On devices with TWRP/recovery, the shipped rootfs can be inspected and repaired without booting it (<https://docs.droidian.org/porting-guide/debugging-tips/>):
+
+```sh
+mkdir /tmp/mpoint
+mount /data/rootfs.img /tmp/mpoint
+chroot /tmp/mpoint /bin/bash
+export PATH=/usr/bin:/usr/sbin
+```
+
+Grow it offline with `e2fsck -fy /data/rootfs.img && resize2fs -f /data/rootfs.img 8G` (complementary to the first-boot `resize_userdata_if_needed`). Recovery is also where you read `/sys/fs/pstore/` after a panic and mask broken systemd units before the next boot attempt.
+
 ---
 
 ## Stage 2 — Android container failures
@@ -86,6 +150,8 @@ Halium patches Android init so the framework never starts, and `on nonencrypted`
 On sargo, `init.<board>.rc` gates `post-fs-data` on `wait_for_prop vendor.qcom.time.set true`; that property is set by Android's `time_daemon`, which Halium doesn't run. `wait_for_prop` blocks init's state machine outright — everything after it (`early-boot`, `boot`, every `class_start`, every `chown`/`chmod` the vendor HALs depend on) is simply never reached. Setting that **one property** on a running device brought up the whole modem subsystem (`per_mgr`, `per_proxy`, `pd_mapper`, `qcrild`), fixed the vibrator restart loop, zeroed the sensors' QMI errors, and cut EACCES failures in a boot from 50 to 1.
 
 The shipped mechanism (`start-android-hals.sh`) generalizes this: parse every `wait_for_prop` out of the container's rc files, grant a grace period, then force only the stragglers — and keep a `class_start`/`chown` replay as a safety net.
+
+Cross-reference: SFOS hits the same time_daemon conflict and mitigates from the other end — disabling `time_daemon`/`vendor.time_daemon` outright via a `disabled_services.rc` dropped into the container's init dirs (stops "RTC initialization failed" loops). A port seeing time_daemon crash-loop should know both mitigations. (<https://sailfishos.wiki/books/hardware/page/hadk-hot>)
 
 ### 2.2 The quoted-property trap
 
@@ -122,6 +188,18 @@ The `/dev/ashmem` case: system booted to `systemctl is-system-running = running`
 | getprop/setprop TLS abort on Android 16 GSI | Needs the Android 16 libhybris adaptation (`Herrie82/libhybris` `herrie/android16-tls`) |
 | GPU driver not found | `/vendor/lib{,64}/egl` must be on the linker's default LD paths (same libhybris branch) |
 | Container "service not found" for zygote/netd/update_verifier | By design — the Halium GSI strips them. Not a bug. |
+| "add_service Permission denied" / "Unknown class service_manager" | SELinux-family (SFOS hadk-hot): the selinux config files must be real files, **not symlinks**; "Unknown class" in permissive mode wants stub services. Check what the base expects first — dmesg shows `SELinux: Disabled at boot` (hybris ≤16) vs `SELinux: Initializing` (≥17) |
+| `libandroidicu.so not found` (and libicui18n/libicuuc) | Straggler libs live in the runtime APEX — symlink them in, e.g. `/odm/lib64/libandroidicu.so → /apex/com.android.runtime/lib64/…` (SFOS hadk-hot) |
+| apexd/loop-device failures | `loop.max_part=7` on the cmdline, loop block-size patch, or the "linkerconfig: switch no-updatable-apex" hybris-patch; also check `/proc/device-tree/firmware/android/fstab/` for partitions the DT expects early-mounted (SFOS hadk-hot) |
+| Early crash-loop on Exynos 9810/9820 | `systemd-journald` crashes the device — mask it (from recovery if needed). On kernels with broken namespace support, mask `systemd-resolved` and `systemd-timesyncd` too (Droidian) |
+
+### 2.6 Working the container by hand (UBports/Halium, Droidian, SFOS)
+
+- `lxc-checkconfig` — one-shot check that the running kernel has every namespace/cgroup option LXC needs (everything except User namespace should be enabled). `lxc-ls --fancy` shows container state at a glance.
+- When `android-system` fails silently, start the container manually with full logging: `lxc-start -n android --logfile=/tmp/lxclog --logpriority=DEBUG`. To debug the host side alone, temporarily neuter the container: override the service with `ExecStart=/bin/true`. (<https://docs.droidian.org/porting-guide/debugging-tips/>)
+- Get logs from inside: `lxc-attach -n android -- /system/bin/logcat` (and `logcat -b radio` for RIL).
+- **The container's init cannot be started twice** (SFOS hadk-hot): a second start fails on leftover state, not on the original bug — so a restart-looping container init is a misleading symptom; find the *first* failure. And logcat only exists once Android init is up — absence of logcat ≠ broken logging.
+- **strace a proprietary vendor daemon** by editing its rc service line (works in the LXC container too): `mkdir -m777 /data/strace`, then `service tad /usr/bin/strace -ff -o /data/strace/tad.strace /vendor/bin/tad …`. Often the only window into a closed daemon. (SFOS hadk-hot)
 
 ---
 
@@ -129,7 +207,17 @@ The `/dev/ashmem` case: system booted to `systemctl is-system-running = running`
 
 First, distinguish the two black-screen shapes:
 - **Stuck on the bootloader splash** with a healthy system underneath → compositor never sent display commands; think ashmem/composer (§2.4), or init gates (§2.1).
-- **Screen dark but everything runs** → check the backlight before anything else: on mindphone nothing drives `/sys/class/leds/lcd-backlight` and the panel boots at brightness 0. `echo 200 >` it from a compositor drop-in as a bring-up hack; the real fix belongs in the display service.
+- **Screen dark but everything runs** → check the backlight before anything else: on mindphone nothing drives `/sys/class/leds/lcd-backlight` and the panel boots at brightness 0. `echo 200 >` it from a compositor drop-in as a bring-up hack; the real fix belongs in the display service. Qualcomm gotcha (Droidian): many QC panels take a max of **2047**, not 255 — a "correct-looking" low absolute value can still leave the panel visually dark.
+
+### The display smoke-test ladder (SFOS HADK/hadk-hot)
+
+When the compositor shows nothing, don't debug it top-down — isolate layers bottom-up with the libhybris test binaries, compositor masked first (SFOS masks `user@100000`; LuneOS analog: stop/mask luna-surfacemanager). (<https://github.com/mer-hybris/hadk-faq>, <https://sailfishos.wiki/books/hardware/page/hadk-hot>)
+
+1. `EGL_PLATFORM=hwcomposer test_hwcomposer` (as root). Success = a spinning colored rectangle: EGL + gralloc + composer blobs work under the hybris linker. Segfault → `EGL_PLATFORM=hwcomposer strace test_hwcomposer`, or `gdb test_hwcomposer` → `run` → `bt full`. Runs-but-black → suspect the gralloc/copybit module.
+2. "minimer": `EGL_PLATFORM=hwcomposer qmlscene -platform hwcomposer main.qml` — adds the Qt QPA hwcomposer plugin on top (LuneOS analog: qt6 qmlscene with qt6-qpa-hwcomposer-plugin). Tuning when it misbehaves: `QPA_HWC_IDLE_TIME=5`, `QPA_HWC_BUFFER_COUNT=3`; black backgrounds/images inside otherwise-working apps → `QT_OPENGL_NO_BGRA=1`.
+3. Only then the full compositor.
+
+**surfaceflinger as a bisect oracle:** run the Android stack's *own* compositor from the container/GSI — `/system/bin/surfaceflinger` (Android 11+: also `ANDROID_ROOT="/system" /system/bin/bootanimation`). If it renders, kernel + vendor blobs + gralloc/composer are proven good and the fault is in the hybris/QPA layer; if it doesn't, stop debugging libhybris and fix the Android side first.
 
 Other verified display/UI failure modes:
 
@@ -139,27 +227,43 @@ Other verified display/UI failure modes:
 | Wrong/unknown panel geometry | Fallback must read `/sys/class/graphics/fb0/modes` — **NOT `mode`**, which empties once the compositor owns the panel. (mindphone's machine conf claimed 1080x2340; the real panel is 480x800@~187ppi — never trust copy-pasted display constants) |
 | Every `eglCreateContext` → `EGL_BAD_ALLOC`, webapps never render | GPU node permissions: `/dev/pvr_sync` and `/dev/ion` needed 0666 (the vendor's own ueventd.rc values) for the WAM user — ship a udev rule |
 | QML apps die with "Failed to create wl_display"; webapp-mgr/maliit can't reach wayland | XDG_RUNTIME_DIR mismatch: compositor keeps its socket in `/tmp/luna-session` (surface-manager.env) while apps inherit `/tmp/xdg` from DefaultEnvironment — and `/tmp/xdg` is pulseaudio's dir (different perm domain, can't merge). Durable fix: a tiny always-on watcher `wayland-xdg-link.service` (Type=simple, Restart=always) re-linking `/tmp/xdg/wayland-0 → /tmp/luna-session/wayland-0` every 2 s. **Not** a systemd .path unit — PathExists stays true, a oneshot loops into its start limit |
-| Compositor races the vendor HAL at boot | Don't sleep — wait for `IComposer` to actually register on hwbinder |
+| Compositor races the vendor HAL at boot | Don't sleep — wait for `IComposer` to actually register on hwbinder. (Even Droidian ships an `ExecStartPre=sleep 5` drop-in for Phosh here; the wait-for-registration pattern is strictly better) |
 
 ---
 
 ## Stage 4 — Subsystems (wifi, modem, BT, misc)
+
+### First question for any subsystem: is the HAL registered at all?
+
+Before debugging ofono/sensorfw/bluebinder configuration, verify the vendor HAL is actually up on the binder bus — LuneOS ships libgbinder, so `binder-list` is available (SFOS hadk-hot, <https://github.com/mer-hybris/libgbinder>):
+
+```
+binder-list -d /dev/hwbinder | grep IRadio      # modem
+binder-list -d /dev/hwbinder | grep ISensors    # sensors
+```
+
+If the interface is absent, the middleware config is irrelevant — go back to Stage 2 (the HAL never started). If `binder-list -d /dev/binder` shows **nothing at all**, the gbinder **API level** may be wrong for this Android base — set it in `/etc/gbinder.conf` (valid levels: see `gbinder_config.c` in mer-hybris/libgbinder). ofono-binder-plugin, bluebinder and sensorfw all sit on libgbinder, so a wrong API level breaks all of them at once.
+
+libhybris also ships per-subsystem smoke binaries usable before any middleware exists: `test_egl`, `test_hwcomposer`, `test_vibrator`, `test_gps`, `test_audio` (`test_sensors` is legacy-HAL-era, Android ≤7 — use binder-list on binderized bases). Cheap first answer to "does the blob respond at all?" (SFOS hadk-faq)
 
 ### Wifi
 - A `wifi-module-load.service` modprobing a module that doesn't exist on this device (copy-paste from another port) produces a 2 s restart loop — check whether the driver is built-in (`CONFIG_MTK_COMBO=y` on mindphone: no module to load).
 - MTK combo (WMT) pattern: the real drivers are the **stock vendor modules** (`/vendor/lib/modules`: wmt_drv, wmt_chrdev_wifi, wlan_drv_gen2, bt_drv, gps_drv). Their CRCs disagree with a reconfigured kernel (module_layout) — `CONFIG_MODULE_FORCE_LOAD=y` + `modprobe --force` proved safe in practice. Set the firmware path (`firmware_class.path` → `/android/vendor/firmware`) before loading.
 - The container's `wmt_loader` needs the MTK connectivity `/dev` nodes exposed to the container; then power-on is `echo 1 > /dev/wmtWifi` **retried until wlan0 exists** (the container wmt daemons patch CONSYS firmware first).
 - This is generalized in `meta-android/recipes-core/mtk-connectivity`: three condition-gated units keyed on `ConditionPathExists |wmt_drv.ko |conninfra.ko`, driven by the connectivity subset of the vendor's `modules.load` (grep `wmt|wlan|conn|bt_drv|gps|fmradio`) — no hardcoded module list, inert on non-MTK.
+- Module-load error decoding (Halium docs, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = module signature enforcement — disable `CONFIG_MODULE_SIG*` (Tier B only; stock GKI leaves MODULE_SIG_FORCE unset anyway, per bluejay). `"Invalid module format"` = kernel/module version-config mismatch — the non-GKI cousin of our CRC story. Broadcom `bcmdhd` is best built `=m`, not `=y` — as a module it picks up the device MAC address; built-in it doesn't. Legacy Qualcomm (pre-2016 SoCs): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath`.
 
 ### Modem
 - mindphone: `md1.status = "exception"`, RIL daemon stopped. Root cause was **fstab selection**: `mount-android.sh` picked `fstab.enableswap` (sorts before `fstab.mt6739` under the glob), so the modem NV partitions (nvcfg/nvdata/protect1/protect2 — MTK calibration + IMEI) never mounted. Fix: prefer `fstab.$(getprop ro.hardware)`, skip `*.enableswap`. Generic to any multi-fstab MTK device. After the fix: `md1.status=ready`, IRadio em1/em2 registered, ofono `/ril_0` + `/ril_1` both Powered (dual-SIM).
 - MTK exposes NV partitions under `/dev/disk/by-partlabel` only (no by-name) — `find_partition_path` must cover that.
+- The Qualcomm variant of the same disease (SFOS hadk-faq): the RIL stack needs the exact `/dev/block/bootdevice/by-name/` symlink structure Android has. Symptom is SIM never detected, in bad cases a bootloop. `ls -lR /dev/block` on Android (or in the container), replicate the structure via udev rules.
 
 ### Bluetooth
 - Node ownership: the **vendor's** ueventd.rc says `/dev/stpbt` is `bluetooth:bluetooth`; the container's ueventd made it `system:system` → HAL can't open it. Chown in the container, then start the BT HAL (after android-system).
 - BT MAC: `bluebinder_post.sh` knows no MTK source; the MAC lives in `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr` (first 6 bytes) → write once to `/var/lib/bluetooth/board-address`.
 
 ### Misc
+- Audio wrong rather than absent: pulseaudio-modules-droid has documented quirk arguments — pitched/tempo-shifted audio → `rate=48000` (or 44100); volume keys dead → `hw_volume=false`; crash or silence in voice calls → `use_legacy_stream_set_parameters=true`. Full table and the `audio.hidl_compat.default.so` binder workaround live in the hal-userspace topic. (UBports docs)
 - Time-sync UI dead: LunaSysService calls `timedatectl`, which isn't installed until systemd-timedated ships.
 - HW keypad ignored by Qt: udev tags it `ID_INPUT_KEY` only; Qt evdevkeyboard discovery needs `ID_INPUT_KEYBOARD` — promote with a udev rule.
 - `library "libpq_cust.so" not found` from MTK HWC is benign — the vendor ships `libpq_cust_base.so` and the HAL falls back.
@@ -190,3 +294,15 @@ Other verified display/UI failure modes:
 | MTK modem "exception" | Wrong fstab chosen → NV partitions unmounted | `mount-android.sh` fstab selection |
 | BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | chown in container |
 | by-partlabel links empty | mdev hotplug needs CONFIG_UEVENT_HELPER | kernel fragment |
+| No USB gadget at all after flash | Kernel/initramfs never ran | unpack + inspect the flashed image; §1.7 skip_initramfs on A8–A10 Tier B |
+| Telnet port 23 answers | Kernel + initrd fine; rootfs transition failed | `cat diagnosis.log`, `/init.log` |
+| Repacked image flashes fine, our init never executes (Tier B) | `skip_initramfs` honoured by the vendor kernel | §1.7; revert the skip_initramfs patches |
+| Boot dies with a serial console on the cmdline | init's stdio hung on a dead UART | `console=tty0` (§1.6) |
+| Container init restart-loops | Second start fails on leftover state — not the original bug | find the *first* failure (§2.6) |
+| `add_service Permission denied` | selinux config files are symlinks, or stubs missing | §2.5 SELinux row |
+| SIM never detected (Qualcomm) | `/dev/block/bootdevice/by-name` structure missing | replicate via udev (§ modem) |
+| `Required key not found` on modprobe | Module signature enforcement (Tier B) | disable CONFIG_MODULE_SIG* |
+| Audio pitched / tempo-shifted | pa-droid sample-rate quirk | `rate=48000` (hal-userspace) |
+| test_hwcomposer segfaults | Blob/linker fault below the compositor | strace/gdb it; smoke-test ladder (§3) |
+| test_hwcomposer runs but screen black | gralloc/copybit module | smoke-test ladder (§3) |
+| Nothing from ofono/sensorfw despite config | HAL never registered, or wrong gbinder API level | `binder-list -d /dev/hwbinder`; `/etc/gbinder.conf` |

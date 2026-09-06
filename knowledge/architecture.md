@@ -13,6 +13,7 @@ The trick is not really "GSI" in the Android sense — it is **Project Treble**:
 - Compatibility is negotiated at runtime through **VINTF** (`compatibility_matrix.xml` / `manifest.xml`). The binding constraint is the **vendor API level** (`ro.vndk.version` / `ro.board.api_level`), *not* the Android version the device currently runs. Match the GSI to that number and it works. Never read `ro.build.version.release` for this.
 - Android 15 deprecated VNDK — for A15/16 vendor images the former VNDK libs ship in `/vendor` itself. Neutral-to-helpful, but the `halium-16.0` GSI is shaped differently and is its own generation.
 - Honest limitation: libhybris/Halium is well-trodden through Android 13. Halium 14/16 exist but are early — plan 9/11/13 as production targets, 16 as an experimental track (though sargo now boots on both 14.0 and 16.0 GSIs).
+- Vendor floor: the Halium 9 GSI requires an **Android 9 vendor** as its base — Android 8.0/8.1 vendors are "experimental" only (UBports porting-notes, https://github.com/ubports/porting-notes/wiki/Generic-system-image-(GSI)).
 
 ## The artifact table
 
@@ -83,6 +84,14 @@ Storage/install model consequences:
 - `userdata` must be formatted **unencrypted** (FBE is on by default from Android 10).
 - `vbmeta` must be flashed with `--disable-verity --disable-verification`.
 
+**Future work — encrypted userdata without giving up this model:** Ubuntu Touch 24.04 runs
+a working FBE setup on the same storage layout — root stays unencrypted, `fscrypt` encrypts
+the data filesystem (AES_256_XTS contents / AES_256_CTS filenames), and PIN entry is
+deferred to the UI. fscrypt policy v2 is native on kernels ≥5.4; for 4.14/4.19 they
+backport fs/crypto + ext4/f2fs support from the Android Common Kernel. Setup is `fscrypt
+setup` plus a per-device opt-in flag. (UBports docs,
+https://docs.ubports.com/en/latest/porting/configure_test_fix/Fscrypt.html)
+
 ## Tier A vs Tier B kernels
 
 **Tier A — GKI (Android 12+, kernel ≥5.10).** Android 12+ with kernel ≥5.10 must ship GKI: the core kernel is generic; SoC/board drivers are loadable modules in `vendor_boot` (early/recovery) and `vendor_dlkm` (the rest). The KMI is binary-stable within an LTS (`android12-5.10`, `android13-5.15`, `android14-6.1`, `android15-6.6`) — exactly what lets us ship **one Halium-configured kernel per KMI instead of one per device**. The stock GKI config is not enough (Droidian's guide says so; verified on bluejay: 23 errors / 59 warnings from `mer_verify_kernel_config`), so rebuild from ACK with a config fragment — but that rebuild is per KMI, not per device; the stock `vendor_dlkm` modules still load because the KMI is stable. That is the single biggest lever in the whole plan. Risk: OEMs that deviate from pure GKI (some Samsung/MediaTek) may reject an ACK-built kernel — those devices fall back to Tier B.
@@ -138,6 +147,25 @@ Container config (from `9b32def7`): `lxc.arch` derived from `TARGET_ARCH` (was w
 **Placeholders, not defaults.** Shipped config files are placeholders: device-describing values in them must be obviously invalid (zeros, empty lists, `/dev/input/PLACEHOLDER`). A plausible constant is worse than a broken one — it is right often enough that the devices where it is wrong never announce themselves (`luna-platform.conf` shipped `DPI=445` and it became the effective DPI of every device without an adaptation; `nyx.conf` shipped sargo's key nodes; `surface-manager.env` shipped sargo's touchscreen node). Two rules: never read a value back out of the file you generate; put genuine fallbacks in the generator, not the config. Values that are not derived at all stay as working values, marked as such.
 
 **Applying an adaptation: bind-mounts now, overlayfs when available.** Copying files in would destroy universality — the mechanism must be non-destructive and re-evaluated every boot. Do NOT use oe-core's `overlayfs-etc.bbclass` (needs a hardcoded per-machine device node, replaces `/sbin/init`, solves a read-only-rootfs problem we don't have). Raw overlayfs (`lowerdir=<adaptation>/etc:/etc`, Droidian's model) is the right shape but e.g. sargo's 4.9 kernel lacks `CONFIG_OVERLAY_FS`. So: prefer overlayfs when `/proc/filesystems` advertises it, fall back to per-file bind-mounts.
+
+**Prior art — UBports' overlay store** is this exact design productized (UBports docs,
+https://docs.ubports.com/en/latest/porting/configure_test_fix/Overlay.html). Enabled with
+`deviceinfo_use_overlaystore="true"`, semantics selected per directory by marker files
+inside the overlay tree:
+
+- `.halium-override-dir` in a directory → the overlay directory **replaces** the destination directory entirely
+- `.halium-overlay-dir` → the directory is **merged** over the destination via overlayfs (underlying files stay visible unless shadowed)
+- no marker → each file is individually **bind-mounted** over its destination
+
+The per-directory replace/merge distinction and the marker-file idea are worth adopting.
+
+**Shadowing files of the mounted stock vendor/system:** Droidian keeps two standing overlay
+roots — `/usr/lib/droid-vendor-overlay/` and `/usr/lib/droid-system-overlay/`, each
+mirroring the partition's directory structure — whose contents shadow individual files of
+the mounted stock partitions without modifying them (used in practice to ship a patched
+`vndservicemanager` binary and tweaked vendor rc files). LuneOS currently has **no**
+mechanism to non-destructively shadow a *vendor* file; this is the known solution shape
+when one is needed. (Droidian, https://docs.droidian.org/porting-guide/debugging-tips/)
 
 **Unknown devices must still boot:** if no `deviceinfo` matches, Tier 0 alone must produce a usable UI — default density from `ro.sf.lcd_density`, geometry from the compositor. That is the difference between "supports 30 devices" and "runs on pretty much every Android device".
 

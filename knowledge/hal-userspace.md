@@ -134,6 +134,43 @@ host and container. This was the single root cause of the boot-splash hang, hidi
 several real-but-secondary bugs. Fixed with a gsub in the awk. sargo never triggered it:
 its vendor gates carry no quotes.
 
+**udev rules from the container's own ueventd files — the next derivation to adopt.**
+The mindphone GPU-node (`pvr_sync`/`ion` 0666) and BT-node (`stpbt` ownership) fixes were
+both hand-transcribed from values already sitting in the vendor's `ueventd.rc`. UBports
+and Droidian generate the whole rule set from those files instead — pure Tier 0
+(https://docs.halium.org/en/latest/porting/debug-build/udev.html,
+https://docs.droidian.org/porting-guide/debugging-tips/):
+
+```sh
+DEVICE=<codename>
+cat /var/lib/lxc/android/rootfs/ueventd*.rc \
+    /var/lib/lxc/android/rootfs/vendor/ueventd*.rc | \
+  grep ^/dev | sed -e 's/^\/dev\///' | \
+  awk '{printf "ACTION==\"add\", KERNEL==\"%s\", OWNER==\"%s\", GROUP==\"%s\", MODE==\"%s\"\n",$1,$3,$4,$2}' | \
+  sed -e 's/\r//' > /etc/udev/rules.d/70-$DEVICE.rules
+```
+
+Every ueventd node line becomes a udev rule, so node ownership/permissions match what the
+vendor HALs expect without a per-device list. Candidate for `luneos-device-config`
+generation, replacing the one-off `72-mindphone-gpu.rules`-style files.
+
+## Binder plumbing: verify HAL registration before debugging middleware
+
+Everything LuneOS layers over libgbinder — ofono-binder-plugin, bluebinder, sensorfw's
+binder path — presumes the vendor HAL actually registered on the binder bus. Check that
+first (SFOS hadk-hot, https://sailfishos.wiki/books/hardware/page/hadk-hot):
+
+```sh
+binder-list -d /dev/hwbinder | grep IRadio      # modem HAL up?
+binder-list -d /dev/hwbinder | grep ISensors    # sensors HAL up?
+```
+
+If the interface is absent, ofono/sensorfw configuration is irrelevant — the vendor HAL
+is not up; go back to the container (init gates, vndservicemanager). If `binder-list`
+shows **nothing at all**, the gbinder **API level** may be wrong for this Android base —
+set it in `/etc/gbinder.conf` (valid levels per `gbinder_config.c` in
+mer-hybris/libgbinder). Full triage sequence in the debugging notes.
+
 ## MediaTek connectivity (mindphone → generic recipe)
 
 The MTK WMT combo driver (wifi/BT/GPS/FM core) is not in the GPL kernel drop — only
@@ -183,6 +220,51 @@ returns `EGL_BAD_ALLOC` and apps never render. Shipped as
 **Keypad:** udev tags `mtk-kpd` as `ID_INPUT_KEY` only; Qt evdevkeyboard discovery needs
 `ID_INPUT_KEYBOARD` → a udev rule promotes it (`71-mindphone-keypad.rules`).
 
+## Audio: pulseaudio-modules-droid quirks and compat shims
+
+Known per-device quirk arguments for `pulseaudio-modules-droid` (documented by UBports —
+https://docs.ubports.com/en/latest/porting/configure_test_fix/Sound.html — passed as
+extra module/card arguments; UT wires them via its DeviceInfo key
+`PulseaudioModulesDroid_ExtraCardArgs`, LuneOS passes them wherever the module is loaded):
+
+| Symptom | Argument |
+|---|---|
+| Audio pitched / tempo-shifted | `rate=48000` (or `rate=44100`) |
+| Volume keys / slider do nothing | `hw_volume=false` |
+| PulseAudio crashes in a voice call, or the call is silent | `use_legacy_stream_set_parameters=true` |
+
+Two compat shims for awkward vendor audio HALs:
+
+- **HAL cannot be dlopen'd directly** (some vendors): symlink
+  `audio.primary.default.so` → `audio.hidl_compat.default.so` — a library implementing
+  the legacy audio HAL interface over binder — and keep the vendor's own audio-hal
+  service *running* in the container (un-disable it in `init.disabled.rc`). (UBports)
+- **32-bit-only audio HAL**: Halium ships a `hidl_compat` audio wrapper in
+  `android_vendor_halium_hardware` (halium-10.0 branch), built with
+  `make audio.hidl_compat.default` and mounted via systemd units — relevant to
+  32-bit ports like mindphone. (SFOS hadk-hot)
+
+SFOS splits its pulseaudio plugin by Android base — `pulseaudio-modules-droid-jb2q` for
+≤10 vs `pulseaudio-modules-droid` for ≥11 — worth knowing when borrowing their configs.
+Debug the daemon directly with `pulseaudio -v`.
+
+## Modem: ofono plugin ladder and config keys
+
+Plugin by Android base (SFOS lineage — https://github.com/mer-hybris/hadk-faq):
+`ofono-ril-plugin` (≤7) → `ofono-ril-binder-plugin` (8–10) → **`ofono-binder-plugin`**
+(≥10, the one LuneOS ships). Its config lives in `/etc/ofono/binder.d/*.conf`
+(`radioInterface` key); a dual-SIM second slot is declared as:
+
+```ini
+[ril_1]
+transport=binder:name=slot2
+name=slot2
+```
+
+Per our Tier-0 rule LuneOS *derives* the slot topology from the HAL
+(enumerating `IRadio/slotN` on hwservicemanager) rather than hand-writing this file —
+but these are the key names the generator must emit.
+
 ## Wayland socket / XDG_RUNTIME_DIR split
 
 Root cause of "QML apps won't launch" and webapp-mgr/maliit wayland failures: the
@@ -223,6 +305,17 @@ Measured over Chromium's remote debugging port on sargo (1080x2220, 441 PPI):
   (address bar 115 → 323 device px at zoom 2.4).
 - The zoom value should be **per-device and declared, not derived** — three independent
   surfaces (Calendar, the Enyo apps, Atlas) each rejected a "natural" density/160 ratio.
+  Ubuntu Touch reached the same conclusion: its **DeviceInfo registry**
+  (`/etc/deviceinfo/devices/<device>.yaml`, lowercase filename, auto-selected via Android
+  props with `/etc/deviceinfo/default.yaml` as fallback) declares a per-device `GridUnit`
+  scaling unit (~23 px/GU at ~440 PPI, 18 on the Nexus 7) alongside `Name`, `DeviceType`,
+  `SupportedOrientations`, `PrimaryOrientation` and per-component keys, consumed uniformly
+  by Mir/Lomiri/repowerd/pulseaudio-module-droid-discover. (UBports docs,
+  https://docs.ubports.com/en/latest/porting/configure_test_fix/device_info/index.html)
+  Droidian handles display cutouts the same declared-data way: an auto-generated JSON
+  overridable at `/usr/lib/droidian/device/phosh-notch/halium.json` — generated first,
+  overridden last, exactly our Tier 0→2 shape; remember it when LuneOS grows notch
+  support. (Droidian)
 - Side-note from the same session: an env var exported in `run_browser_shell` never
   reached the process while a flag added in the same edit did — something filters that
   environment; verify before relying on env vars in that script.

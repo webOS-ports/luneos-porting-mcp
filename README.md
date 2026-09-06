@@ -19,6 +19,11 @@ The knowledge was distilled from real ports and bring-ups:
 - **mindphone** (MT6739) — Tier B legacy port: 32-bit kernel, `halium_arm`
   GSI built for Halium 11 and 16, full UI/wifi/BT/modem bring-up
 
+plus cross-checked material from the UBports, Droidian and Sailfish OS (HADK)
+porting guides, integrated where their methods transfer to the LuneOS stack
+(and flagged where they conflict — e.g. their kernel config lists vs the
+Tier A KMI-poison findings).
+
 ## Install
 
 ```sh
@@ -64,6 +69,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `debugging` | staged "device doesn't come up" playbook, symptom → cause table |
 | `installing` | flash kits, userdata images, fastboot flows, anti-rollback |
 | `tools` | kmi-crc-check, module-order, payload_extract, mer-kernel-check, … |
+| `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variable reference our Tier 1 format reuses |
 | `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` | per-device reference |
 
 ### Tools
