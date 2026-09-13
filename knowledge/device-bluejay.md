@@ -45,6 +45,15 @@ De-risked by direct vendor.img inspection: composer is **HIDL @2.4::IComposer** 
 
 `/media/herrie/LuneOS/bluejay-staging/` — pure-fastboot install (athena/panther parity): `install.sh` flashes vbmeta (verification off) → boot → `userdata-luneos.img` (3,774,873,600 B ext4 with `rootfs.img` + `android-rootfs.img` = Halium 16 GSI side by side; grows on first boot) → reboot. `make-userdata.sh` rebuilds after a rootfs rebuild. Distributable: `luneos_bluejay_20260904.tar.gz`. Only difference from panther: one boot image instead of two (no init_boot).
 
+## Update (12 Sep 2026): deploy set rebuilt, MODULE_SIG_PROTECT defect found and fixed
+
+- `/media/herrie/LuneOS/bluejay-staging/` regenerated: boot images (GKI 6.1.172 from ACK `android14-6.1-2026-06_r7`), halium-arm64 dev `rootfs.img` (ext4, wrynose 20260912), Halium 16 GSI `20260910-1` as `android-rootfs.img`, stock bp4a vbmeta, `install.sh`, README, SHA256SUMS.
+- **The earlier kit had a real defect: `CONFIG_MODULE_SIG_PROTECT` was on.** A GKI kernel refuses (`-EACCES`) to let a module it did not sign resolve protected symbols; since we rebuild GKI, our key is not Google's, so the phone's own stock vendor modules count as unsigned → **Wi-Fi/BT modules never loaded — invisibly to a CRC-only check**. Fixed with one config line (`# CONFIG_MODULE_SIG_PROTECT is not set`, `MODULE_SIG`/`MODULE_SIG_ALL` stay `=y`; `internal.h` stubs both helpers when off — no source patch needed, unlike achunt2143's bootimg PR that surfaced it). **Verified, not assumed**: 203/203 factory modules load, 0 CRC mismatches, option confirmed off via IKCONFIG readback, poison list still off, UEVENT_HELPER + DEVTMPFS on. See kernel-porting.md Step 4b.
+- `CONFIG_BT_HCIVHCI=m` added to the fragment (+ `hci_vhci` in the Kleaf GKI module lists in `build-bootimg.sh`) for bluebinder's `/dev/vhci`.
+- `build-bootimg.sh` was broken until this rebuild: the module-loader overlay patch is now upstream in `initramfs-scripts-halium/init.sh`, so `patch` hit "previously applied" and died under `set -e`. Now applied via `apply_if_needed()`, which treats already-applied as success.
+- meta-webos-ports cherry-picks applied (uncommitted): 3 PulseAudio null-guard patches + SRC_URI lines, and the `AUDIO_FORMAT_PCM_FLOAT` rewrite in droid-audio-config-gen — verified present in the packaged output of both halium_arm64 and bluejay builds. Everything else from PR817 dropped; see `pr-audit-2026-09-12.md`.
+- Machine confs now say which KMI they want out loud — `bluejay.conf`/`panther.conf` declare `GKI_BOOTIMG = "1"` + `PREFERRED_VERSION_linux-halium-gki = "6.1%"` — because a second KMI (android12-5.10, for q25) now exists in the tree.
+
 ## Status
 
-Kernel + initramfs boot verified on hardware (two panics diagnosed and fixed: module order → MCT panic; FMP module params). Boot images, KMI verification, flash kit, Yocto machine: done. UI/graphics bring-up on Mali-G78: the open frontier.
+Kernel + initramfs boot verified on hardware (two panics diagnosed and fixed: module order → MCT panic; FMP module params). Boot images, KMI verification (CRC **and** signature-protection), flash kit, Yocto machine: done. UI/graphics bring-up on Mali-G78: the open frontier.

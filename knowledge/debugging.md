@@ -277,6 +277,19 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 
 ---
 
+## Stage 5 — Idle health: the port "works" but burns CPU, flash or battery
+
+A port that boots and runs can still be quietly wasteful. From the sargo/tissot idle triage (12 Sep 2026, `LuneOS/memoryusage/findings-2026-09-12.md`): both devices "healthy", yet four separate things were burning a core or flash for nothing. **Metrics to collect on any idle device:** per-process *cumulative* CPU vs uptime (`ps -o time` against `uptime` — a daemon that has used 2 h in 10 h is 20% of a core however calm it looks now), journal *and* container-logcat lines/s, GB/h whole-disk flash writes, `SUnreclaim` slope over **at least a day** (18 minutes cannot separate a slow leak from churn), and the suspend entry count (neither triage device had suspended once — check before trusting wake-from-suspend).
+
+Four proven failure patterns, generalized:
+
+1. **A bypassed vendor helper daemon busy-spins.** tissot's `wcnss_filter` sat at 96% of a core logging **~62,000 lines/s** (2.34 billion entries / 262 GB into the host log buffer since boot; `logd` burned another 36% of a core absorbing it). Cause: libbt-vendor `ctl.start`s the filter, but the BT HAL already holds the SMD channels — LuneOS reaches BT via bluebinder/vhci and never uses the filter — so its SoC open fails and `handle_soc_events()` spins on a dead fd. BT verified fully working without it. Fix shape: stop the daemon plus a periodic guard (it gets `ctl.start`ed again on some BT power-on paths — recipe `tissot-wcnss-filter-fixup`, 30 s guard). **Generic lesson: on any "working" port, sort processes by cumulative CPU and measure the container log rate** — a vendor helper made redundant by the LuneOS stack can burn a core silently. Related: restarting a vendor BT HAL requires restarting bluebinder too — it holds the HIDL binding and does not re-bind by itself.
+2. **Zero-interval GTimerSource spin.** `sleepd` at 25% of a core, ~40,000 wakeups/s: a `GTimerSource` with `interval_ms == 0` expires the instant it is dispatched (prepare TRUE → check TRUE → callback → re-arm, never reaching poll). Two callers passed 0 to mean "fire now". Fixed in sleepd branch `herrie/fix-zero-interval-timer` (separate fire-now from repeat-every-0; floor intervals). Signature: a daemon pinned at a constant fraction of a core with an enormous wakeup count and no I/O.
+3. **pulseaudio pinned by an uncorked stream.** `playbackState` says Stopped but the GStreamer pipeline is still PLAYING (the Qt 6 EOS bug — full story in device-sargo); `module-suspend-on-idle` cannot suspend a sink that has uncorked inputs, so the sink renders silence forever. Diagnose: `pactl list sink-inputs` showing `Corked: no` long after the sound ended; prove the cost with `pactl suspend-sink <sink> 1` and watch pulseaudio's CPU collapse.
+4. **Kernel debug spam wears flash.** sargo's `qpnp_smb2` ships `debug_mask=31`, nearly doubling idle flash writes (0.19 vs 0.10 GB/h). Measure GB/h writes and kernel-journal lines/s at idle; silence via module parameters — a `tmpfiles.d` rule works, but **not via the device-config sparse overlay** (no ordering against `systemd-tmpfiles-setup.service`, the rule can arrive after tmpfiles already ran).
+
+---
+
 ## Quick checklist: symptom → likely cause → where to look
 
 | Symptom | Likely cause | Where to look |
@@ -313,3 +326,8 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 | test_hwcomposer segfaults | Blob/linker fault below the compositor | strace/gdb it; smoke-test ladder (§3) |
 | test_hwcomposer runs but screen black | gralloc/copybit module | smoke-test ladder (§3) |
 | Nothing from ofono/sensorfw despite config | HAL never registered, or wrong gbinder API level | `binder-list -d /dev/hwbinder`; `/etc/gbinder.conf` |
+| Daemon at a fixed % of a core, ~40k wakeups/s, no I/O | Zero-interval GTimerSource re-arming instantly | Stage 5 §2; sleepd `herrie/fix-zero-interval-timer` |
+| Vendor filter/helper at ~100% of a core, massive logcat rate | Daemon bypassed by the LuneOS stack spinning on a dead fd | Stage 5 §1; stop it + guard service |
+| pulseaudio busy while silent; sink RUNNING forever | Uncorked stream (Qt EOS bug) | `pactl list sink-inputs`; Stage 5 §3, device-sargo |
+| Idle flash writes high (GB/h at rest) | Kernel driver debug_mask / log spam | Stage 5 §4; module param via tmpfiles.d |
+| Wifi/BT vendor modules never load on a rebuilt GKI kernel though kmi-crc-check passes | `CONFIG_MODULE_SIG_PROTECT` must be off | kernel-porting.md (bluejay 12 Sep) |

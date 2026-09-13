@@ -18,6 +18,9 @@ The knowledge was distilled from real ports and bring-ups:
 - **panther** (Pixel 7) — A13-launch `init_boot` layout, same kernel binary
 - **mindphone** (MT6739) — Tier B legacy port: 32-bit kernel, `halium_arm`
   GSI built for Halium 11 and 16, full UI/wifi/BT/modem bring-up
+- **q25** (Zinwa Q25, MT6789/Helio G99) — first MediaTek Tier A GKI target,
+  square-screen QWERTY; Yocto side and stock-firmware analysis complete,
+  pre-hardware
 
 plus cross-checked material from the UBports, Droidian and Sailfish OS (HADK)
 porting guides, integrated where their methods transfer to the LuneOS stack
@@ -70,7 +73,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `installing` | flash kits, userdata images, fastboot flows, anti-rollback |
 | `tools` | kmi-crc-check, module-order, payload_extract, mer-kernel-check, … |
 | `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variable reference our Tier 1 format reuses |
-| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` | per-device reference |
+| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` | per-device reference |
 
 ### Tools
 

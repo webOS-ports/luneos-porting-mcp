@@ -52,7 +52,7 @@ load** against your rebuilt kernel — and losing them loses the whole Tier A pr
 This is checkable **host-side, with no device**: build ACK + fragment, then compare
 your `Module.symvers` CRCs against the `__versions` sections of the stock `.ko`s.
 
-### Step 3: The KMI-poison list (empirical, final)
+### Step 3: The KMI-poison list (empirical, per-KMI)
 
 Bisect on bluejay (kernel-only rebuilds, ~5 min each):
 
@@ -79,9 +79,30 @@ STATIC_USERMODEHELPER=n, QUOTA_NETLINK, the whole netfilter/PPP/L2TP block — i
 KMI-clean: zero CRC drift, 201/203 stock modules load (the 2 failures were
 pre-existing ACK-pin skew, not config — see Step 5).
 
-The poison list is a property of **GKI**, not of gs101: those options change *core*
-struct layouts under MODVERSIONS. Panther confirmed the same fragment transfers
-unchanged (204/204 modules, 0 mismatches).
+The poison list transfers within a KMI — panther (same `android14-6.1` KMI)
+confirmed the same fragment unchanged (204/204 modules, 0 mismatches) — but it is
+**a property of the specific KMI/kernel tree, not of GKI universally**. Q25
+(MT6789, `android12-5.10`) proved the counter-case: the Droidian kernel fork it
+builds from (`gitlab.com/deathmist/kernel-android-common`, branch
+`common-android12-5.10-droidian`) carries *"GKI: use Android ABI padding for
+SYSVIPC task_struct fields"* — the SYSVIPC fields go into the reserved ABI
+padding instead of growing `task_struct`, the CRCs do not move, and **SYSVIPC is
+safe on that KMI**. The difference is that patch, not the kernel version. (The
+same fork hooks `find_get_pid` for `mali_kbase`/`mali_kbase_mt6789` and
+`snd_soc_jack_report` for `mt6358_accdet` — quirks needed once `PID_NS=y` puts
+the Mali driver's pid lookups in a namespace, and for headset detection.)
+
+The Q25 also has its own, different poison list, confirmed ABI-breaking for
+MT6789 on 5.10: `FANOTIFY`, `NF_TABLES`, `HUGETLBFS`,
+`NETFILTER_XT_MATCH_NFACCT`, plus `CGROUP_PIDS` and `POSIX_MQUEUE` per the
+Droidian wiki. deathmist's `droidian.config` enables them anyway and leans on the
+fork's force-load patch; **LuneOS turns all six off instead** — a force-loaded
+module that disagrees about a struct layout corrupts memory rather than failing
+cleanly, and "the stock vendor modules load legitimately" is the entire Tier A
+property.
+
+**The working rule: re-derive the poison list per KMI with `kmi-crc-check.py`;
+never transplant it between KMIs in either direction.**
 
 **Userland consequences of the poison list staying off:**
 
@@ -119,6 +140,23 @@ Bluejay baseline (stock config, from-source build): 201/203 factory
 vendor_boot-dlkm modules load-compatible, 0 CRC mismatches. Panther:
 `python3 ../bluejay/kmi-crc-check.py .../out-luneos-tierA/Module.symvers
 vkb-modules` → 204 modules checked, 0 would fail to load.
+
+### Step 4b: `CONFIG_MODULE_SIG_PROTECT` must be OFF — a failure class invisible to CRC checks
+
+Found on bluejay (12 Sep 2026), and it is a **new "invisible to CRC" failure
+class**: `kmi-crc-check.py` passes, yet the stock vendor modules still never
+load. A GKI kernel with `CONFIG_MODULE_SIG_PROTECT=y` refuses (`-EACCES`) to let
+a module it did not sign resolve *protected* symbols. A self-rebuilt GKI is not
+signed with Google's key, so the phone's **own stock vendor modules count as
+unsigned** — Wi-Fi/BT modules silently never loaded in the earlier bluejay kit,
+and a CRC-only check cannot see it because the CRCs are fine.
+
+Fix is one config line — `# CONFIG_MODULE_SIG_PROTECT is not set` — while
+`MODULE_SIG`/`MODULE_SIG_ALL` stay `=y`; `internal.h` stubs both helpers when the
+option is off, so no kernel source patch is needed (found via achunt2143's
+bootimg PR, which patched the source instead). Verified KMI-clean, not assumed:
+with it off, 203/203 factory vendor modules load, 0 CRC mismatches, and the
+option confirmed off by reading the built kernel's IKCONFIG back.
 
 ### Step 5: The ACK pin bump (vendor hooks)
 
@@ -185,6 +223,22 @@ initramfs's mdev writes `/sys/kernel/uevent_helper`, which stock GKI doesn't
 provide — without it late hotplug events are lost (initial `mdev -s` covers the
 normal path, but add it if by-partlabel links come up empty). It is behavioral and
 KMI-safe; with it the bluejay kernel is still 203/203 factory-module compatible.
+
+**Kleaf fragment-comment trap** (cost one failed build, 12 Sep 2026): Kleaf
+verifies a defconfig fragment by grepping it for the symbol token and **folds
+comment lines into the expected value** — so a fragment must not mention, even
+in a comment, a symbol it declares. The KMI-poison comment block in the bluejay
+fragment is safe only because it names symbols the fragment never declares.
+
+**Second KMI in the Yocto tree** (added for Q25, 12 Sep 2026): a
+`linux-halium-gki_5.10.bb` recipe now sits beside the 6.1 one; boot-image
+machines gate on `GKI_BOOTIMG = "1"` in their own machine conf (the recipe moved
+out of a meta-google `^(bluejay|panther)$` regex); `GKI_KERNEL_IMAGE_NAME` lets a
+machine ask for `Image.gz` instead of `Image.lz4`; and `GKI_CLANG_DIR` /
+`GKI_BUILD_TOOLS_DIR` are machine-scoped in local.conf because android12-5.10
+wants clang **r416183b** while android14-6.1 wants **r487747c**. bluejay/panther
+now declare `GKI_BOOTIMG = "1"` + `PREFERRED_VERSION_linux-halium-gki = "6.1%"`
+explicitly. See device-zinwa-q25.md for the 5.10 case study.
 
 ### One kernel per KMI, literally
 
@@ -395,8 +449,10 @@ Tier A kernel; the rest are behavioral.
 - **`CONFIG_BT_HCIVHCI=y` is bluebinder's kernel prerequisite** — bluebinder
   feeds the Android BT HAL into a virtual HCI. mindphone's working hci0 (vhci)
   depended on this; we never recorded the config until now (SFOS hadk-hot).
-  Legacy Qualcomm `hci_smd` is `CONFIG_BT_HCISMD` — already flagged elsewhere as
-  copy-paste to delete.
+  The bluejay fragment now carries it as `=m`, with `hci_vhci` added to the
+  Kleaf GKI module lists in `build-bootimg.sh` (12 Sep 2026). Legacy Qualcomm
+  `hci_smd` is `CONFIG_BT_HCISMD` — already flagged elsewhere as copy-paste to
+  delete.
 - **`CONFIG_USB_CONFIGFS_RNDIS=y`** enables the RNDIS USB-networking debug
   channel (SSH into a half-booted device — see debugging.md). Droidian's symptom
   mapping: "stuck at the glowing logo and RNDIS is not working → check

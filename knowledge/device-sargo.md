@@ -61,6 +61,54 @@ All GSI work targets `Herrie82/meta-smartphone` → `herrie/wrynose`; build tree
 - 4.9 kernel has **no `CONFIG_OVERLAY_FS`** → adaptation overlays must fall back to bind-mounts on sargo.
 - Atlas browser UI scaling: no LuneOS-side config fixes it — both fixes (CSS zoom, collapsing toolbar) belong in Atlas itself (`gsigki/atlas-scaling-findings.md`).
 
+## Idle-health triage (12 Sep 2026)
+
+10 h idle on a charger, alongside tissot as a comparison device (full write-up:
+`LuneOS/memoryusage/findings-2026-09-12.md`). Headline: **no memory leaks** —
+`surface-manager` flat at 166 MB (17 min uptime) vs 165 MB (10.5 h on tissot) —
+and **no unexplained crashes**. But **neither device had suspended once this
+boot**: do not rely on wake-from-suspend behaviour yet.
+
+- **Coredumps explained, not spontaneous.** `composer@2.1-service` SIGABRT ×2 and
+  `MaliitServer` SIGABRT all coincided with *explicit* `systemctl restart
+  surface-manager-daemon` jobs; sargo then ran 9 h 42 m untouched. The real
+  defect: **maliit-server and webapp-mgr abort instead of exiting cleanly when
+  the Wayland socket disappears** ("The Wayland connection broke…" → SIGABRT).
+  Not chased further.
+- **Charger debug spam ≈ doubles idle flash writes.** `qpnp_smb2` ships
+  `debug_mask=31`; on a charger it emitted ~4 of the ~7 kernel lines/s reaching
+  journald. A/B measured: **0.19 GB/h → 0.10 GB/h** whole-disk writes with
+  `debug_mask=0` (the driver's own default; the vendor config sets 31 — nothing
+  in LuneOS reads these, charging state comes from `/sys/class/power_supply`
+  via nyx). Fix: `/etc/tmpfiles.d/luneos-charger-debug.conf`; recipe
+  `meta-luneos/recipes-core/luneos-kernel-log-quirks/` — machine-independent
+  (tmpfiles `w` only writes an existing file, no-op elsewhere), and
+  **deliberately not routed through luneos-device-config's sparse overlay**,
+  which has no ordering against `systemd-tmpfiles-setup.service`. Remaining
+  chatter: `google_charger` (~1.45 lines/s) has **no runtime knob** — silencing
+  it needs a kernel patch demoting its `pr_info` calls.
+- **pulseaudio at 10% of a core while silent — a Qt 6 QtMultimedia bug.** At
+  end-of-media, `QGstreamerMediaPlayer::handlePlayerMessage()`'s EOS branch
+  reports `StoppedState` but never calls `gst_play_stop()`, so the GStreamer
+  pipeline stays `PLAYING`; `pulsesink` only corks on PLAYING→PAUSED, so one
+  finished boot chime pinned `sink.primary_output` RUNNING for the compositor's
+  lifetime. Proven **not** audiod-pro (it never corks others' streams; 0 CPU
+  over 12 h). Fixed in
+  `meta-luneos/recipes-qt/qt6/qtmultimedia/0001-gstreamer-stop-the-pipeline-at-end-of-media.patch`
+  (adds `gst_play_stop()` to the EOS branch) — verified on sargo with **stock
+  QML plus the rebuilt plugin alone**: 10.1% → 3.4%. No cardshell change is
+  carried; the patch is `Upstream-Status: Pending` with the full measurement in
+  its header. **Still open:** `luneos-speechd`'s dummy output holds its own
+  uncorked stream, keeping the chain at ~3% (0.2% with both fixed).
+- Housekeeping: sargo `/` is 79% full; the LXC android rootfs image is 95% full
+  (fixed size, expected).
+
+On-device state vs recipes: sargo carries `/etc/tmpfiles.d/luneos-charger-debug.conf`
+and a locally rebuilt, Qt-patched `libgstreamermediaplugin.so` (original kept as
+`.bak-claude`; the next image flash overwrites it — the patch is in the recipe,
+so a normal build carries it). The recipes live uncommitted on `meta-webos-ports`
+`herrie/rebased`.
+
 ## What sargo can and cannot test
 
 **Can:** vendor API 28→31 ladder on one device, A/B, retrofit dynparts, FBE/AVB/APEX (from A10 vendor up), the whole generic-rootfs claim, Halium 14/16 GSIs over a 12.1 vendor.

@@ -98,6 +98,21 @@ an Android API was removed, flip that one module to `NYXMOD_OW_<X> TRUE` rather 
 pinning older headers (the headers version must track the GSI — see the device-bringup
 notes).
 
+## nyx-modules-hybris internals: alarms no longer need /dev/alarm
+
+The hybris system module's RTC-alarm path historically used the legacy Android
+`/dev/alarm` device, which many newer vendor kernels simply lack — tissot's
+4.9.188 has none while sargo's 4.9.124 still ships it — so every
+`android_alarm_*` call became `ioctl(-1, …)` → EBADF ("Could not open rtc
+driver. 2" at startup, "Failed to clear alarm" on every RTC watchdog tick).
+Ported (12 Sep 2026) on nyx-modules-hybris branch `herrie/alarm-dev-optional`:
+`f0f61a2` guards the ioctl paths, then `a1efcfc` moves the whole file to
+`timerfd_create(CLOCK_REALTIME_ALARM)` — the alarmtimer-backed replacement AOSP
+itself moved to — verified working on both devices. The port also fixed a
+latent timezone bug: `android_alarm_read()` used `localtime_r()` while its
+caller used `timegm()`, putting "now" one UTC offset in the future and pushing
+near-term alarms out by that much.
+
 ## Copy-paste is fiction until verified on hardware
 
 From the mindphone notes, verbatim lesson: after the haptics fix, "the rest of
