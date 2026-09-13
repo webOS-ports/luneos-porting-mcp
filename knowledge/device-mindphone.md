@@ -45,7 +45,7 @@ Build gotchas that cost real time:
 
 - **11.0**: `device/halium/halium_arm` cloned from halium_arm64 in the `/media/herrie/HaliumDisk/11.0` tree (NOT `~/Halium/11.0`, an empty skeleton): board include `generic_arm_ab`, no `core_64_bit.mk` inherit, keep `TARGET_USES_64_BIT_BINDER := true` (binder wire ABI). 16-min build.
 - **16.0** (`/media/herrie/HaliumDisk/16.0`, and what the build now uses): three edits — (1) BoardConfig includes `build/make/target/board/generic/BoardConfig.mk` (the ready-made `generic_arm_ab` was removed in 13/14); drop `core_64_bit.mk`; do NOT set `TARGET_USES_64_BIT_BINDER` (default+deprecated); (2) hardlink `prebuilts/vndk/v30` from the 14.0 tree, `PRODUCT_EXTRA_VNDK_VERSIONS := 30 32 34` — the Android 11 vendor needs the v30 VNDK apex; (3) **the non-obvious one**: `packages/modules/vndk/apex/Android.bp` only declares `apex_vndk` for v31–v34 — add a v30 block or `com.android.vndk.v30` never exists and is *silently dropped*. Build with explicit env `TARGET_PRODUCT=lineage_halium_arm TARGET_RELEASE=bp4a TARGET_BUILD_VARIANT=userdebug; m systemimage`. Output verified genuinely 32-bit-primary (zero `system/lib64`) with the v30 apex present.
-- Packaged as `halium-luneos-16.0-20260827-1-halium_arm.tar.bz2`; `android-system-image-mindphone.bb` points at it, `android-headers-halium` bumped 11.0%→16.0%, libhybris rebuilt. Device itself still runs the 11 stack — 16 is build-side only so far.
+- Packaged as `halium-luneos-16.0-20260827-1-halium_arm.tar.bz2`; `android-system-image-mindphone.bb` points at it, `android-headers-halium` bumped 11.0%→16.0%, libhybris rebuilt. **Flashed and confirmed running on hardware (13 Sep 2026):** mindphone boots the Halium 16 stack over its Android 11 (VNDK 30) vendor — the second runtime proof of a Halium 16 GSI on an old vendor after sargo (12.1 / VNDK 32), and the first on 32-bit.
 
 ## Install (fastboot; no custom recovery exists)
 
@@ -77,7 +77,6 @@ Regenerate userdata after an image rebuild: `mke2fs -q -F -t ext4 -L userdata -d
 - `*`/`#` keymap remap (KEY_SWITCHVIDEOMODE 227 → KEY_NUMERIC_STAR) for the dialer; T9 v2 could go dictionary-predictive.
 - FW_LOADER_USER_HELPER flipped off (halium default) vs stock on — revisit if MTK firmware loading misbehaves.
 - nyx `mindphone.cmake` battery/charger/input paths are still rosy copy-paste — verify on device (patch 0022 allows `/etc/nyx.conf` runtime override); `NYXMOD_OW_HAPTICS TRUE` is deliberate (hybris haptics needs the legacy vibrator API that headers ≥11 lack — sargo precedent).
-- Actually flash/run the 16 stack: revalidate the boot chain (esp. the quoted-gate fix and VNDK apex mounting behave differently on 16).
 - Device-only fixes to land in layers: GPU udev rule, keypad udev, product.env DRM guard (needs luna-surfacemanager patch), wayland watcher; kernel patches should move to shr-distribution `dnim/4.14.186`; the 16 recipe/machine edits belong on `herrie/mindphone-mt6739`, not `herrie/mindphone-platform-fixes`.
 - initramfs still lacks `udevadm`/`dumpe2fs`; machine.conf carries stale mmcblk numbers (harmless, fix to by-name).
 

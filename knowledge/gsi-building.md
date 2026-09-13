@@ -108,7 +108,7 @@ In `/media/herrie/HaliumDisk/11.0`, create `device/halium/halium_arm` cloned fro
 
 ### Halium 16 (three edits — 17m51s first full build)
 
-Built and verified at `/media/herrie/HaliumDisk/16.0`: system.img genuinely 32-bit-primary (vold ELF 32-bit ARM, zero `system/lib64`, 541 32-bit libs), containing `com.android.vndk.v30.apex` (48 MB) beside v32/v34 — so an Android-11 vendor is served. The exact three edits:
+Built and verified at `/media/herrie/HaliumDisk/16.0`: system.img genuinely 32-bit-primary (vold ELF 32-bit ARM, zero `system/lib64`, 541 32-bit libs), containing `com.android.vndk.v30.apex` (48 MB) beside v32/v34 — so an Android-11 vendor is served. **Runtime-proven 13 Sep 2026: mindphone boots this 32-bit Halium 16 GSI on hardware over its Android 11 (VNDK 30) vendor** — the v30-port approach works end to end, not just at build time. The exact three edits:
 
 1. `device/halium/halium_arm` cloned from `halium_arm64`: BoardConfig includes `build/make/target/board/generic/BoardConfig.mk` (pure arm, armv7-a-neon, no `TARGET_2ND_ARCH`) — the ready-made `generic_arm_ab` board was **removed in 13/14**; `lineage_halium_arm.mk` drops the `core_64_bit.mk` inherit (mirror `aosp_arm.mk`); do **NOT** set `TARGET_USES_64_BIT_BINDER` (default-true + deprecated in 16).
 2. `cp -al /media/herrie/HaliumDisk/14.0/prebuilts/vndk/v30` into the 16.0 tree; `device.mk`: `PRODUCT_EXTRA_VNDK_VERSIONS := 30 32 34`.
