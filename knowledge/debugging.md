@@ -18,6 +18,38 @@ On a kernel panic the console log survives the reboot in pstore. This is how the
 `Kernel panic: exynos4_timer_resources: unable to determine tick clock rate`
 were read from the ramoops console dump after the device rebooted. If the device panics and resets, pull the pstore console before touching anything else.
 
+### MediaTek: `expdb` when there is no pstore and no gadget
+
+Qualcomm and Exynos ports lean on ramoops (above). MediaTek kernels frequently
+ship **no pstore console at all**, and if the USB controller is a vendor module
+(see 1.9) there is no debug gadget either — so a failing MediaTek device can be
+completely mute: no screen, no adb, no telnet, nothing on `lsusb` but the
+preloader flashing past on each reset.
+
+`expdb` is the way in. It is a MediaTek partition holding preloader/lk logs, AP
+watchdog status and the kernel's `RAM_CONSOLE` (the kmsg from before the reset),
+and it is readable over the preloader connection that *is* still enumerating.
+See tools.md for mtkclient; `dump-expdb.sh` in the MP01 port directory wraps it.
+
+What it looks like when it works — this is the MP01, and it settled a question
+three rounds of guessing had not:
+
+```
+[    0.422636][    T1] Run /init as init process
+[    0.458973][    T1] ======= LuneOS/Halium ===========
+[    0.461627][    T1] initrd: luneos initramfs failed:
+[    0.461688][    T1] initrd: Initramfs Debug Mode
+[    1.541216][    T1] initrd: debug: telnet ready on usb0, 192.168.2.15 port 23
+RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
+```
+
+i.e. our init *was* running, the debug shell *was* coming up, and the watchdog
+was killing it — none of which was visible from outside.
+
+**Read `wdt_status` in that dump.** A non-zero value means the hardware watchdog
+reset the SoC rather than the kernel panicking, which is a completely different
+problem (1.10).
+
 ### The debug boot image (`fastboot boot`, no flashing)
 
 Every device kit ships a `boot-<device>-luneos-debug.img`: the same kernel + initramfs with `enable_adb` on the cmdline. `fastboot boot` runs it without flashing (on Pixels this works even for images that would normally live in `init_boot` — the debug image is deliberately self-contained, kernel + ramdisk in one image). With `enable_adb`, init panics into the initramfs adbd debug shell: the device enumerates as a USB gadget named **"Halium initrd — Failed to boot"**. Then:
@@ -145,6 +177,159 @@ export PATH=/usr/bin:/usr/sbin
 Grow it offline with `e2fsck -fy /data/rootfs.img && resize2fs -f /data/rootfs.img 8G` (complementary to the first-boot `resize_userdata_if_needed`). Recovery is also where you read `/sys/fs/pstore/` after a panic and mask broken systemd units before the next boot attempt.
 
 ---
+
+### 1.9 The vendor modules may not be in the merged ramdisk at all
+
+1.1 assumes the vendor's early modules are at `/lib/modules` because the
+bootloader concatenates `vendor_boot`'s ramdisk with ours. That is what AOSP
+specifies and what stock Android relies on — but **verify it rather than assume
+it**, because when it does not happen `load_kernel_modules()` returns silently:
+
+```sh
+[ -f /lib/modules/modules.load ] || return 0
+```
+
+No error, no kmsg line, and on a device whose storage *and* USB are modules the
+result is a machine that cannot find its root filesystem and cannot tell you so.
+
+The robust fix is to stop depending on the bootloader: ship the vendor's modules
+**inside the LuneOS initramfs**. `initramfs-android-image` has a hook for it:
+
+```
+ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL = "<machine>-vendor-modules"
+IMAGE_ROOTFS_SIZE:pn-initramfs-android-image = "65536"   # default 8 MB is too small
+```
+
+with a recipe that installs the extracted `.ko` plus `modules.load`/`.dep`/
+`.softdep` to `/lib/modules` (see `meta-minimal/recipes-bsp/mp01-vendor-modules`).
+On the MP01 that is 180 modules, 25 MB unpacked, **5.5 MB compressed** — against
+a 64 MiB boot partition holding a 16 MB kernel. The budget is not close, and if
+the concatenation *does* happen these are the same files landing in the same
+place, so it is safe either way.
+
+Use `install`, not `cp -a`, in `do_install`: `cp -a` preserves the uid of
+whoever extracted the factory image and `do_package` then dies with
+`KeyError: 'getpwuid(): uid not found: 1000'`.
+
+### 1.10 The watchdog reset trap (MediaTek)
+
+MediaTek's preloader arms a **hardware watchdog** before handing off. Stock
+Android's init feeds it; our initramfs does not. `CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y`
+makes the kernel watchdog core keep petting it until userspace takes over — but
+only once the watchdog *driver* is loaded, and on MediaTek `mtk_wdt.ko` is one
+of the vendor modules. So if module loading has not happened yet, nothing feeds
+it and the SoC resets after ~20–30 s.
+
+From outside this is indistinguishable from a boot loop, and it will happily
+reset *a working debug shell* out from under you. Two tells:
+- `wdt_status` non-zero in `expdb` (Stage 0)
+- the reset interval is suspiciously regular
+
+**This is MediaTek-specific in practice.** On Qualcomm the watchdog driver
+(`msm_watchdog`/`qcom_wdt`) is built into the kernel on every port we have —
+athena (Key2) builds its own complete kernel from `athena-perf_defconfig` and
+carries only `CONFIG_QCA_CLD_WLAN=m`, so it has no module-load dependency for
+boot at all and cannot hit this. Tensor devices likewise. Check
+`CONFIG_<vendor>_WATCHDOG` in the stock config before assuming.
+
+### 1.11 Debug mode must come *after* module loading
+
+`init.sh` historically did this:
+
+```sh
+cat /proc/cmdline | grep enable_adb
+if [ $? -ne 1 ] ; then
+    panic "Initramfs Debug Mode"      # <-- stops here
+fi
+...
+load_kernel_modules                    # <-- never reached
+```
+
+Fine on Tensor, where UFS and the gadget are `=y`. **Fatal on any device whose
+USB, storage or watchdog are vendor modules**: the debug shell comes up with no
+block devices to inspect, and on MediaTek no `mtk_wdt.ko` either, so the
+watchdog kills it within seconds. What you observe is "the debug image
+bootloops", when in fact debug mode is working perfectly and being shot.
+
+`load_kernel_modules` + `start_mdev` now run *before* the `enable_adb` check.
+Costs nothing where it is not needed (the loader returns immediately when
+`/lib/modules/modules.load` is absent) and the loader is bounded, so it cannot
+itself hang the debug path.
+
+Related, and worth internalising: **"luneos initramfs failed:" with an empty
+reason is not a failure.** `panic()` is reused as the debug-mode entry point;
+the reason is the *next* kmsg line, and for the debug image it reads
+`Initramfs Debug Mode`.
+
+### 1.12 The debug gadget is not necessarily adb
+
+`USB_FUNCTIONS="adb rndis ecm acm"` — whichever the kernel supports is what you
+get, and on a vendor kernel that may be **none of them being adb**. On the MP01
+the gadget came up as ECM + ACM: `adb devices` stayed empty while the device was
+perfectly reachable. Check all of these before concluding the device is dead:
+
+```sh
+adb devices
+ls /dev/ttyACM*                  # screen /dev/ttyACM0 115200
+ip -br link | grep -E "usb|enx"  # then: telnet 192.168.2.15
+lsusb | grep -iE "18d1|0e8d"     # raw enumeration
+```
+
+### 1.13 Ramdisk compression must match across the concatenation
+
+The bootloader concatenates `vendor_boot`'s ramdisk with ours and hands the
+kernel one stream. AOSP requires the two to use the **same compression** ("a
+device that is GKI-compliant must use an lz4-compressed vendor ramdisk", since
+the generic ramdisk is lz4). `initramfs-android-image` produces `cpio.gz`.
+
+On the MP01 the mismatch was not benign: with a gzip ramdisk behind an lz4
+vendor ramdisk, ours was never unpacked, the vendor's `/init` symlink survived,
+Android's init ran instead of ours and the device landed in **Android Recovery**
+("Try again / Factory data reset") — which reads like a userdata problem and is
+not.
+
+Check the stock images and match them:
+
+```sh
+xxd -l 4 ramdisk     # 02 21 4c 18 = LZ4 *legacy*, 1f 8b = gzip
+```
+
+`GKI_RAMDISK_COMPRESSION = "lz4-legacy"` in the machine conf repacks it. It must
+be **legacy** lz4 (`lz4 -l`), not the modern frame format (`04 22 4d 18`) —
+`lib/decompress_unlz4.c` only knows the legacy magic.
+
+### 1.14 Vermagic: match it rather than force it
+
+To insmod stock vendor modules the vermagic must match, and the initramfs has
+only **busybox** `insmod`, which cannot pass `MODULE_INIT_IGNORE_VERMAGIC` —
+and `CONFIG_MODULE_FORCE_LOAD` is usually unset in the stock config anyway. So
+`--force-vermagic` is not available where you need it most.
+
+Make the string match instead. Vermagic is
+`<kernel release> SMP preempt mod_unload modversions aarch64`; everything after
+the release comes from config options you already inherit, so only the release
+differs:
+
+```
+sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 233/' Makefile
+CONFIG_LOCALVERSION="-android12-9-gdeb4d30d3489"
+# CONFIG_LOCALVERSION_AUTO is not set
+: > .scmversion          # or setlocalversion appends "+" and the match fails
+```
+
+That last line is not optional and cost a full rebuild to find: patching the
+Makefile dirties the tree, and `scripts/setlocalversion` ends with
+`res="$res${scm:++}"` whenever the tree is not on a clean annotated tag. One
+character, and nothing loads.
+
+Deploy `include/config/kernel.release` from the kernel recipe so the string is
+checkable before flashing — on a device this mute, an unverifiable assumption
+costs a whole debug cycle.
+
+Faking the sublevel is defensible **only because the ABI is separately
+verified**: `check-kmi.sh` must report 0 of N stock modules failing against the
+real exported-symbol CRCs. Without that measurement this is just a lie in
+`uname -r`.
 
 ## Stage 2 — Android container failures
 
@@ -331,3 +516,238 @@ Four proven failure patterns, generalized:
 | pulseaudio busy while silent; sink RUNNING forever | Uncorked stream (Qt EOS bug) | `pactl list sink-inputs`; Stage 5 §3, device-sargo |
 | Idle flash writes high (GB/h at rest) | Kernel driver debug_mask / log spam | Stage 5 §4; module param via tmpfiles.d |
 | Wifi/BT vendor modules never load on a rebuilt GKI kernel though kmi-crc-check passes | `CONFIG_MODULE_SIG_PROTECT` must be off | kernel-porting.md (bluejay 12 Sep) |
+
+## Techniques from the MP01 bring-up (15 Sep 2026)
+
+### journald loses the interesting part by default
+
+`Storage=auto` + the default `SyncIntervalSec=5m` means journald buffers and
+flushes periodically. Every debug cycle on a phone ends in a forced power-off,
+so the last flush is all you get — two captures in a row ended early here, the
+second holding only the **first six seconds** of a boot that ran for minutes.
+It reads exactly like an early crash and is not one.
+
+Before debugging anything that takes more than a few seconds to fail:
+
+```
+# /etc/systemd/journald.conf
+Storage=persistent
+SyncIntervalSec=1s
+```
+
+Also check *where* the journal actually lives. On a Halium rootfs `/var` is
+commonly bind-mounted from the data partition, so `rootfs.img`'s own
+`/var/log/journal/` is empty while the real journal sits in
+`<data>/luneos-data/var/log/journal/<machine-id>/`.
+
+### `sh -x` as ExecStart, for a unit that logs nothing
+
+A `Type=notify` unit that times out with **no output at all** has usually died
+before its first log statement. Do not guess which line — trace it, without
+touching the script:
+
+```
+# /etc/systemd/system/<unit>.service.d/99-debug.conf
+[Service]
+ExecStart=
+ExecStart=/bin/sh -x /usr/bin/<the-script>
+```
+
+`exec` at the end of the script keeps the PID, so `Type=notify` still works.
+This is what pinned a 90s compositor timeout to `PmLogCtl def surface-manager`,
+the very first command in the file.
+
+### Reading an aarch64 core with no gdb and no debuginfo
+
+Host `gdb` dies with an internal error on an aarch64 core, and phone rootfses
+carry no debugger. This works instead:
+
+1. `eu-stack --core <core>` — raw frame addresses.
+2. Parse `NT_FILE` from `readelf -n <core>` to map each address to its library
+   and subtract the library's lowest mapped address for a file offset.
+3. `readelf -sW <lib>` — find the enclosing `FUNC` symbol for that offset.
+4. Parse `NT_SIGINFO` **by hand** for `si_addr`. `readelf` prints the note
+   header but not its contents, and `si_addr` is frequently the whole answer:
+   here it was ASCII text, which says "clobbered thread pointer", not "null
+   pointer". On aarch64 `si_addr` is at offset 16 in the note descriptor.
+
+Two more things a core gives you for free on Halium:
+
+- **The mapping list is a ground-truth inventory** of which vendor blobs really
+  loaded — far better evidence than reading config files and guessing.
+- **Android's property pages are mapped into the core**, so
+  `strings core | grep ...` recovers live property values and driver paths from
+  a dead process, with no running system.
+
+### busybox `ls` column-formats into a pipe
+
+```
+ls /sys/class/udc | grep -v dummy | head -1
+```
+
+busybox `ls` emits `dummy_udc.0  musb-hdrc` as **one line**, so `grep -v dummy`
+discards both and the script concludes there is no UDC. This cost hours of
+chasing imaginary USB-controller problems. Iterate the directory instead:
+
+```sh
+for u in /sys/class/udc/*; do
+    n=${u##*/}; case "$n" in *dummy*) continue;; esac
+    echo "$n"; break
+done
+```
+
+Related busybox traps in the same family: `head -5` is not valid (`head -n 5`),
+and `ls -l a b 2>&1` interleaves differently than coreutils.
+
+### mdev creates kernel names, not partition names
+
+Halium's `mountroot` looks for the data partition with
+`find /dev -name userdata`, but mdev only creates `/dev/sdc59`. The partition is
+present and mounts fine by hand, yet the initramfs panics with "Couldn't find
+data partition". Synthesise the by-name links from sysfs rather than patching
+mountroot:
+
+```sh
+for blk in /sys/class/block/*; do
+    pn=$(sed -n 's/^PARTNAME=//p' "$blk/uevent" 2>/dev/null)
+    [ -n "$pn" ] || continue
+    [ -e "/dev/$pn" ] || ln -sf "/dev/${blk##*/}" "/dev/$pn"
+done
+```
+
+### Debug boot images cannot observe a full boot
+
+If the debug image's cmdline triggers an unconditional drop-to-shell (Halium's
+`enable_adb` → `panic "Initramfs Debug Mode"`), that image **never reaches
+systemd**, so it can never show you a userspace problem. Only the normal image
+boots through. And you cannot finish the boot by hand from the debug shell —
+`switch_root` requires PID 1.
+
+Consequence for the workflow: the normal image often has no network at all (the
+USB gadget is set up inside `panic()`), so the loop is: boot normal → let it
+run → reflash debug → mount the data partition → read the journal that the
+normal boot left behind. Which is only possible if journald was syncing (above).
+
+### This class of device does not charge while you debug it
+
+Neither fastboot nor the initramfs runs any charging policy, and the kernel log
+says so (`get_charger_charging_current: ... failed: -95`). Hours of reflash
+cycles flatten the battery, and the symptom — "rebooted to a battery symbol
+after some minutes" — looks exactly like a crash or watchdog reset. Charge it
+powered-off on a real charger, and budget for it in long sessions.
+
+## Two UDCs: `"$(ls /sys/class/udc)"` is a latent bug on every port
+
+`android-gadget-setup` (meta-android) bound the gadget with
+
+```sh
+write $GADGET_DIR/g1/UDC "$(ls /sys/class/udc)"
+```
+
+which silently assumes the device has exactly one USB device controller. The
+MP01 has two, because its **stock** kernel config sets `CONFIG_USB_DUMMY_HCD=y`,
+registering a fake `dummy_udc.0` beside the real `musb-hdrc`. The write became
+both names with whitespace between them, the kernel rejected it, the gadget
+never bound, and the device had **no adb at all** on the normal image. The only
+trace is this, and it is easy to read straight past:
+
+```
+android-gadget-setup: === Writing dummy_udc.0
+musb-hdrc into /sys/kernel/config/usb_gadget/g1/UDC
+```
+
+`dummy_udc.0` is no help even when it parses alone: it accepts the bind and
+does nothing.
+
+This is the *same* bug as the initramfs one (`ls /sys/class/udc | grep -v dummy |
+head -1`, where busybox `ls` column-formats into a pipe). Two different scripts,
+one layer apart, same wrong assumption - so when you fix one, grep the tree for
+the other:
+
+```
+grep -rn "class/udc" <layers>
+```
+
+Fix in both places is the same:
+
+```sh
+first_real_udc() {
+    for _u in /sys/class/udc/*; do
+        [ -e "$_u" ] || continue
+        _n=${_u##*/}
+        case "$_n" in *dummy*) continue ;; esac
+        echo "$_n"; return 0
+    done
+    return 1
+}
+```
+
+Why no other port hit it: sargo, tissot, mido and mindphone each expose a single
+UDC, so the unparsed `ls` output happened to be one valid name. It was never
+correct, only lucky. Check `CONFIG_USB_DUMMY_HCD` in a new device's stock config
+to know in advance.
+
+## The reboot that is not a crash: MediaTek's 31s watchdog
+
+A device resetting every ~90-120s with **no panic and no oops** in the journal
+is probably the SoC watchdog, not a crash:
+
+```
+mtk-wdt 10007000.watchdog: Watchdog enabled (timeout=31 sec, nowayout=0)
+[wdtk] kick watchdog
+[wdtk] kick watchdog
+[wdtk] kick watchdog        <- then silence, and the journal simply ends
+```
+
+Grep for `kick watchdog` and look at the interval between kicks against the
+declared timeout. The journal's last timestamp is *not* the reset time - it is
+the last flush before it - so expect the gap. Nothing in the log says "reboot",
+which is exactly what makes it look mysterious.
+
+## Disabling the MediaTek watchdog while debugging
+
+A device that resets every ~90s makes measurement almost impossible - half the
+samples come back from a machine that rebooted mid-command. On MT6789 the
+watchdog can be turned off at runtime with the standard magic close:
+
+```sh
+printf 'V' > /dev/watchdog
+```
+
+Verified on the MP01: uptime went from resetting at ~90-104s to passing 180s and
+climbing. It lasts for that boot only, so do it as the first command of every
+debug session, and remember that a suspiciously empty `journalctl -b` usually
+means the device rebooted rather than that nothing happened.
+
+Check `cut -d. -f1 /proc/uptime` in the *same* command as any measurement. A
+reading with a low uptime invalidates everything else in that sample.
+
+## Android property service: enabled, but not running
+
+`setprop` failing from a host process looks like a permissions or socket
+problem. On the MP01 it was simply that the service was dead:
+
+```
+$ systemctl is-active android-property-service
+inactive
+$ journalctl -u android-property-service -b
+-- No entries --
+```
+
+Enabled, `After=android-system.service`, never started, and *no journal entries
+at all* - so it had not failed, it had never been asked to run.
+
+Reading properties still works, which is what makes this confusing:
+`getprop ro.hardware` returns `mt6789` because the property area is mapped
+read-only. Only writes need the service:
+
+```
+libc: Unable to set property "vendor.debug.sf.hwc_pid" to "20896": connection failed
+```
+
+MediaTek's hwcomposer sets properties during init, so this is not cosmetic.
+Starting the unit by hand fixes writes immediately (`setprop debug.test 1` then
+`getprop debug.test` returns 1).
+
+Worth checking on any Halium port: the unit being *enabled* is not evidence it
+ran. `systemctl is-active` plus an empty `journalctl -u <unit> -b` is the tell.

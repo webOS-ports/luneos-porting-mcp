@@ -110,6 +110,59 @@ an AOSP dt_table (magic `0xd7b7ab1e`), not a bare FDT.
 
 **Location:** `gsigki/mindphone/unpack_bootimg.py`.
 
+## mtkclient — reading `expdb` when the device cannot talk (MediaTek)
+
+<https://github.com/bkerler/mtkclient>
+
+The MediaTek answer to "the device resets and there is no console, no adb and no
+pstore". MediaTek SoCs keep an **exception database** in a partition called
+`expdb`: preloader/lk logs, the AP watchdog status, and the kernel's last
+`RAM_CONSOLE` — i.e. the kmsg from *before* the reset. It is readable over the
+preloader/BROM USB connection, which still enumerates on a device that boots
+nothing at all.
+
+```sh
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt && pip install .
+sudo cp mtkclient/Setup/Linux/*.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules
+sudo systemctl stop ModemManager      # it grabs 0e8d:2000 inside the handshake window
+mtk r expdb expdb.bin                 # READ ONLY
+strings expdb.bin | grep -iE "initrd:|Kernel panic|wdt_status|RAM_CONSOLE" | tail -40
+```
+
+The entry point moved between versions: newer trees install a console script
+`mtk`, older ones have `mtk.py` in the repo root. Catching the device: leave it
+bootlooping and mtkclient will grab the preloader as it cycles past; if not,
+power fully off and plug in holding **Volume Down** to force BROM.
+
+**Only ever use `mtk r`.** The same tool writes partitions and reflashes the
+preloader, and a bad preloader write is the one genuinely hard-to-recover brick
+on MediaTek.
+
+`/home/herrie/webos/LuneOS/MP01/dump-expdb.sh` wraps all of the above, including
+the greps, and takes `--analyse` to re-read an existing dump.
+
+## edl — the Qualcomm counterpart
+
+<https://github.com/bkerler/edl> (same author; `strongtz/edl-ng` is a newer fork)
+
+Sahara (bootrom protocol, uploads a programmer to RAM) + Firehose (the
+programmer's protocol, does partition read/write). `edl r <partition> out.bin`
+is the analogue of `mtk r`.
+
+**It is not as good a story as mtkclient, and you should not plan around it.**
+Firehose needs the *signed firehose programmer* for that specific SoC, which
+Qualcomm does not publish and vendors rarely leak — without it EDL 9008 mode
+gets you nowhere. There is also no single `expdb`-equivalent partition: Qualcomm
+crash state lives in ramdumps (Sahara MemoryDebug mode, USB PID 0x900E, only if
+the device is fused for it) or in `rawdump`, both device-dependent.
+
+In practice **on Qualcomm you use ramoops/pstore instead** (see
+debugging.md Stage 0), which is why bluejay, sargo and athena all lean on
+`/sys/fs/pstore/console-ramoops-0` and never needed EDL. The MediaTek situation
+is the unusual one: pstore is often not configured, so `expdb` is the only
+record.
+
 ## mer-kernel-check (`mer_verify_kernel_config`)
 
 **Purpose:** check a kernel config against the Mer/Halium/systemd requirement

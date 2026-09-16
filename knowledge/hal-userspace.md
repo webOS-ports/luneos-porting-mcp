@@ -73,13 +73,32 @@ infer either from the Android version the device runs.
   Jolla C2) with A12/A13 blobs.
 - **Unproven: big-Valhall G77/G78/G710** (Exynos 2100/2200, Tensor). Nobody has run
   libhybris on a Tensor device — LuneOS would be first.
-- **Patch set to carry from day one** (check whether the rootfs's Herrie82/libhybris
-  `herrie/android16-tls` build already includes them):
-  - PR #543 / #575 — TLS-register leak workaround for A12+ Mali blobs (still open
-    upstream; shipped by Droidian/FuriLabs)
-  - PR #601 — queueBuffer skip → tearing fix
-  - PR #594 + qt5-qpa-hwcomposer-plugin PR #104 — present-fence / buffer-slot
-  - FuriLabs 4a42d42 — WaylandNativeWindow buffer-thrash crash
+- **Patch set to carry from day one.** Audited against `Herrie82/libhybris`
+  `herrie/android16-tls` @ `032a289a` on 15 Sep 2026 (MP01 bring-up):
+  - PR #543 / #575 — TLS workaround for A12+ Mali blobs. **NOT in the fork.**
+    Still open upstream; Ubuntu Touch, Sailfish, Droidian and FuriLabs ship it.
+    Carried in-layer as meta-android `libhybris/0007-hooks-hook-MEOW_get_tls_meow_offset-*.patch`.
+  - PR #601 — queueBuffer skip → tearing fix. **Already merged** (`9928c40`).
+  - PR #594 + qt5-qpa-hwcomposer-plugin PR #104 — present-fence / buffer-slot.
+    libhybris side **already merged** (`f6202e9`); the qt5-qpa side still needs checking.
+  - FuriLabs 4a42d42 — WaylandNativeWindow buffer-thrash crash. Not audited yet.
+
+- **`--enable-mali-quirks` was OFF for every halium machine**, which is the trap:
+  the Mali quirk code is all inside `#ifdef MALI_QUIRKS`, and `configure.ac`
+  defaults it to `no`. So even the mali-hist-dump commits that *are* in the fork
+  (`8792ddc`, `e1d645d`, `417861a`, `31fb3fb`) were compiled out, and PR #543's
+  hook would be too. Now in `EXTRA_OECONF` in `meta-android/…/libhybris_git.bb`.
+  Inert on non-Mali devices — the hooks only fire when a Mali blob asks.
+
+- **Symptom to recognise** (MP01, Mali-G57, A12 blobs, driver
+  `/vendor/lib64/egl/libGLES_meow.so`): compositor SIGSEGVs ~1s after
+  `exec surface-manager -platform hwcomposer`, stack
+  `libhybris eglInitialize` → `android::egl_display_t::initialize` → **libc**,
+  and `si_addr` is **ASCII text** (here `0x74695773656d6140`, `"@amesWit"`).
+  A string fragment used as a pointer means the thread pointer was clobbered,
+  not a null deref. `libGLES_meow.so` hunts for its pthread TLS slot by scanning
+  from the thread pointer; that works on bionic, cannot work on glibc, so it
+  falls back to `TLS_SLOT_OPENGL` — which it also uses for something else.
 - **Plan B (blob-free):** postmarketOS boots bluejay with panel+touch on a near-mainline
   6.18 kernel via simpledrm (gs101-mainline); Mesa panfrost supports Valhall-JM and gained
   G68 in Aug 2026 but has no G78 model entry yet — "small mesa patch + GPU DT plumbing"

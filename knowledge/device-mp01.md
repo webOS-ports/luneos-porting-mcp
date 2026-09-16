@@ -1,0 +1,161 @@
+# Device: mp01 (Minimal Phone MP01, vendor codename Z10)
+
+4.3" **E Ink** phone with a physical QWERTY, from The Minimal Company. Would be
+the first LuneOS port to an electrophoretic display.
+
+**Status: not booting yet.** Kernel builds and is KMI-verified (0 of 345 stock
+modules would fail), boot image reproduces the stock header field for field, the
+install kit is complete — but no successful boot. Treat everything here about
+runtime behaviour as unverified.
+
+Layer `meta-smartphone/meta-minimal`, `MACHINE=mp01`. Port directory
+`~/webos/LuneOS/MP01` (notes, firmware, KMI gate, `dump-expdb.sh`).
+
+## The one-line summary
+
+**Same SoC and same kernel as the Zinwa Q25** — MT6789 (Helio G99), MediaTek
+`mgk` android12-5.10 **KMI generation 9**, clang r416183b, 64 MiB boot,
+9216 MiB super, unused `init_boot`. The two stock kernel configs differ by
+**85 options out of 2,665**, every one a board-level driver. Read
+`device-q25.md` first; most of it applies.
+
+## Platform facts
+
+All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`,
+build `alps-mp-s0.mp1-V17.88`), which Minimal publish themselves at
+<https://minimalcompany.dev/blog/tags/update> — no OTA interception needed.
+
+| Fact | Value |
+|---|---|
+| Codename | **`Z10`** in `flash.xml`/scatter/preloader and over fastboot (`getvar product`); `ro.product.vendor.device=MP01` is what `luneos-device-config` reads |
+| SoC | **MT6789** — scatter, and the vendor's own flashing guide. Spec sites claiming MT6769/G85 are **wrong** |
+| Kernel | **5.10.233**, `5.10.233-android12-9-gdeb4d30d3489`, clang r416183b, `CONFIG_ARCH_MEDIATEK=y` |
+| Vendor API | 31 (Android 12 vendor, `alps-mp-s0`) — halium_arm64 16.0 GSI carries `com.android.vndk.v31` |
+| Display | 4.3" E Ink 600×800, `CONFIG_DRM_PANEL_Z10_EINK_VDO=m` — a **DSI video-mode DRM panel**, Pango FPGA doing DSI→EPD |
+| Keyboard | AW9523B I2C expander, `aw9523b-key`. Key table includes **`Volup`**, so pin key devices by name |
+| Touch | FocalTech, `focaltech_touch.ko` |
+| Storage | 108.8 GiB userdata (**scatter declares 3 GiB — nominal, ignore it**; `fastboot getvar partition-size:userdata` = `0x1b357f8000`) |
+| Connectivity | `gen4m_6789` / `connac1x` / `gps_drv_stp` / `mt6631_6635` — **character-for-character the Q25's** |
+
+## Kernel: no published source, and it does not matter
+
+Minimal publish no GPL kernel source. What they do publish is the factory image,
+which ships the stock kernel config loose as `merged/.config`.
+
+So `linux-minimal-mp01` builds the **Q25's** tree
+(`LineageOS/android_kernel_xelex_mt6789`, 5.10.198) against the **MP01's own
+stock config** (5.10.233). Measured against all 345 of this device's stock
+modules: **0 would fail**, with zero mismatches on any `vmlinux`-exported
+symbol. The substitution is legitimate.
+
+Two things that fall out of building a different tree than the config came from:
+
+- **List-valued options break the build.** `CONFIG_TOUCHSCREEN_MTK_TOUCH` and
+  `CONFIG_CUSTOM_KERNEL_IMGSENSOR` are *strings naming source subdirectories*.
+  `olddefconfig` silently drops unknown *symbols* — which is what makes the
+  whole substitution work — but cannot drop these, because the symbol exists
+  and only the directories do not. Result: `No rule to make target
+  .../focaltech_touch/Makefile`. `files/tree-fixup.cfg` rewrites them, applied
+  **unconditionally including the baseline**, since it belongs to the source
+  substitution rather than to LuneOS.
+- **Vermagic must be forced to match** (debugging.md 1.14) — `SUBLEVEL = 233`,
+  `CONFIG_LOCALVERSION="-android12-9-gdeb4d30d3489"`, `LOCALVERSION_AUTO` off,
+  and an empty `.scmversion`.
+
+KMI-poison list is the Q25's, re-measured here: `CONFIG_SYSVIPC` (with
+`SYSVIPC_SYSCTL`, `IPC_NS`) and `CONFIG_USER_NS`. `PID_NS` and
+`CHECKPOINT_RESTORE` are clean.
+
+### ThinLTO is worth it during bring-up
+
+Stock sets `CONFIG_LTO_CLANG_FULL=y`, and `ld.lld -r -o vmlinux.o` then runs
+**single-threaded** — measured at 93.6% of one core on a 64-thread host, ~20
+min. `CONFIG_LTO_CLANG_THIN` drops it to **6m04s** and is KMI-neutral: CRCs come
+from `$(CPP) -D__GENKSYMS__ | genksyms`, i.e. preprocessed *source*, which is
+independent of codegen. Verified 0/345 both ways. Gated behind
+`conf/mp01-thinlto.conf`; revert to full LTO for a shipped image.
+
+## Why this device is so hard to debug
+
+Everything you would normally use to see a failed boot is itself a vendor
+module:
+
+```
+CONFIG_SCSI_UFS_MEDIATEK=m   ufs-mediatek-mod.ko    storage
+CONFIG_MMC_MTK=m             mtk-mmc.ko, phy-mtk-ufs.ko
+(out-of-tree)                musb_hdrc.ko           USB - so no adb, no gadget
+(vendor)                     mtk_wdt.ko             watchdog - so it resets you
+```
+
+No debug UART, and the panel is E Ink behind another module. A failing MP01 is
+**completely mute**: nothing on `lsusb` but the preloader flashing past on each
+reset. This drove four separate findings now generalised into debugging.md
+1.9–1.14 — read those before debugging any MediaTek GKI device.
+
+`~/webos/LuneOS/MP01/dump-expdb.sh` is the way in: MediaTek's `expdb` partition
+over mtkclient. It is what proved our init *was* running and the watchdog was
+killing the debug shell.
+
+## Device quirks that cost time
+
+- **It does not power off with a long press while USB is connected.** MediaTek
+  auto-boots on USB power, so Power-for-10s just resets it and it comes straight
+  back. You do not need it off, though: **hold Volume Down through that forced
+  restart and it lands in BROM** (confirmed on hardware), which is the reliable
+  way in. Alternatively a device in a reset loop presents the preloader on every
+  cycle and mtkclient polls for exactly that, so leaving it looping on the cable
+  also works.
+- **`0e8d:201c` is fastboot mode**, not a LuneOS gadget. `0e8d:2000` is the
+  preloader, and it presents a `/dev/ttyACM0` of its own that spews `READY` -
+  which is *not* our debug console. Ours is **`18d1:d001`** ("Halium initrd /
+  Failed to boot"). Three separate false positives came from not checking the
+  ID.
+- **"telnet ready on usb0" in the log does not mean USB works.** The original
+  panic() did `write .../UDC "$(ls /sys/class/udc)"` and then called
+  start_debug_network unconditionally - so with an empty UDC the bind silently
+  did nothing while the script still logged success. Check for the USB ID, never
+  the log line.
+- **`expdb` only records on an exception.** A clean hang writes nothing, so
+  re-dumping after a silent hang returns the *previous* crash and looks like
+  nothing changed. If the device hangs without resetting, boot it with
+  `initrd_no_wdt` so the watchdog fires and produces a record.
+
+## Install
+
+`/media/herrie/LuneOS/mp01-staging/` (`mp01_20260914.zip`). Modelled on the Q25
+kit, four differences:
+
+1. **All three vbmeta images** are attempted, but lk only exposes the top-level
+   one — `has-slot:vbmeta_system` comes back empty and flashing it dies with
+   `partition does not exist`. Harmless: `--disable-verity
+   --disable-verification` on the top-level vbmeta disables the whole chain.
+2. **Lock-state check first.** A locked MediaTek lk does not report itself as
+   locked; it refuses *critical* partitions individually with
+   `FAILED (remote: 'No support by lock control')`, which reads like a problem
+   with that partition. And if `flashing get_unlock_ability` is `false`, the
+   unlock itself is refused too — that switch only exists inside booted Android.
+3. **Partition-size check** before flashing userdata (see the scatter trap
+   above).
+4. **No `fastboot -w`** on top of the Q25's no-`fastboot boot` rule; the
+   community guide reports `-w` failing here.
+
+Fastboot entry: power fully off, **Volume Up + Power**, navigate with Vol Up,
+select with **Vol Down**.
+
+## The display, which is the real work
+
+The panel is DSI so it will *paint* — from the SoC's side it is an ordinary
+MediaTek DRM display. What LuneOS does not do at all is manage **waveform and
+full-vs-partial refresh**; on stock that is Minimal's own system service driving
+a sysfs attr group `panel-z10-eink-i2c.ko` registers as `eink_cpld_registers`.
+The sysfs path is not knowable offline — `find /sys -name 'eink_cpld*'` on the
+first shell that comes up is the single command that unblocks this work item.
+
+Beyond that: 16-level greyscale (dark themes are unusable), luna-surfacemanager
+animates everything, and `deviceinfo_display_dpi=233` /
+`device_pixel_ratio=1.333` are arithmetic from the spec sheet, not tuned. Expect
+the legible DPI to be *larger* than the arithmetic one — hairlines that are
+merely crisp on an LCD vanish on E Ink.
+
+Booting this is a bring-up task; making it pleasant is a design task. Scope them
+separately.

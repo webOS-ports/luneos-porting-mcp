@@ -522,3 +522,157 @@ remains is deliberate). Known checker quirks to not chase:
 
 Interpret errors as "explain or fix", not "fix": on bluejay the final config ships
 with 5 errors, every one accounted for.
+
+## CONFIG_SYSVIPC is not optional on LuneOS (and GKI defaults it off)
+
+Android does not use SysV IPC, so GKI configs ship `# CONFIG_SYSVIPC is not set`.
+LuneOS **does** need it: `libPmLogLib.so` calls `shmget()`/`shmat()`. Without
+SysV IPC every `PmLogCtl` invocation blocks forever waiting for
+`com.webos.pmlogd` to answer, and PmLog is wired into far more than logging —
+`luna-service2` itself depends on `pmloglib`.
+
+Measured on MP01 (MT6789), 15 Sep 2026. Five units died on 90s timeouts with
+**no output of their own**:
+
+```
+surface-manager-daemon   db8-maindb   db8-mediadb   bluebinder   camera-droid-heal
+```
+
+`surface-manager.sh` calls `PmLogCtl def surface-manager` on its *first line*,
+above every log statement — so the compositor never starts and the screen never
+comes on, with nothing whatsoever in the journal to say why. `sh -x` as the
+ExecStart wrapper is what exposed it.
+
+**How to recognise it in two commands:**
+
+```
+$ ls -d /proc/sysvipc                       # absent  -> SYSVIPC is off
+$ strings /usr/lib/libPmLogLib.so.3 | grep -E 'shmget|shmat'
+```
+
+### Enabling it without destroying the KMI
+
+Turning `CONFIG_SYSVIPC=y` on normally appends `sysvsem`/`sysvshm` to the middle
+of `task_struct`, shifting every field after them. That moves `module_layout`
+and every other CRC: measured as **344 of 344 stock modules refusing to load**
+on this SoC. Do not just flip it.
+
+Park the two members in the reserved Android KABI padding instead. The whole
+trick is one line in `include/linux/android_kabi.h`:
+
+```c
+#ifdef __GENKSYMS__
+#define _ANDROID_KABI_REPLACE(_orig, _new)	_orig
+```
+
+genksyms computes CRCs from the `_orig` arm, so it still sees
+`u64 android_kabi_reservedN` exactly as the stock `CONFIG_SYSVIPC=n` kernel did,
+while the compiler sees a union carrying the real fields. Sizes pick the slots:
+`sysv_sem` is one pointer and fits one slot via `ANDROID_KABI_USE(6, ...)`;
+`sysv_shm` is a `list_head` (16 bytes) and no USE macro spans two slots, so
+write that union longhand across slots 7 and 8.
+
+Check before writing the patch: `CONFIG_ANDROID_KABI_RESERVE=y`,
+`CONFIG_MODVERSIONS=y`, which reserve slots are still free (slot 1 is usually
+`pf_io_worker`), and that `init/init_task.c` has no `.sysvsem` initializer.
+
+Result on MP01: `/proc/sysvipc` present, all 159 vendor modules loading,
+**0 "disagrees about version"**. Leave `CONFIG_IPC_NS` off — `shmget()` does not
+need it, it touches other structures, and LXC can be told not to unshare it with
+`lxc.namespace.keep = ipc user`.
+
+**Counting warnings correctly:** `dmesg | grep -c "Unknown symbol"` returned
+**400** on a perfectly healthy boot — that is dependency-ordering noise from the
+module load retry loop (`tcpc_class: Unknown symbol pd_dbg_info`), resolved on a
+later pass. The CRC message is **"disagrees about version"**. Count that one.
+
+## The vendor_dlkm module set is never loaded on Halium (Tier A only)
+
+A GKI-era vendor ships kernel modules in **two** sets, and Halium only ever loads
+the first:
+
+| Set | Lives in | Loaded by | On Halium |
+|---|---|---|---|
+| vendor_boot ramdisk | `/lib/modules` in the vendor_boot ramdisk | the initramfs, early, to reach storage | **yes** |
+| `vendor_dlkm` | the `vendor_dlkm` logical partition | Android's init, later | **no** |
+
+Halium curtails the container's init on a `wait_for_prop` gate long before it
+reaches the second set, and the initramfs cannot load it either (it is a logical
+partition inside `super`, needing dm-linear that the initramfs has no tooling
+for). So those modules simply never load, on any Tier A device.
+
+On the MP01 that is **164 modules — more than the 159 the initramfs loads.**
+
+The reason this is worth its own section is that the symptoms do not look
+remotely like "missing kernel modules":
+
+- `nvmem-mt635x-efuse.ko` lives in `vendor_dlkm`, while `mt635x-auxadc.ko` is in
+  the early set and depends on it. The auxadc probe returns **-517**
+  (`EPROBE_DEFER`) forever, the fuel gauge never comes up, and healthd reports
+  `battery l=-1`. lk then paints a **battery icon with a question mark**, decides
+  the device is in charger mode, starts Android's `charger` binary, and reboots
+  in a loop. This reads exactly like a flat battery and is not one — the same
+  device reported `v=4429` (4.43 V, essentially full) while showing it.
+- The **touchscreen** drivers (`gt9886.ko`, `gt9896s.ko`, `focaltech_touch.ko`)
+  are in `vendor_dlkm` too, so the panel has no touch at all, nothing advertises
+  `ID_INPUT_TOUCHSCREEN`, and `luneos-device-config` leaves the compositor
+  pointed at `evdevtouch:/dev/input/PLACEHOLDER`.
+
+**Check for it on any new Tier A port, before blaming anything else:**
+
+```
+# how big is the set nobody loads?
+wc -l < <vendor-modules>/dlkm/modules/modules.load
+# is a driver you are missing in it rather than in the early set?
+grep -iE 'touch|efuse|nvmem' <vendor-modules>/dlkm/modules/modules.load
+# on the device
+ls -d /proc/sysvipc; dmesg | grep -- -517
+```
+
+**Fix:** load them from `mount-android.sh`, after `vendor_dlkm` is mounted and
+before the container's init starts (meta-android, `load_vendor_dlkm_modules`).
+Guarded on `[ -d /vendor_dlkm/lib/modules ]`, so it is a no-op on devices
+without the partition. Note `modules.load` is a **list, not a dependency
+order** — the same trap as in the initramfs — so make repeated passes and stop
+when a pass loads nothing new, rather than trusting the file's order.
+
+**Who is affected:** any Android 12+ / GKI device with a `vendor_dlkm`
+partition — MP01, and bluejay and panther when they start. **Not** affected:
+pre-dynamic-partition devices, which have only one module set. mindphone
+(MT6739, Android 11, kernel 4.14, no super/vendor_boot) is the clearest example
+and is exactly why the same SoC vendor shows no such problem there. sargo has no
+vendor_dlkm either.
+
+## Rebuilding one kernel module without a full kernel build
+
+Bitbake's kernel `do_compile` and plain `make modules` both take ~10 minutes on
+a tree this size, because LTO relinks every module. When you only changed one
+`.c`, neither is necessary. What does **not** work:
+
+- `make ... drivers/foo/` - builds the objects but never links the `.ko`
+- `make ... M=drivers/foo modules` - treats an in-tree dir as an external
+  module directory and tries to rebuild unrelated files in it, which fails
+
+What works, in seconds: build the object with the directory target, then link
+the module by hand exactly as kbuild would:
+
+```sh
+export PATH=<clang-prebuilt>/bin:$PATH
+make -C $S O=$B LLVM=1 LLVM_IAS=1 ARCH=arm64 \
+     CROSS_COMPILE=aarch64-linux-gnu- -j64 drivers/regulator/
+
+cd $B && ld.lld -r --build-id=sha1 -T scripts/module.lds \
+    -o drivers/regulator/foo.ko \
+       drivers/regulator/foo.o drivers/regulator/foo.mod.o
+```
+
+The `.mod.o`/`.mod.c` from the previous full build stay valid as long as the
+module's exported symbols have not changed. Get the exact flags from bitbake's
+own `temp/run.do_compile.*`, which records the make line verbatim.
+
+Verify before flashing: `strings foo.ko | grep <a string from your change>`.
+
+Combined with the fact that **our modules load fine next to the vendor's**
+(same vermagic, KMI verified), this makes single-driver experiments a
+sub-minute loop with `adb push` + `rmmod`/`insmod`, instead of a
+build-flash-reboot cycle.
