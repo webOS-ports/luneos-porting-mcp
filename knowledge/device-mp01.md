@@ -183,7 +183,7 @@ Balanced (default), Auto, Text, Ultra; the choice persists as systemservice
 preference `einkRefreshMode`. It reads keycode 252 from evdev (`mtk-kpd`,
 event1) itself: short press = full refresh, long press = the shell's popup.
 luna-next-cardshell's `Connectors/EinkRefresh.qml` derives "moving" from the
-compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 0.5 s without
+compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 1 s without
 a frame, for Auto (1 at rest, 4 while moving - the flash-free pair; a full
 refresh counts as settled); `Notifications/EinkRefreshMenu.qml` is the long-press popup; and
 `AppTweaks.reduceMotion` (forced on when the service reports a panel) makes
