@@ -453,6 +453,15 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 ### Bluetooth
 - Node ownership: the **vendor's** ueventd.rc says `/dev/stpbt` is `bluetooth:bluetooth`; the container's ueventd made it `system:system` → HAL can't open it. Chown in the container, then start the BT HAL (after android-system).
 - BT MAC: `bluebinder_post.sh` knows no MTK source; the MAC lives in `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr` (first 6 bytes) → write once to `/var/lib/bluetooth/board-address`.
+- **`hci0` exists but stays DOWN, `bluetoothctl` says "No default controller available":** check `rfkill list` first (webOS BT off = soft-blocked), then `hciconfig hci0 up`. `Invalid request code (56)` is `EBADRQC`, which `bt_to_errno()` maps from HCI status **0x01 "Unknown HCI Command"**: the controller refused something the kernel sent during init because the controller *advertised* it. Find which with `btmon`, which LuneOS ships:
+
+  ```sh
+  (btmon -i hci0 > /tmp/bt.log 2>&1 &); sleep 1; hciconfig hci0 up; sleep 2; pkill btmon
+  grep -B2 -A6 "Unknown HCI Command" /tmp/bt.log
+  ```
+
+  Then look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the bit bluebinder passes through (`BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`, `BLUEBINDER_LOCAL_FEATURES_MASK`) or add missing ones (`BLUEBINDER_LOCAL_COMMANDS_SET`). MP01: Read Synchronization Train Parameters → page 2 byte 0 bit 2 → mask `0x0400000000000000`. Test by writing the value to `/var/lib/environment/bluebinder/<x>.conf` and restarting bluetooth → bluebinder → bluetooth in that order.
+- A `dut_mode ... already present` debugfs warning means a second `hci0` was registered over a stale vhci — a killed bluebinder left it behind. Restart the stack in order before debugging further.
 
 ### Misc
 - Audio wrong rather than absent: pulseaudio-modules-droid has documented quirk arguments — pitched/tempo-shifted audio → `rate=48000` (or 44100); volume keys dead → `hw_volume=false`; crash or silence in voice calls → `use_legacy_stream_set_parameters=true`. Full table and the `audio.hidl_compat.default.so` binder workaround live in the hal-userspace topic. (UBports docs)
@@ -751,3 +760,110 @@ Starting the unit by hand fixes writes immediately (`setprop debug.test 1` then
 
 Worth checking on any Halium port: the unit being *enabled* is not evidence it
 ran. `systemctl is-active` plus an empty `journalctl -u <unit> -b` is the tell.
+
+## Techniques from the MP01 bring-up (16-17 Sep 2026)
+
+### A clean-shutdown reboot loop is a userspace policy, not a crash
+
+A device that goes down every ~3.5-4 min with a *clean* systemd shutdown in
+`journalctl -b -1` ("Reached target System Power Off") is being shut down on
+purpose. Candidates seen on the MP01, in order: `sleepd` (masked during
+bring-up), and batteryd's critical-percent check fed by a fuel gauge that
+reports `capacity=-1` (`CHG_LOGIC: Battery at -1%, at or below the critical
+level of 2%`). `journalctl --list-boots` shows the rhythm at a glance.
+
+### Charger-mode boots and DRM master
+
+A MediaTek device that is never truly off (holding Power just resets it) boots
+with `androidboot.bootreason=usb` whenever a cable is attached, and Android's
+`init.halium.rc` starts `/system/bin/charger`, which takes DRM master and never
+gives it back. `lsof | grep card0` shows who holds it. `start-android-hals.sh`
+stops it via `DISPLAY_CONFLICT_MATCH` - but there are **two copies** of that
+script (`meta-android` and `meta-luneos`), and the `meta-luneos` one is what
+ships. Diff the deployed file against both before assuming a fix is in.
+
+### systemd ignores `export ` lines in `EnvironmentFile=`
+
+`Ignoring invalid environment assignment 'export QT_QPA_FORCE_HWC2=1'` is easy to
+scroll past. The fix looked present in the file and never reached the process.
+Always confirm with `tr '\0' '\n' < /proc/<pid>/environ`.
+
+### Client or compositor? Measure both sides of a wrong-sized window
+
+For "the app is drawn too small / cropped" there are two independent views:
+
+- **Client (web apps):** WebAppMgr runs Chromium with
+  `--remote-debugging-port=9998`. `adb forward tcp:9998 tcp:9998`, list pages at
+  `http://127.0.0.1:9998/json`, and evaluate `screen`, `innerWidth/Height`,
+  `outerWidth/Height`, `devicePixelRatio`, `visualViewport.scale` and
+  `document.hidden` over the page's websocket (`Runtime.evaluate`). Hidden pages
+  are not what is on screen - measure the one with `hidden:false`.
+- **Compositor:** a temporary `qWarning` in `WebOSSurfaceItem`, connected to
+  `QWaylandSurface::bufferSizeChanged/destinationSizeChanged/sourceGeometryChanged/
+  bufferScaleChanged` and the item's width/height, prints what the client
+  actually committed against the item it is drawn into. Build it from a git
+  worktree at the deployed `SRCREV` through a temporary `externalsrc` entry, and
+  push only `libWebOSCoreCompositor.so` from `packages-split/` (the stripped one).
+  Remove the `externalsrc` before building an image.
+
+On the MP01 portrait the compositor side was all consistent (600x657 buffer,
+destination, source and item), so the crop is inside Chromium, which reports
+`screen` as the *unrotated* 800x600 `landscape-primary`. Screenshots:
+`luna-send -n 1 luna://com.webos.surfacemanager/captureCompositorOutput
+'{"output":"/tmp/x.png","format":"PNG"}'` or the shell's own
+`/media/internal/screencaptures/`; both are in panel orientation, so rotate
+before measuring.
+
+### Resolving a deferred ASoC card
+
+`cat /sys/kernel/debug/devices_deferred` names the card;
+`/sys/kernel/debug/asoc/components` lists what registered. Pull
+`/proc/device-tree` with `adb pull`, read the machine node's phandle properties
+with `od -An -tx1`, and find the node whose `phandle` matches. That names the
+missing component; its compatible string names the module. busybox `od` and
+`head -c` are too limited for this on the device - do it on the host.
+
+### Is this subsystem's module even loaded? Compare with the vendor's list
+
+```sh
+M=/android/vendor_dlkm/lib/modules; L=$(lsmod | cut -d" " -f1 | tr - _)
+while read m; do b=$(basename $m .ko | tr - _); echo "$L" | grep -qx "$b" || echo "$m"; done < $M/modules.load
+```
+
+A whole subsystem missing from that output (camera, audio) points at module
+loading, not at the HAL. See hal-userspace.md on letting the vendor's init load
+them.
+
+### Two ways to write a file on the device
+
+Files placed with `adb push` from a local copy behaved every time. Several
+bootloops in this bring-up followed writes done as `adb shell "cat > file
+<<EOF ... EOF"`; the correlation is strong but not proven (the device also had
+independent reset causes). Prefer `adb push`, keep backups outside directories
+that are scanned (a `.orig` plugin next to the real one gets loaded too).
+
+### Test a service environment variable without writing a file
+
+`systemctl set-environment VAR=1; systemctl restart <unit>; systemctl
+unset-environment VAR` applies it to one start and leaves nothing behind. That is
+how `HYBRIS_PREFER_VNDK` was proven on the MP01 before being made permanent.
+
+### Waydroid stops the host's nfcd
+
+Upstream Waydroid's `container_manager.py` runs `systemctl stop nfcd` when the
+container starts and only starts it again when the container stops; a failed
+container start therefore leaves NFC dead until reboot. LuneOS keeps NFC on the
+host (meta-luneos waydroid patch 0010 removes both calls). A fresh userdata has
+no `/var/lib/waydroid/waydroid.cfg`, so the session units skip themselves until
+`waydroid init` has downloaded its ~1 GB of images - "does not start" right
+after a reflash is usually just that.
+
+When it genuinely does not start, `/var/lib/waydroid/waydroid.log` has the
+`lxc-start` output. On the MP01 it was `lxc_spawn: Invalid argument - Failed to
+clone a new set of namespaces`: the kernel has no `CONFIG_IPC_NS` /
+`CONFIG_USER_NS` (MediaTek GKI KMI-poison options), and LXC clones every
+namespace type unless told to keep the host's. The Android container already
+had `lxc.namespace.keep = ipc user`; Waydroid's generated config did not.
+`waydroid-luneos-prepare` now adds it for whichever of the two is missing from
+`/proc/self/ns`, after `waydroid upgrade -o` has regenerated the config (a hand
+edit to the config is overwritten on the next session start).

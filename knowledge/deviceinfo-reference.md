@@ -145,6 +145,43 @@ the kernel per deviceinfo, builds, packs the boot image):
 — a GitLab CI template for ports, worth cribbing when LuneOS sets up per-device
 boot-image CI.
 
+## LuneOS runtime keys (read by `luneos-device-config` at boot)
+
+These are LuneOS's own additions. They live in the adaptation's `deviceinfo`
+(`/usr/share/luneos/adaptations/<codename>/deviceinfo`, shipped by the device
+layer's `luneos-device-config` bbappend) and are read by the generators in
+`meta-luneos/recipes-core/luneos-device-config`. Every one is **opt-in**: unset
+means "derive it" or "leave the shipped value", which is what keeps one shared
+`halium-arm64` rootfs correct on every device. Generators can only *shadow*
+files that already exist in the rootfs, so a new target file has to be shipped
+empty by `luneos-device-config` first.
+
+| Key | Effect |
+|---|---|
+| `deviceinfo_touchscreen_device` / `deviceinfo_touchscreen_by_name` | pin the touch input node (normally derived from `ID_INPUT_TOUCHSCREEN`) |
+| `deviceinfo_key_devices` / `deviceinfo_key_devices_by_name` | pin the key input nodes, `;`-separated; needed when a keyboard also claims a volume key (Q25, MP01) |
+| `deviceinfo_display_dpi` / `deviceinfo_display_density` | display density for grid unit derivation |
+| `deviceinfo_grid_unit` / `deviceinfo_grid_unit_mm` | explicit grid unit, or its physical size |
+| `deviceinfo_device_pixel_ratio` | WebAppMgr / Chromium device scale factor |
+| `deviceinfo_target_css_width` | alternative to the ratio: the CSS width apps should get |
+| `deviceinfo_compositor_geometry` | e.g. `800x600+0+0r270s1` for a panel mounted rotated; also drives evdevtouch rotation |
+| `deviceinfo_force_hwc2` | `1` → `QT_QPA_FORCE_HWC2=1`, stops the compositor opening the hwcomposer HAL a second time (MediaTek: the second `HWCMediator` fights for DRM master) |
+| `deviceinfo_battery_sysfs_path`, `deviceinfo_battery_extra_sysfs_paths` | nyx battery supplies |
+| `deviceinfo_charger_usb_sysfs_path`, `deviceinfo_charger_ac_sysfs_path` | nyx charger supplies |
+| `deviceinfo_battery_critical_percent` | batteryd's percentage shutdown; `0` disables it (MP01: gauge reports -1) |
+| `deviceinfo_als_calibration` | light-sensor scale for the cover glass |
+| `deviceinfo_binder_slots`, `deviceinfo_binder_radio_interface`, `deviceinfo_binder_signal_strength_range` | ofono-binder-plugin topology and signal curve |
+| `deviceinfo_video_call` | `true`/`false` overrides the derived camera capability |
+| `deviceinfo_hybris_prefer_vndk` | `1` → `HYBRIS_PREFER_VNDK=1` for pulseaudio (via `/etc/default/pulseaudio.conf`), so the in-process audio HAL resolves the vendor's VNDK libraries. Per device only: it breaks sargo (VNDK 32) |
+| `deviceinfo_audio_sample_rate` | adds `rate=<n>` to `module-droid-card` in `webos-system.pa` |
+| `deviceinfo_bluebinder_ext_features_page_2_mask` | `BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`: bits bluebinder clears from Read Local Extended Features page 2 (byte 0 = top byte) |
+| `deviceinfo_bluebinder_local_commands_set` | `BLUEBINDER_LOCAL_COMMANDS_SET`, `<octet>:<hex>,...` added to Read Local Supported Commands |
+
+Devices built as their own `MACHINE` with their own rootfs (tissot, mido,
+mindphone) can use a machine package instead; devices on the shared
+`halium-arm64` rootfs (MP01) must use these keys, because a machine package never
+reaches that rootfs.
+
 ## Cross-references
 
 - Boot-image assembly per layout class, initramfs patches, AVB: see the boot-images notes.

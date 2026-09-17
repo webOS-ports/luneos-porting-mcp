@@ -222,6 +222,76 @@ whole MediaTek family. Three condition-gated systemd units + two helpers, gated 
 Container node access matters generally: `wmt_loader` could not open `/dev/wmtdetect`
 until the MTK connectivity nodes were exposed to the container.
 
+**GKI-era MediaTek (MT6789, MP01, Sep 2026) — what changed:**
+
+- **The modules live in `vendor_dlkm`, not `vendor`.** All three units' conditions
+  only checked `/android/vendor/lib/modules`, so on the MP01 every unit was skipped
+  with "no trigger condition checks were met". They now also check
+  `/android/vendor_dlkm/lib/modules` (`meta-smartphone` `8fd74686`).
+- **Load order matters: WiFi and BT modules loaded together in the wrong order
+  corrupt the DMASHDL queues the two share** (`RST_FW_DL_FAIL` every ~6 s, forever).
+  Follow the vendor's two-stage `init.*.rc` order (`wmt_drv` + `connfem` on boot,
+  the rest on `vendor.connsys.driver.ready=yes`), never a generic dependency loader.
+- **WiFi power-on races `wmt_launcher`.** `wlan_drv` powers the chip as soon as
+  it loads; if `wmt_launcher` has not yet set up the host interface, power-on fails
+  with `wmt_core_stp_init: no hif info!` (`-8`) and asserts a whole-chip reset.
+  When the reset recovers, BT/WiFi/GPS all come up afterwards and WiFi works;
+  when it does not, no `wlan0`. Proper fix (open): power WiFi only after
+  `wmt_launcher`'s `WMT_open`.
+- **BT HAL name is per vendor.** Do not hardcode `bluetooth-1-0`; the MP01 has
+  `bluetooth-1-1`. `mtk-bt-bringup.sh` reads it from the vendor rc
+  (`service <name> .../android.hardware.bluetooth@*`).
+- **Restart order for BT:** stop BlueZ and bluebinder → restart the HAL → start
+  bluebinder → start BlueZ. Restarting the HAL under a connected bluebinder makes
+  it loop on "Remote has died", systemd kills it, and the leftover vhci is an
+  `hci0` that will not initialise until the whole stack is restarted in order.
+- **The MT6789 over-reports Synchronization Train support.** It sets page 2
+  byte 0 bit 2 but answers Read Synchronization Train Parameters with
+  `Unknown HCI Command`; the kernel aborts hci init, `hci0` stays DOWN
+  (`Can't init device hci0: Invalid request code (56)`), BlueZ has no adapter.
+  Fix: `deviceinfo_bluebinder_ext_features_page_2_mask="0x0400000000000000"`.
+  The MT6739 (mindphone) has the opposite problem — under-reported LE commands,
+  fixed with `BLUEBINDER_LOCAL_COMMANDS_SET`. See debugging.md for the `btmon`
+  method that finds these.
+- **`BLUEBINDER_LOCAL_FEATURES_MASK 0x0` in bluebinder's log is its own unset
+  setting echoed back**, not a reply from the controller. Easy to misread as
+  "controller dead".
+
+## Vendor kernel modules: let the vendor's init load them
+
+On GKI devices the vendor ships its own loader. MediaTek: `init.mtkgki.rc` starts
+`insmod_sh` at `early-init`, and `init.insmod.<hw>.cfg` says `modprobe|*`, i.e.
+`modprobe -a -d /vendor/lib/modules $(cat /vendor/lib/modules/modules.load)` —
+the full, ordered vendor list, exactly as on stock Android. Halium/UBports
+(`mount-android-partitions` + `mount --rbind /android` into the container rootfs)
+and Droidian (`vendor_dlkm` at the host's `/vendor_dlkm` + an
+`lxc.mount.entry = /vendor_dlkm vendor_dlkm bind`) both just make that path work
+and keep **no module list of their own**. Their initramfs loads only the
+first-stage list from `vendor_boot` (`/lib/modules/modules.load`, with
+`/override/modules.load` as a per-device override).
+
+The trap on LuneOS: `/vendor/lib/modules` is a symlink to
+`/vendor_dlkm/lib/modules`. If the host-side `/vendor_dlkm` is an *empty*
+directory (the partition was only mounted under `/android/vendor_dlkm`), the lxc
+bind puts that empty directory over the real mount inside the container, and
+`insmod_sh` silently loads nothing while still setting
+`vendor.all.modules.ready=1`. A hand-written allowlist in `mount-android.sh` then
+looked necessary, and every subsystem missing from it was dead: on the MP01 that
+was audio (`mtk-btcvsd`), and the entire camera stack (`imgsensor_isp6s`,
+`camera_isp`, `camera_mem`, the lens and flash drivers, `mtk-vcu`/`mtk_jpeg`/
+vcodec).
+
+Fixed in `mount-android.sh`: try `dynpart-<p>_a`/`_b` as well (the device-mapper
+name comes from the super metadata, not the booted slot — the MP01 boots b and
+gets `_a`), bind `/android/vendor_dlkm` and `/android/odm` onto the host paths if
+needed, and default `VENDOR_DLKM_MODULES=none`. With the vendor loader working,
+332 modules load and audio, camera, WiFi and cellular all came up in one boot.
+Check inside the container: `ls /vendor/lib/modules/modules.load`.
+
+Known hazards of the full list, still worth watching on a new device: the
+connsys family (above) and `ccci_md_all`, which once wedged PID 1 on the MP01
+(it did not with the vendor's own order).
+
 **Modem (mindphone — a generic multi-fstab MTK bug):** `mount-android.sh` picked
 `fstab.enableswap` because it glob-sorts before `fstab.mt6739`, so the modem NV
 partitions (`nvcfg`/`nvdata`/`protect1`/`protect2` — MTK calibration + IMEI) never
@@ -262,6 +332,34 @@ Two compat shims for awkward vendor audio HALs:
   `android_vendor_halium_hardware` (halium-10.0 branch), built with
   `make audio.hidl_compat.default` and mounted via systemd units — relevant to
   32-bit ports like mindphone. (SFOS hadk-hot)
+
+**Old vendor, new GSI: the in-process HAL needs the vendor's VNDK.** Halium
+disables the vendor's audio HAL *service* (`init.disabled.rc` points
+`vendor.audio-hal` at a non-existent `..._DISABLED` binary) because
+`module-droid` loads the HAL into pulseaudio itself. With an Android 16 GSI
+over an older vendor that load fails on symbols `/system` no longer exports —
+MP01 (VNDK 31): `cannot locate symbol "android::base::Basename(std::string
+const&)" referenced by /vendor/lib64/libnvram.so`; tissot/mido (VNDK 28):
+`set_sched_policy`. libhybris patch 0006 adds `HYBRIS_PREFER_VNDK=1`, which
+resolves from the VNDK APEX named by `/vendor/etc/selinux/plat_sepolicy_vers.txt`.
+It must stay per device: on sargo (VNDK 32) it makes hybris take `libbinder`
+from the APEX, which lacks `get_trace_enabled_tags()` that the GSI's
+`libbinder_ndk` needs. VNDK 31's `libbinder` lacks it too, yet pulseaudio ran
+fine on the MP01 — so test, do not predict. Set it with a machine drop-in
+(own-rootfs machines) or `deviceinfo_hybris_prefer_vndk` (shared rootfs).
+
+**MediaTek MT6789 audio:** the sound card only registers once `mtk-btcvsd`
+(component `mtk-btcvsd-snd`) is loaded — without it `mt6789-mt6366` defers
+forever (`snd_soc_register_card fail -517`). Find the missing component with
+`/sys/kernel/debug/devices_deferred` and `/sys/kernel/debug/asoc/components`,
+resolving the machine node's phandles against a pulled `/proc/device-tree`. The
+DT's `rt5512` speaker amp is a second-source part not populated on the MP01
+(`chip id check fail, ret = -6`); the fitted amp is `oca72xxx_pa`. The DL
+paths run at 48 kHz (`mtk_afe_fe_hw_params() ... rate 48000`); at pulseaudio's
+default 44.1 kHz the HAL resamples and playback sounds slightly off →
+`deviceinfo_audio_sample_rate="48000"`. `libsndcardparser.so not found` from
+the vendor `libtinycompress.so` is harmless noise. Pulseaudio's unit restarts
+five times within a second on a crash and then gives up, taking `audiod` with it.
 
 SFOS splits its pulseaudio plugin by Android base — `pulseaudio-modules-droid-jb2q` for
 ≤10 vs `pulseaudio-modules-droid` for ≥11 — worth knowing when borrowing their configs.
@@ -353,3 +451,11 @@ Measured over Chromium's remote debugging port on sargo (1080x2220, 441 PPI):
 | Screen dark but system running | nothing drives the backlight (`/sys/class/leds/lcd-backlight` at 0) |
 | Hardware keys ignored by Qt | input node lacks `ID_INPUT_KEYBOARD` udev tag |
 | Vendor HAL hangs block boot queue | lshal without a per-call watchdog |
+| Audio, camera or other subsystems dead; their modules not loaded (GKI) | container's `/vendor_dlkm` is an empty bind, so the vendor's `insmod_sh` loaded nothing |
+| Compositor spins on "failed to get drm master" | Android `charger` holds DRM master (device booted in charger mode), or the compositor opened the HWC a second time (`deviceinfo_force_hwc2`) |
+| `QT_QPA_FORCE_HWC2` set but no effect | an `export ` prefix in a systemd `EnvironmentFile=` line — systemd ignores the line |
+| Device powers off within a minute while charging | batteryd's critical-percent check on a gauge that reports `capacity=-1` |
+| batteryd reports `Charging:false` on the cable | charger `online` is `2` ("online programmable"); nyx only accepted `1` (fixed: any `> 0`) |
+| pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | vendor HAL needs its VNDK: `HYBRIS_PREFER_VNDK` per device |
+| `hci0` DOWN, "Invalid request code (56)" | controller rejects a command it advertised (HCI status 0x01); find it with `btmon`, mask it in bluebinder |
+| `nfcd` stopped a few minutes after boot | Waydroid's container start runs `systemctl stop nfcd` (meta-luneos waydroid patch 0010 removes it) |

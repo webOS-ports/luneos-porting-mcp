@@ -21,6 +21,9 @@ The knowledge was distilled from real ports and bring-ups:
 - **q25** (Zinwa Q25, MT6789/Helio G99) — first MediaTek Tier A GKI target,
   square-screen QWERTY; Yocto side and stock-firmware analysis complete,
   pre-hardware
+- **mp01** (Minimal Phone MP01, MT6789) — E Ink QWERTY phone on the shared
+  `halium-arm64` rootfs, with no published kernel source; vendor-driven module
+  loading, per-device `deviceinfo` workarounds for audio and Bluetooth
 
 plus cross-checked material from the UBports, Droidian and Sailfish OS (HADK)
 porting guides, integrated where their methods transfer to the LuneOS stack

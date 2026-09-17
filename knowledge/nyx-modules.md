@@ -183,6 +183,17 @@ HAL and blocked the whole boot queue), and the panel-size fbdev fallback reading
 `/sys/class/graphics/fb0/modes` — **not** `fb0/mode`, which empties once the compositor
 owns the panel.
 
+## Charger `online` is not a boolean
+
+The power_supply ABI defines `online` as 0 offline, 1 online (fixed voltage),
+2 online (programmable voltage). `core_charger_read_status()` used to accept only
+`== 1`, so MediaTek's mt6375 charger (`online=2`, `status=Charging`) read as
+unplugged: `chargerStatusQuery` said `Charging:false` with the cable in, and
+batteryd's critical-level check (which only runs while nothing charges) could
+power the phone off on the charger. Fixed in `nyx-modules` `919ab0c`
+(`herrie/fix-charger`): any positive value is online; a missing node reads -1.
+Check `cat <supply>/online` whenever charging detection is wrong.
+
 ## Checklist: adding nyx support for a new machine
 
 1. Create `meta-luneos/recipes-webos-ose/nyx-modules/nyx-modules/<machine>.cmake` — start

@@ -3,10 +3,12 @@
 4.3" **E Ink** phone with a physical QWERTY, from The Minimal Company. Would be
 the first LuneOS port to an electrophoretic display.
 
-**Status: not booting yet.** Kernel builds and is KMI-verified (0 of 345 stock
-modules would fail), boot image reproduces the stock header field for field, the
-install kit is complete — but no successful boot. Treat everything here about
-runtime behaviour as unverified.
+**Status (17 Sep 2026): boots to the LuneOS UI on the shared `halium-arm64`
+rootfs.** Working on hardware: display (rotated E Ink panel), touch, keyboard,
+WiFi, cellular, camera, audio, Bluetooth (classic and LE scanning), NFC,
+fingerprint, sensors, charging detection. Open: battery percentage (fuel gauge
+reports -1), a WiFi power-on race, web apps cropped in portrait. See
+"Bring-up results" below; the sections before it describe the pre-boot work.
 
 Layer `meta-smartphone/meta-minimal`, `MACHINE=mp01`. Port directory
 `~/webos/LuneOS/MP01` (notes, firmware, KMI gate, `dump-expdb.sh`).
@@ -159,3 +161,61 @@ merely crisp on an LCD vanish on E Ink.
 
 Booting this is a bring-up task; making it pleasant is a design task. Scope them
 separately.
+
+## Bring-up results (16-17 Sep 2026)
+
+Staging kit: `/media/herrie/LuneOS/mp01-staging/` (`README.md` there has the
+WiFi/BT write-up). LuneOS runs on **slot b**; slot a keeps stock Android.
+
+### Flashing and recovery
+
+- `fastboot getvar current-slot` right after `--set-active` can report the old
+  slot; flash `boot_b`/`vbmeta_b` explicitly instead of trusting it.
+- A slot that failed to boot is marked `slot-unbootable` and lk silently falls
+  back to the other one; `--set-active` does not clear that.
+- `vendor_dlkm` is not a fastboot partition (`partition does not exist`); it is
+  inside `super`. For LuneOS only `boot_b`, `vbmeta_b` and `userdata` need
+  flashing - leave `super` alone unless restoring stock.
+- `fastboot -w` fails on the host (`make_f2fs failed`); flash
+  `userdata-luneos.img` (or stock `userdata.img`) instead.
+- Full recovery that worked: flash stock boot/vendor_boot/dtbo/vbmeta to the
+  slot, boot Android, charge to 100%, then reflash LuneOS.
+- Update the staging kit from the build first: `boot-mp01-luneos*.img` from
+  `tmp/deploy/images/mp01/`, `rootfs.img` from
+  `tmp/deploy/images/halium-arm64/`, then `make-userdata.sh`.
+
+### Per-subsystem findings
+
+| Area | Finding | Fix |
+|---|---|---|
+| Reboot every ~3.5 min | clean shutdowns from `sleepd` | masked during bring-up |
+| Power-off within a minute on the charger | fuel gauge `capacity=-1` ("cali car tune 119, invalid" from MediaTek's closed `libfgauge_gm30.so`) trips batteryd's critical check | `deviceinfo_battery_critical_percent="0"` (stopgap) |
+| `Charging:false` on the cable | mt6375 reports `online=2` | nyx-modules `919ab0c` |
+| Compositor spins on DRM master | charger-mode boot (`bootreason=usb`, the phone is never truly off); `charger` holds master; `QT_QPA_FORCE_HWC2` lost to an `export` prefix | `/system/bin/charger` in `DISPLAY_CONFLICT_MATCH` (meta-luneos copy), generator writes plain `KEY=VALUE` |
+| No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm`, vendor loads modules |
+| pulseaudio crash | vendor `libnvram.so` needs VNDK 31 `libbase` | `deviceinfo_hybris_prefer_vndk="1"` |
+| Audio slightly off | HAL DL paths at 48 kHz | `deviceinfo_audio_sample_rate="48000"` |
+| No WiFi/BT modules | `mtk-connectivity` conditions only checked `vendor` | `8fd74686` |
+| BT dead | wrong HAL name, bad restart order, Synchronization Train over-reported | `mtk-bt-bringup.sh`, `deviceinfo_bluebinder_ext_features_page_2_mask="0x0400000000000000"` |
+| NFC stops | Waydroid's container start stops `nfcd` | waydroid patch 0010 |
+| Waydroid "container failed to start" | kernel has no IPC/user namespaces, Waydroid's LXC config asked for them | `waydroid-luneos-prepare` adds `lxc.namespace.keep` for missing namespaces |
+| Web apps sized wrong for the rotated panel | WAM used unrotated display size | WAM `herrie/panel-fix` (logical size + configd `compositorGeometry` subscription) |
+| Gestures on the wrong edge | OrientationHelper mapped from parent, missing the output rotation | luna-next-cardshell `15bf576` (`mapFromGlobal`) |
+
+Hardware notes: the NFC controller is an NXP PN8x (`nxpnfc_i2c`, `/dev/nxpnfc`,
+`ro.hardware.nfc_nci=pn8x`). The speaker amp actually fitted is `oca72xxx_pa`
+(`6-0058`); the DT's `rt5512@5c` is not populated. BT is MediaTek
+(manufacturer `0x0046`), address from nvram `BT_Addr`. `rt5133@18` (a regulator)
+stays deferred (`Failed to request HWEN gpio`) without anything visibly broken.
+
+### Still open
+
+- **Battery percentage.** The kernel gauge (`mtk_battery.c`) is fine; the
+  userspace algorithm rejects the nvram calibration. Compare with what stock
+  Android reads from the same nvram record.
+- **WiFi power-on race** with `wmt_launcher` (hal-userspace.md).
+- **Web apps cropped in portrait** (548x600 of a 600x657 card, landscape fine).
+  Compositor side verified consistent; Chromium reports `screen` as unrotated
+  800x600 landscape. Look at the webOS Wayland output handling in the web runtime
+  (`wayland_output.cc` `panel_transform`/`logical_transform`).
+- **E Ink refresh control** (`eink_cpld_registers`) - not started.
