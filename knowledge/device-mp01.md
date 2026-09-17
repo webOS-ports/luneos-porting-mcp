@@ -146,12 +146,50 @@ select with **Vol Down**.
 
 ## The display, which is the real work
 
-The panel is DSI so it will *paint* — from the SoC's side it is an ordinary
-MediaTek DRM display. What LuneOS does not do at all is manage **waveform and
-full-vs-partial refresh**; on stock that is Minimal's own system service driving
-a sysfs attr group `panel-z10-eink-i2c.ko` registers as `eink_cpld_registers`.
-The sysfs path is not knowable offline — `find /sys -name 'eink_cpld*'` on the
-first shell that comes up is the single command that unblocks this work item.
+The panel is DSI so it *paints* — from the SoC's side it is an ordinary MediaTek
+DRM display. Refresh mode is a separate, solved problem (17 Sep 2026):
+
+**Hardware.** `panel-z10-eink-i2c.ko` (the Pango CPLD's I2C side) exposes one
+write-only command register,
+`/sys/bus/i2c/drivers/eink_cpld/7-004b/eink_cpld_registers`, plus a read-only
+`refresh_mode` mirror (0..3). Values, all measured on the phone:
+
+| write | effect |
+|---|---|
+| 1 | waveform 0: full greyscale, slowest, cleanest (stock "Slow") |
+| 2 | waveform 1: greyscale, visibly clearer and less ghosting than 1 |
+| 3 | waveform 2: nearly two-level - crisp text, images lose their greys |
+| 4 | waveform 3: fastest, most ghosting (stock "Ultra") |
+| 5 | clear (full refresh); stock always follows it with 3, then restores the mode 100 ms later |
+| 6/7/8/10-15 | read-backs into dmesg (CPLD id, fw version 36, waveform version 16, VCOM ...) |
+| 9 | **reprograms the CPLD's flash** from the module's embedded bitstream - never write casually |
+
+Switching *into* 3 or 4 from a greyscale mode is silent; switching *back* to 1
+or 2 is a double clearing flash. That asymmetry decides every policy below.
+
+**Stock's design** (decompiled with jadx from `services.jar` and the MiniEink
+apk): `DisplayManager.setRefreshMode(int)` writes the integer to that file;
+`MinimalRefreshService` in system_server offers Slow (1), Hybrid (1, with 4
+while a `WindowMonitor` sees scrolling/animation/video) and Ultra (4), per-app
+modes, and `forceFullRefresh` = 5, 3, restore. The key between volume up and
+down is Linux keycode 252 (`AREFRESH` in Generic.kl): short press = full
+refresh, 400 ms hold = quick settings; the Home key also triggers a full
+refresh 500 ms after each press.
+
+**LuneOS.** `org.webosports.service.eink` (einkd, C, modelled on torchd, in
+the MP01 image via `MACHINE_EXTRA_RRECOMMENDS`) owns the register: `getStatus`
+(subscribable), `setMode`, `setActive`, `refresh`, `watchKey`. Modes: Slow,
+Balanced (default), Auto, Text, Ultra; the choice persists as systemservice
+preference `einkRefreshMode`. It reads keycode 252 from evdev (`mtk-kpd`,
+event1) itself: short press = full refresh, long press = the shell's popup.
+luna-next-cardshell's `Connectors/EinkRefresh.qml` derives "moving" from the
+compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 2 s without
+a frame, for Auto (2 at rest, 4 while moving; a full refresh counts as
+settled); `Notifications/EinkRefreshMenu.qml` is the long-press popup; and
+`AppTweaks.reduceMotion` (forced on when the service reports a panel) makes
+the launcher tab switch, card open/close and launch-bar transitions instant -
+each animation frame was a flashing greyscale update. Settings > Display has
+the same controls.
 
 Beyond that: 16-level greyscale (dark themes are unusable), luna-surfacemanager
 animates everything, and `deviceinfo_display_dpi=233` /
@@ -218,4 +256,7 @@ stays deferred (`Failed to request HWEN gpio`) without anything visibly broken.
   Compositor side verified consistent; Chromium reports `screen` as unrotated
   800x600 landscape. Look at the webOS Wayland output handling in the web runtime
   (`wayland_output.cc` `panel_transform`/`logical_transform`).
-- **E Ink refresh control** (`eink_cpld_registers`) - not started.
+- **E Ink polish.** Refresh control is done (see the display section); what is
+  left is finding the remaining shell animations worth making instant under
+  `AppTweaks.reduceMotion`, a Home-press full refresh like stock's, and per-app
+  modes if anyone wants them.
