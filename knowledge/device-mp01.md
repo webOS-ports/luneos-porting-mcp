@@ -164,8 +164,8 @@ write-only command register,
 | 6/7/8/10-15 | read-backs into dmesg (CPLD id, fw version 36, waveform version 16, VCOM ...) |
 | 9 | **reprograms the CPLD's flash** from the module's embedded bitstream - never write casually |
 
-Switching *into* 3 or 4 from a greyscale mode is silent; switching *back* to 1
-or 2 is a double clearing flash. That asymmetry decides every policy below.
+Every switch among 1, 3 and 4 is silent; **entering 2** - from 1, 3 or 4 alike -
+is a double clearing flash. That one fact decides every policy below.
 
 **Stock's design** (decompiled with jadx from `services.jar` and the MiniEink
 apk): `DisplayManager.setRefreshMode(int)` writes the integer to that file;
@@ -183,9 +183,9 @@ Balanced (default), Auto, Text, Ultra; the choice persists as systemservice
 preference `einkRefreshMode`. It reads keycode 252 from evdev (`mtk-kpd`,
 event1) itself: short press = full refresh, long press = the shell's popup.
 luna-next-cardshell's `Connectors/EinkRefresh.qml` derives "moving" from the
-compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 2 s without
-a frame, for Auto (2 at rest, 4 while moving; a full refresh counts as
-settled); `Notifications/EinkRefreshMenu.qml` is the long-press popup; and
+compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 0.5 s without
+a frame, for Auto (1 at rest, 4 while moving - the flash-free pair; a full
+refresh counts as settled); `Notifications/EinkRefreshMenu.qml` is the long-press popup; and
 `AppTweaks.reduceMotion` (forced on when the service reports a panel) makes
 the launcher tab switch, card open/close and launch-bar transitions instant -
 each animation frame was a flashing greyscale update. Settings > Display has
