@@ -186,7 +186,7 @@ luna-next-cardshell's `Connectors/EinkRefresh.qml` derives "moving" from the
 compositor's `frameSwapped` (6 frames in 250 ms) and "still" from 1 s without
 a frame, for Auto (1 at rest, 4 while moving - the flash-free pair; a full
 refresh counts as settled); `Notifications/EinkRefreshMenu.qml` is the long-press popup; and
-`AppTweaks.reduceMotion` (forced on when the service reports a panel) makes
+`AppTweaks.disableAnimations` (forced on when the service reports a panel) makes
 the launcher tab switch, card open/close and launch-bar transitions instant -
 each animation frame was a flashing greyscale update. Settings > Display has
 the same controls.
@@ -258,5 +258,5 @@ stays deferred (`Failed to request HWEN gpio`) without anything visibly broken.
   (`wayland_output.cc` `panel_transform`/`logical_transform`).
 - **E Ink polish.** Refresh control is done (see the display section); what is
   left is finding the remaining shell animations worth making instant under
-  `AppTweaks.reduceMotion`, a Home-press full refresh like stock's, and per-app
+  `AppTweaks.disableAnimations`, a Home-press full refresh like stock's, and per-app
   modes if anyone wants them.
