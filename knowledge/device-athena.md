@@ -127,6 +127,27 @@ Better than the MTK ports to start with: `ANDROID_BINDERFS`, `ASHMEM`, `ION`, `V
 
 SELinux: the UBports SDM660 port boots with `selinux=0` on the cmdline and `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0`, i.e. off by default rather than merely permissive. Adopted here.
 
+## AVB: nothing to do, and nothing to extract
+
+Worth recording because the instinct is to go hunting for OEM firmware. athena
+launched on Android 8.1, so AVB 2.0 *exists* as an era — but this device tree does
+not use it and the bootloader does not enforce it once unlocked. Four independent
+checks, all cheap:
+
+| Check | Result |
+|---|---|
+| `unzip -l <rom>.zip \| grep -i vbmeta` | nothing — the /e/OS package ships none |
+| updater-script partitions written | `boot`, `system`, `vendor` only |
+| `AVBf` footer / `AVB0` blob in its `boot.img` | neither — plain unsigned image |
+| `BoardConfigCommon.mk` AVB/VERITY/VBMETA vars | none, on `lineage-22.2` or `lineage-23.2` |
+
+Plus the empirical one: an unsigned LuneOS boot image was *accepted and executed*
+by aboot — the splash hang was a corrupted kernel, not a rejected image.
+
+Generalises: before assuming a device needs a verification-disabled vbmeta, check
+whether the community ROM that already boots on it ships or writes one. If it does
+not, and its boot image carries no AVB footer, there is nothing to disable.
+
 ## Traps
 
 - **The `merge_config.sh` comment trap.** A comment reading `# CONFIG_DUMMY=y  kept at the stock value` is parsed as a *directive* and silently unsets the symbol — `merge_config.sh` matches `^(# )?CONFIG_[A-Za-z0-9_][= ]`. Never start a comment line in a fragment with `# CONFIG_`. Cost an hour here.
