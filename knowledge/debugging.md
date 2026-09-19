@@ -867,3 +867,39 @@ had `lxc.namespace.keep = ipc user`; Waydroid's generated config did not.
 `waydroid-luneos-prepare` now adds it for whichever of the two is missing from
 `/proc/self/ns`, after `waydroid upgrade -o` has regenerated the config (a hand
 edit to the config is overwritten on the next session start).
+
+## Swap the kernel under a known-good ramdisk to split kernel from userspace
+
+When a port fails at something as basic as mounting, the first question is
+whether the kernel or the userspace is at fault, and almost every other
+experiment confounds the two. The cheap separator:
+
+**Take the stock (or LineageOS recovery) boot image for the device and replace
+only the kernel with yours.** Their ramdisk, their cmdline, their load
+addresses, their page size. One variable.
+
+On athena this settled a week of speculation in one log. Our 4.19 kernel under
+LineageOS's recovery ramdisk mounted the exact partition that failed for us:
+
+```
+[5.472028] EXT4-fs (mmcblk0p77): mounted filesystem with ordered data mode
+```
+
+and Android init reached `enforcing=1`. Kernel exonerated; the fault was the
+initrd environment. That immediately killed three live hypotheses (LSE atomics,
+a config diff against LineageOS, and "this kernel cannot mount block devices"
+as a framing).
+
+Caveats worth stating before you run it:
+
+- **Strip cmdline tokens that are fatal to your kernel version.** athena's stock
+  cmdline carries `swiotlb=1` — harmless on their 4.4, hangs our 4.19 before any
+  console exists. Copying it verbatim produces a black screen that tells you
+  nothing.
+- **A recovery that never comes up is inconclusive, not a result.** Say so in
+  advance so nobody over-reads it. If Android's init bails because your kernel
+  defaults SELinux off, adding `selinux=1 androidboot.selinux=permissive`
+  changes nothing the mount path can see.
+- **Check the logs you already have first.** On athena this experiment had
+  already been run and was sitting in the log archive the porter had sent;
+  an image was built to re-run it anyway.

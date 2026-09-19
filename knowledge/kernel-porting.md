@@ -766,3 +766,48 @@ Combined with the fact that **our modules load fine next to the vendor's**
 (same vermagic, KMI verified), this makes single-driver experiments a
 sub-minute loop with `adb push` + `rmmod`/`insmod`, instead of a
 build-flash-reboot cycle.
+
+## Two traps when copying config from another distro's port
+
+### A cmdline token can be half of a pair
+
+UBports' SDM660 `deviceinfo` carries `selinux=0`, and it is tempting to copy
+straight into a Halium port. The full line is:
+
+```
+selinux=0 … apparmor=1 security=apparmor
+CONFIG_DEFAULT_SECURITY="apparmor"    CONFIG_DEFAULT_SECURITY_APPARMOR=y
+```
+
+UBports is not disabling the LSM, it is **swapping** it, because Ubuntu Touch
+confines apps with AppArmor. A distro that does not use AppArmor and copies only
+`selinux=0` turns SELinux off and puts nothing in the slot — no benefit, and the
+Android container inside wants the `security.selinux` xattr handler live.
+
+For a Halium port the fleet convention is `androidboot.selinux=permissive` and
+nothing else. That is an **Android-init property, not a kernel parameter** — the
+kernel ignores it entirely, and the kernel's own SELinux stays enabled. Check
+what the rest of your ports do before adding a kernel-side token that only one
+device has.
+
+### A symbol that a backported stable tree has deleted
+
+`CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0` is standard advice for Android
+kernels and does nothing on CIP 4.19.325. That tree backported the 5.x
+SELinux/LSM rework — visible in the built `.config` as `CONFIG_LSM="…"`,
+`CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS`, `CONFIG_SECURITY_LOCKDOWN_LSM` on a
+4.19 kernel — and that rework **deleted the symbol** in favour of
+
+```c
+int selinux_enabled_boot __initdata = 1;      /* security/selinux/hooks.c */
+__setup("selinux=", selinux_enabled_setup);
+```
+
+`merge_config.sh` drops a symbol that is not in Kconfig **silently**, with no
+warning in `log.do_configure`. This is the same family as the comment trap but
+worse, because the line looks correct and greps clean.
+
+**Check the merged `.config`, not the fragment** — that rule already applies to
+mer-kernel-check and it applies here. A long-term stable tree (CIP, and Android
+LTS) can have newer infrastructure than its version number suggests; grep
+`security/selinux/Kconfig` in the actual source before trusting a Kconfig name.
