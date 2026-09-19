@@ -24,6 +24,11 @@ The knowledge was distilled from real ports and bring-ups:
 - **mp01** (Minimal Phone MP01, MT6789) — E Ink QWERTY phone on the shared
   `halium-arm64` rootfs, with no published kernel source; vendor-driven module
   loading, per-device `deviceinfo` workarounds for audio and Bluetooth
+- **athena** (BlackBerry KEY2, SDM660) — Tier B on a 4.19 CAF tree built with
+  Yocto's own GCC 15; source of the **boot-image window** rule (the kernel plus
+  its appended device trees must end below `ramdisk_offset`) and of the
+  Android-15-vendor shortcut, where an A15 vendor serves a Halium 16 GSI with no
+  VNDK snapshot at all
 
 plus cross-checked material from the UBports, Droidian and Sailfish OS (HADK)
 porting guides, integrated where their methods transfer to the LuneOS stack
@@ -67,7 +72,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 |---|---|
 | `architecture` | the GSI+GKI model: one rootfs, Treble, Tier A/B, adaptation tiers, on-device layout |
 | `kernel-porting` | GKI/ACK builds, KMI-poison list & CRC verification, Tier B legacy kernels |
-| `boot-images` | header v0–v4, per-layout repack recipes, initramfs init patches, AVB/vbmeta |
+| `boot-images` | header v0–v4, the kernel/ramdisk window check, per-layout repack recipes, initramfs init patches, AVB/vbmeta |
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), Halium 16 traps, VNDK snapshots |
 | `device-bringup-yocto` | meta-smartphone machines, gki_bootimg, recipes, bitbake gotchas |
 | `nyx-modules` | nyx-modules(-hybris) per-machine cmake, variables, pitfalls |
@@ -76,7 +81,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `installing` | flash kits, userdata images, fastboot flows, anti-rollback |
 | `tools` | kmi-crc-check, module-order, payload_extract, mer-kernel-check, … |
 | `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variable reference our Tier 1 format reuses |
-| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` | per-device reference |
+| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` / `device-athena` | per-device reference |
 
 ### Tools
 

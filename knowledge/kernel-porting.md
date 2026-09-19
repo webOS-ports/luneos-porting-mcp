@@ -334,6 +334,83 @@ The `unifdef.c` fix recurs on every old tree: sargo's 4.9 host tooling stopped
 compiling because `unifdef.c` declares `static bool constexpr;` and modern host
 GCC defaults to `-std=gnu23`. Pinning the host C standard (or renaming) is enough.
 
+### The appended-DTB glob trap (CAF arm64 trees)
+
+`CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES` exists so a product can append only
+the device trees it needs. In a correct tree `arch/arm64/boot/Makefile` honours it:
+
+```make
+DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES))
+ifneq ($(DTB_NAMES),)
+DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
+DTB_OBJS := $(addprefix $(obj)/dts/,$(DTB_LIST))      # <- the branch that matters
+else
+DTB_OBJS := $(shell find -L $(obj)/dts/ -name \*.dtb)
+endif
+```
+
+**Some vendor forks resolve `DTB_LIST` and then never use it**, leaving
+`Image.gz-dtb` depending on the bare `find` — so the trim knob is decorative and
+every board's dtb is appended. On an SDM660 tree that is 27 blobs / ~8 MB, of which
+one is wanted, and it is enough on its own to blow the kernel/ramdisk window
+(boot-images.md). Check for the `ifneq ($(DTB_NAMES),)` branch before trusting the
+config; UBports' `android_kernel_xiaomi_sdm660` has it, tim-ecoder's
+`sdm660-4p19` did not.
+
+Enabling the parent `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE` also rewrites
+`KBUILD_IMAGE` to `$(KBUILD_IMAGE)-dtb` and surfaces a Kconfig *choice*; pin
+`CONFIG_IMG_GZ_DTB=y` rather than relying on first-entry-wins. Name the dtb by its
+path under `$(obj)/dts/` — e.g. `"vendor/qcom/sdm660-internal-codec-mtp-athena"`.
+
+### Building a 4.19 CAF tree with a modern GCC and Make
+
+Two traps that are not about the kernel at all, hit on athena (see device-athena.md):
+
+- **GNU Make 4.4** (what OE ships as `make-native`) fails every `techpack/audio`
+  subdirectory with `scripts/Makefile.lib:408: *** prerequisites cannot be defined
+  in recipes`. Two causes: directives inside `ifeq` blocks indented with **TABs**
+  (Make 4.4 reads those as recipe lines), and a bare `export` after each
+  `include <soc>auto.conf` — Make 4.4 changed export semantics, and exporting
+  kbuild's multi-line command macros wholesale makes the sub-make re-parse them as
+  makefile text. Replace the bare `export` with the explicit
+  `export $(shell sed 's/=.*//' <the conf just included>)`.
+- **`CONFIG_CC_WERROR=y` + GCC 12+** turns long-standing vendor patterns into ~90
+  build failures. Keep `-Werror` and demote only the benign classes via
+  `$(call cc-option,-Wno-error=<x>)`: `format`, `format-extra-args`, `address`,
+  `unused-variable`, `maybe-uninitialized`, `unused-result`, `enum-int-mismatch`,
+  `attributes`, `parentheses`, `bool-operation`, `duplicate-decl-specifier`,
+  `misleading-indentation`, plus `missing-attributes` and `array-parameter` once
+  you build modules (qcacld-3.0). Vendor Makefiles carrying **clang-only**
+  `-Wno-error=` spellings (`vla-extension`, `typedef-redefinition`,
+  `non-literal-null-conversion`, `fortify-source`) must be wrapped in `cc-option`:
+  GCC rejects an unknown `-Wno-error=` outright rather than ignoring it.
+
+GCC's stricter analysis is worth the trouble — on athena it found seven genuine
+bugs in shipping code, including a `memset` clearing a quarter of its buffer and an
+overflowable `copy_from_user` bound check. Fix those at source; silence only the noise.
+
+### Framebuffer console: the Tier B debug channel nobody enables
+
+Most phones expose no usable UART without a jig, so an early hang shows only as a
+frozen bootloader splash, and netconsole / `printk.devkmsg=on` cannot help — they
+need the kernel running and the USB gadget up.
+
+If the vendor defconfig already has a framebuffer driver (`CONFIG_FB` plus e.g.
+`CONFIG_FB_MSM`/`FB_MSM_MDSS`), then `FRAMEBUFFER_CONSOLE` only depends on `FB`:
+
+```
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
+CONFIG_FONT_SUPPORT=y
+CONFIG_FONT_8x16=y
+```
+
+plus `CONFIG_VT` (already in the LuneOS fragment) and `console=tty0` on the
+cmdline. The kernel log then prints on the device's own screen. Note that several
+ports carry `console=tty0` with **no fbcon behind it**, where it resolves to the
+dummy console and shows nothing — copying their cmdline is not enough. Costs ~100 KB,
+which matters when fighting the boot-image window; worth it until the device boots.
+
 ### Stock vendor modules on a rebuilt Tier B kernel
 
 The MTK WMT combo driver (wifi/BT/GPS/FM core) is not in the GPL kernel drop —

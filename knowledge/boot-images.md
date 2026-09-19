@@ -32,6 +32,76 @@ bluejay runs Android 16 but launched on A12, so it has no `init_boot`.
 
 ---
 
+## The kernel/ramdisk window — check this before every flash
+
+A boot header gives the kernel a *budget*, not just an address. The bootloader
+loads the kernel at `base + kernel_offset` and then writes the ramdisk at
+`base + ramdisk_offset`; if the kernel image is longer than the gap, the ramdisk
+lands on top of it and the bootloader jumps into a corrupted kernel.
+
+```
+window = ramdisk_offset - kernel_offset
+```
+
+On the common Qualcomm v0 layout (`base 0x0`, `kernel 0x8000`,
+`ramdisk 0x01000000`) that window is **16,744,448 bytes** — and everything in the
+kernel image counts, appended device trees included.
+
+**Assert it before flashing anything:**
+
+```sh
+python3 - "$IMG" <<'EOF'
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+ks, ka, rs, ra, ss, sa, ta, ps, hv, ov = struct.unpack('<10I', d[8:48])
+end = ka + ks
+print(f"kernel {ks:,} B  ends 0x{end:08x}   ramdisk 0x{ra:08x}")
+print("OVERLAP" if end > ra else f"fits, {ra-end:,} B spare")
+EOF
+```
+
+**Symptom when it is wrong:** the device hangs on the *bootloader's* splash with
+no USB enumeration, after `fastboot flash boot` succeeded. The bootloader accepted
+the image and handed off, so this looks nothing like an AVB rejection or a missing
+device tree — and no amount of kernel-side logging (netconsole, `printk.devkmsg=on`)
+can report it, because the kernel never runs. athena lost a bring-up cycle to this;
+see device-athena.md.
+
+**Fix the kernel, not the address.** A published-and-working boot image for the
+device (a stock ROM, or another distro's port) proves its offsets on that
+bootloader. Moving `ramdisk_offset` up to buy room replaces a verified address with
+an unverified one — a bad trade while a boot failure is already being debugged.
+Shrink the image instead: trim the appended device trees first (usually the biggest
+and most pointless chunk — see kernel-porting.md), then `CONFIG_IKHEADERS`,
+`CONFIG_KALLSYMS_ALL`, vendor debug loggers. `CONFIG_DEBUG_INFO` is a red herring:
+it lives in `vmlinux`, not in `Image`.
+
+Cross-check the offsets against another project's port of the same SoC before
+inventing them. UBports and Droidian both publish them as `deviceinfo`
+(`deviceinfo_flash_offset_ramdisk` etc.); Droidian's `kernel-info.mk` calls the same
+value `KERNEL_BOOTIMAGE_INITRAMFS_OFFSET`.
+
+## Header v0 with an appended device tree (Qualcomm aboot)
+
+Pre-Android-10 Qualcomm devices carry the device tree **concatenated onto the
+compressed kernel** (`BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb`) rather than in a
+header section. There is no `dtb` field in a v0 header and often no `dtbo.img`.
+aboot scans the blobs after the gzip stream and selects one by matching
+`qcom,msm-id` (SoC id) and `qcom,board-id` (platform/subtype) against what the
+hardware reports — so the set must contain the board, and only needs to contain
+the board.
+
+To read them back out of an image, decompress the gzip member and scan the
+remainder for the FDT magic `d00dfeed`; `dtc -I dtb -O dts` then shows the
+`model` / `msm-id` / `board-id` of each. Comparing that list against a working
+image for the same device is the fastest way to confirm a board match.
+
+`abootimg` is what builds v0 here, and it **defaults to 2048-byte pages and takes
+no notice of `ANDROID_BOOTIMG_PAGESIZE`** — a 4096-byte-page v0 device needs
+`ANDROID_BOOTIMG_EXTRA_ABOOTIMG_ARGS = "-c pagesize=4096"` or the sections land at
+the wrong offsets. (Verified: `abootimg -c pagesize=4096` does produce a correct v0
+header.) Only `android_bootimg_v2()` reads the pagesize variable.
+
 ## Class 1 — Legacy v2 (mindphone, MT6739, Android 11)
 
 No vendor_boot, no init_boot, no super (non-dynamic partitions), A/B slots.
