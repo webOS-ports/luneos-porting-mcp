@@ -1,6 +1,6 @@
 # Device: athena (BlackBerry KEY2, SDM660) — Tier B, and the boot-image window
 
-The first SDM660 / BlackBerry target, and the port that produced the **boot-image window rule** in boot-images.md. A 4.19 kernel forked to `shr-distribution/linux` branch `key2/4.19` builds clean under Yocto with GCC 15; the Android-15 vendor from a third-party ROM serves a Halium 16 GSI with **zero VNDK work**. First hardware attempt hung at the splash — cause identified as the kernel image overrunning the ramdisk load address. Pre-boot as of Sep 2026.
+The first SDM660 / BlackBerry target, and the port that produced the **boot-image window rule** in boot-images.md. A 4.19 kernel forked to `shr-distribution/linux` branch `key2/4.19` builds clean under Yocto with GCC 15; the Android-15 vendor from a third-party ROM serves a Halium 16 GSI with **zero VNDK work**. The kernel reaches userspace on hardware (dmesg, unpacked initramfs, debug shell). An early splash hang was wrongly attributed to the kernel overrunning the ramdisk load address — that overrun was real and is fixed, but was never shown to be a cause. See the splash caveat below.
 
 ## Platform facts
 
@@ -71,7 +71,9 @@ deviceinfo_kernel_cmdline="… selinux=0 console=tty0 …"
 
 `second` is `0x00f00000` there and `0x00000000` in the real athena image — ours matches the device, theirs the BoardConfig default. `second_size` is 0 either way, so it does not matter.
 
-**The failure:** first flash hung at the BlackBerry splash with `fastboot flash boot`. aboot *accepted* the image and jumped — so not AVB, not a missing dtb. The kernel image was **24.9 MB** against a window of `0x01000000 - 0x8000 = 16,744,448 B`. aboot loads the kernel at `base+0x8000`, writes the ramdisk at `base+0x01000000` through the middle of it, and jumps into the wreckage. The stock 4.4 image is 13.76 MB and clears the window by 2.99 MB.
+**A real defect, not a proven cause.** The first flash hung at the BlackBerry splash, and the kernel image measured **24.9 MB** against a window of `0x01000000 - 0x8000 = 16,744,448 B` — a genuine violation, fixed. But the causal story (aboot writes the ramdisk through the middle of the kernel and jumps into wreckage) was never verified: **the splash on this device never clears**, so it looks the same for a dead kernel and a working boot, and the 24.9 MB image was never re-tested once that was known. The kernel that produced the 1406-line dmesg is the 13.1 MB one. For reference the stock 4.4 image is 13.76 MB and clears the window by 2.99 MB.
+
+The pre-fix image is still reconstructible from the older `_deploy` sstate entry if anyone wants to settle it; nothing currently depends on the answer.
 
 **8.07 MB of the 24.9 MB was 27 appended device trees, 26 of them for other sdm630/sda630 boards** — see kernel-porting.md for the `DTB_OBJS` glob trap that makes the trim config a no-op. The fix is the trim plus config slimming, **not** moving the ramdisk: `0x01000000` is proven on this bootloader by two independent working images, and swapping a verified address for an unverified one while debugging a boot failure is the wrong trade.
 

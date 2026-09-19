@@ -60,12 +60,18 @@ print("OVERLAP" if end > ra else f"fits, {ra-end:,} B spare")
 EOF
 ```
 
-**Symptom when it is wrong:** the device hangs on the *bootloader's* splash with
-no USB enumeration, after `fastboot flash boot` succeeded. The bootloader accepted
-the image and handed off, so this looks nothing like an AVB rejection or a missing
-device tree — and no amount of kernel-side logging (netconsole, `printk.devkmsg=on`)
-can report it, because the kernel never runs. athena lost a bring-up cycle to this;
-see device-athena.md.
+**What it looks like when it is wrong is not reliably knowable**, which is the trap.
+The plausible story — bootloader accepts the image, hands off, jumps into a kernel
+whose middle has been overwritten, so nothing enumerates and no kernel-side logging
+(netconsole, `printk.devkmsg=on`) can report it — is a *prediction*, not an
+observation. On athena a 24.9 MB image against a 16.7 MB window coincided with a
+splash hang, and the overrun was treated as its cause. That was wrong: the splash on
+that device never clears, so it looks identical for a dead kernel and a working boot,
+and the oversized image was never shown to have failed at all. See device-athena.md.
+
+Treat the window as a **build-time invariant to assert, not a diagnosis to reach for.**
+It is a genuine constraint and cheap to check; it is not evidence about a symptom you
+are looking at.
 
 **Fix the kernel, not the address.** A published-and-working boot image for the
 device (a stock ROM, or another distro's port) proves its offsets on that
