@@ -389,27 +389,40 @@ GCC's stricter analysis is worth the trouble — on athena it found seven genuin
 bugs in shipping code, including a `memset` clearing a quarter of its buffer and an
 overflowable `copy_from_user` bound check. Fix those at source; silence only the noise.
 
-### Framebuffer console: the Tier B debug channel nobody enables
+### Framebuffer console as a Tier B debug channel — often does NOT work
 
-Most phones expose no usable UART without a jig, so an early hang shows only as a
-frozen bootloader splash, and netconsole / `printk.devkmsg=on` cannot help — they
-need the kernel running and the USB gadget up.
-
-If the vendor defconfig already has a framebuffer driver (`CONFIG_FB` plus e.g.
-`CONFIG_FB_MSM`/`FB_MSM_MDSS`), then `FRAMEBUFFER_CONSOLE` only depends on `FB`:
+Most phones expose no usable UART without a jig, so an early hang shows only as a frozen
+bootloader splash, and netconsole / `printk.devkmsg=on` cannot help — they need the
+kernel running and the USB gadget up. The obvious idea is to put the kernel log on the
+panel:
 
 ```
 CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
-CONFIG_FONT_SUPPORT=y
-CONFIG_FONT_8x16=y
+CONFIG_FONT_SUPPORT=y   CONFIG_FONT_8x16=y
 ```
 
-plus `CONFIG_VT` (already in the LuneOS fragment) and `console=tty0` on the
-cmdline. The kernel log then prints on the device's own screen. Note that several
-ports carry `console=tty0` with **no fbcon behind it**, where it resolves to the
-dummy console and shows nothing — copying their cmdline is not enough. Costs ~100 KB,
-which matters when fighting the boot-image window; worth it until the device boots.
+plus `CONFIG_VT` and `console=tty0`.
+
+**Treat this as unproven until you see `Console: switching to colour frame buffer device`
+in dmesg.** On athena (msm mdss fbdev, 4.19) it was built exactly as above and fbcon
+never took over from the dummy console — fb0 registered at 1.12 s, `console [tty0]
+enabled` at 0.001 s, and the switch line was absent from 1406 lines of log. The
+`deferred_takeover` config was off, `register_framebuffer()` is used, and the fbcon
+notifier is registered at `subsys_initcall`, so the usual explanations did not apply.
+See device-athena.md.
+
+Two lessons worth more than the technique:
+
+- Several vendor/community kernels ship `console=tty0` on the cmdline with fbcon
+  disabled. That is *not* evidence they simply forgot to enable it — enabling it may not
+  be sufficient, and assuming it is leads to a wrong conclusion about why their log is
+  silent.
+- **On a device whose bootloader splash is never cleared, the splash is not a symptom.**
+  It looks identical for a dead kernel and for a fully working boot with a live debug
+  shell. Never reason from "stuck on the logo"; get a USB-side signal (adb, the
+  initramfs gadget's `iSerial`, or any enumeration at all) before concluding anything
+  about where boot stopped.
 
 ### Stock vendor modules on a rebuilt Tier B kernel
 

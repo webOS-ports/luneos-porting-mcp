@@ -96,36 +96,54 @@ it caught a dropped `ANDROID_BOOTIMG_RAMDISK_RAM_BASE` (silently defaulting the
 ramdisk load address to 0x0) that the build reported no error for. See
 device-bringup-yocto.md for why that change did not re-run `do_deploy`.
 
-## Framebuffer console: the debug lever this device needs
+## Framebuffer console: tried, and it does NOT work here
 
-A retail KEY2 exposes **no debug UART without a jig**, so a hang shows only as a frozen splash and netconsole/`printk.devkmsg=on` cannot help — they only emit once the kernel runs and the USB gadget is up. But `CONFIG_FB_MSM`/`FB_MSM_MDSS` are already in the stock defconfig and `FRAMEBUFFER_CONSOLE` only depends on `FB`, so:
+**Disproven on hardware (20 Sep 2026). Do not repeat this reasoning.**
+
+The idea was sound on paper: a retail KEY2 has no reachable debug UART, `CONFIG_FB_MSM`/
+`FB_MSM_MDSS` are already in the stock defconfig, and `FRAMEBUFFER_CONSOLE` only depends
+on `FB` — so `FRAMEBUFFER_CONSOLE=y` plus `console=tty0` ought to put the kernel log on
+the panel. It was built that way and it does not happen:
 
 ```
-CONFIG_FRAMEBUFFER_CONSOLE=y
-CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
-CONFIG_FONT_SUPPORT=y   CONFIG_FONT_8x16=y
-# plus console=tty0 on the cmdline, and CONFIG_VT from the LuneOS fragment
+[0.001449] Console: colour dummy device 80x25
+[0.001465] console [tty0] enabled
+[1.122001] mdss_fb_register: FrameBuffer[0] 1080x1620 registered successfully!
 ```
 
-turns "splash, then nothing" into a readable kernel log on the phone's own screen. **Neither the /e/OS build nor the UBports SDM660 port enables it**, though both carry `console=tty0` — where it resolves to the dummy console and shows nothing. Worth the ~100 KB on any Tier B device without a serial port.
+`fb0` registers fine at 1.12 s, the console is still the **dummy** device, and
+`Console: switching to colour frame buffer device` appears **nowhere in 1406 lines** of
+dmesg. `CONFIG_FRAMEBUFFER_CONSOLE=y` and `console=tty0` are both set.
 
-## mer-kernel-check
+This is the same failure this file previously attributed to the /e/OS and UBports builds
+("carries console=tty0 with no fbcon behind it"). That framing was wrong: they carry
+`console=tty0` *and* it does not work for them either, and **enabling fbcon is not what
+was missing**.
 
-Run on the **merged `.config`**, never the defconfig:
+Root cause not established. What has been ruled out, from the source at `key2/4.19`:
 
-| | errors | warnings |
-|---|---|---|
-| stock `athena-perf_defconfig` | 8 | 54 |
-| + `luneos.cfg` | **1** (deliberate) | 35 |
+- `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER` is **not** set, so `deferred_takeover`
+  is compiled to `false` and `fbcon_fb_registered()` should fall straight through to
+  `do_fbcon_takeover()`.
+- `mdss_fb_register()` uses `register_framebuffer()` (mdss_fb.c), which fires
+  `FB_EVENT_FB_REGISTERED`.
+- `fb_console_init()` runs from `fbmem_init` (`subsys_initcall`) and registers the fbcon
+  notifier, so the notifier is in place well before fb0 appears at 1.12 s.
+- `CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y` leaves `primary_device == -1` on arm64
+  (no arch `fb_is_primary_device()`), which takes the `info_idx == -1` branch and should
+  still reach takeover.
 
-The 8 were `SYSVIPC`, `FHANDLE`, `DEVTMPFS`, `DEVTMPFS_MOUNT`, `VT`, `NLS_UTF8`, `DUMMY`, `STATIC_USERMODEHELPER`. Two worth calling out:
+So the plumbing is present and the takeover silently does not occur. `dmesg | grep -i
+fbcon` on the device is the next cheap probe.
 
-- **`CONFIG_STATIC_USERMODEHELPER=y` with `STATIC_USERMODEHELPER_PATH=""`** — an empty path disables *every* `call_usermodehelper()`: `request_module()`, core dumps, the firmware fallback loader. Android never calls them; LuneOS does.
-- **`PID_NS`, `USER_NS` and `CGROUP_DEVICE` all off** in the stock defconfig. The LXC Android container needs all three.
+**The consequence that actually matters:** on this phone the BlackBerry logo stays up in
+*every* case — including a fully working boot with a live debug shell. The splash is not
+a symptom. It carries no information about where boot got to, and any reasoning that
+treats "stuck on the logo" as evidence of failure is unsound on this device. Use adb and
+dmesg; the screen is not a debug channel here.
 
-Better than the MTK ports to start with: `ANDROID_BINDERFS`, `ASHMEM`, `ION`, `VETH`, `TUN`, `OVERLAY_FS`, `PSI`, `SECURITY_SELINUX_DEVELOP` already set, and **no `ANDROID_PARANOID_NETWORK` anywhere in the tree**.
-
-SELinux: the UBports SDM660 port boots with `selinux=0` on the cmdline and `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0`, i.e. off by default rather than merely permissive. Adopted here.
+Related, and confirmed good: the kernel unpacks our ramdisk correctly —
+`Trying to unpack rootfs image as initramfs... Freeing initrd memory: 15440K`.
 
 ## AVB: nothing to do, and nothing to extract
 
