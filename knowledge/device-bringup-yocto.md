@@ -7,6 +7,38 @@ mechanics, LXC container config, 32-bit pitfalls from mindphone (MT6739), and th
 failures worth remembering. Everything here was established on real hardware during the
 sargo/bluejay/panther/mindphone ports (Aug–Sep 2026).
 
+## ANDROID_BOOTIMG_* changes do not always re-run do_deploy
+
+`kernel_android.bbclass` reads the boot-image addresses in a loop:
+
+```python
+for key, var in (("cmdline",     "ANDROID_BOOTIMG_CMDLINE"),
+                 ("kerneladdr",  "ANDROID_BOOTIMG_KERNEL_RAM_BASE"),
+                 ("ramdiskaddr", "ANDROID_BOOTIMG_RAMDISK_RAM_BASE"), ...):
+    cmd += ["-c", "%s=%s" % (key, d.getVar(var))]
+```
+
+Because the variable name reaches `d.getVar()` through `var` rather than as a
+literal, bitbake's dependency scanner cannot see the reference, so changing one of
+these in the recipe **may not invalidate `do_deploy`** — the build succeeds, reports
+no error, and silently redeploys the previous boot image. Always follow such a
+change with:
+
+```sh
+MACHINE=<m> bitbake -f -c deploy linux-<vendor>-<device>
+```
+
+and then verify the produced image rather than trusting the build (see the
+kernel/ramdisk window check in boot-images.md). This bit athena twice in one
+session: once when a dropped `ANDROID_BOOTIMG_RAMDISK_RAM_BASE` silently fell back
+to the bbclass default `?= "0x00000000"` — a ramdisk load address of zero, which
+the build is perfectly happy to emit — and once when restoring it appeared to
+change nothing.
+
+A missing `*_RAM_BASE` is worth calling out on its own: the default is `0x0`, so a
+recipe that loses the line produces an image whose ramdisk is loaded at address
+zero. Nothing in the build complains.
+
 ## Repo and layer geography
 
 - **`meta-smartphone` is the repo, not the layer.** `meta-smartphone/meta-android` is a

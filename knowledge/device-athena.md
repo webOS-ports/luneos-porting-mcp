@@ -86,6 +86,16 @@ Size levers that mattered, in order:
 
 `CONFIG_DEBUG_INFO` is a red herring — debug info lives in `vmlinux`, not `Image`.
 
+**Result, measured (19 Sep 2026):** `Image.gz-dtb` **24,903,202 → 13,146,188 B**, one
+appended dtb instead of 27, ramdisk kept at the proven `0x01000000`. It now clears the
+window by **3.60 MB — more margin than the stock 4.4 image has (2.99 MB)**, despite
+being a 4.19 kernel. Untested on hardware.
+
+The check itself is `kit/check-bootimg.sh` and it is worth running on every image:
+it caught a dropped `ANDROID_BOOTIMG_RAMDISK_RAM_BASE` (silently defaulting the
+ramdisk load address to 0x0) that the build reported no error for. See
+device-bringup-yocto.md for why that change did not re-run `do_deploy`.
+
 ## Framebuffer console: the debug lever this device needs
 
 A retail KEY2 exposes **no debug UART without a jig**, so a hang shows only as a frozen splash and netconsole/`printk.devkmsg=on` cannot help — they only emit once the kernel runs and the USB gadget is up. But `CONFIG_FB_MSM`/`FB_MSM_MDSS` are already in the stock defconfig and `FRAMEBUFFER_CONSOLE` only depends on `FB`, so:
