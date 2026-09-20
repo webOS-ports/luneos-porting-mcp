@@ -879,3 +879,67 @@ are precisely what gates runtime CPU-feature selection. It appears on every boot
 of this tree, working or not, so it explains nothing on its own - but on a tree
 where feature gating is known broken, do not assume any `CONFIG_*_USE_*` runtime
 switch is inert just because the hardware lacks the feature.
+
+## Shipping kernel modules to a device that flashes the generic rootfs
+
+A Tier B port that flashes the **generic** `halium-arm64 luneos-dev-image` has
+nowhere for its kernel modules to live. That image is arch-generic by design
+(`generic-rootfs-qa.bbclass`), is built against no particular kernel, and ships
+no `/lib/modules` at all. So the tissot/mido pattern
+
+```
+MACHINE_EXTRA_RDEPENDS = " … kernel-module-wlan … "
+```
+
+**cannot be copied**: it works there because each of those machines builds its
+own complete image, and there is no `MACHINE=<device>` rootfs here for it to
+land in. sargo has the same shape and carries an unresolved
+`# kernel-module-wlan` comment in its machine conf for exactly this reason.
+
+On athena this is the difference between WiFi and no WiFi: `CONFIG_QCA_CLD_WLAN=m`
+is the only module in the config, and the vendor's own `wlan.ko` will not load
+(`disagrees about version of symbol module_layout` - `module_layout`'s CRC
+encodes `struct module`, so the configs genuinely differ, and
+`CONFIG_MODULE_FORCE_LOAD` is not set).
+
+### Inject them into rootfs.img with debugfs - no root, no loop mount
+
+The same trick `android-system-image-tissot.bb` and `-mido-halium.bb` use to
+patch images at build time works for a whole module tree:
+
+- Write to **`/usr/lib/modules/<kver>`**, not `/lib/modules`. The rootfs is
+  usrmerged - `/lib` is a *symlink* - and debugfs does not resolve paths through
+  symlinks.
+- debugfs has no `mkdir -p` and no recursive put: walk the tree and emit one
+  `mkdir` per directory, parents first.
+- `write` refuses to overwrite, so emit `rm` before each `write` to stay
+  idempotent.
+- debugfs stamps the invoking uid/gid; follow each write with
+  `sif <path> uid 0`, `gid 0`, `mode 0100644`.
+- Run `depmod -b <staging>` on the host so the image gets a real `modules.dep`
+  and `modprobe` works on device.
+- Drop a `/etc/modules-load.d/<device>.conf` in as well - the generic rootfs
+  already has `systemd-modules-load.service`, so no unit is needed.
+- Expected noise to filter: `File not found` from the pre-emptive `rm` on a
+  first run, `already exists` from `mkdir` on a re-run, and (below 5.2)
+  `depmod: could not open modules.builtin.modinfo`, which landed in 5.2.
+
+### The deployed modules tarball is not stripped
+
+Do not feed `modules-<machine>.tgz` from `tmp/deploy` into that. `kernel.bbclass`
+builds it with
+
+```
+tar $TAR_ARGS -cv -C ${D}${root_prefix} lib | gzip -9n > $deployDir/modules-….tgz
+```
+
+from **`${D}`**, the pre-strip install tree. OE's stripping happens later in
+`do_package` against `${PKGD}`, so the split package `kernel-module-<name>-<kver>`
+has the stripped copy while the deploy tarball keeps full debug info. On athena
+that is **330,879,592 B vs 9,115,216 B** for the same `wlan.ko`, against ~700 MB
+free in the rootfs.
+
+This is upstream behaviour on every machine, not a recipe bug. Repack from
+`packages-split/kernel-module-*` instead, and guard the injector with a
+`readelf -S … | grep .debug_info` check - a host `strip` cannot help you
+(`Unable to recognise the architecture of the input file`).
