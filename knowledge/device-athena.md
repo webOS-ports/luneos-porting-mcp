@@ -174,3 +174,102 @@ not, and its boot image carries no AVB footer, there is nothing to disable.
 - **Flash-kit directories on `/media` get cleaned.** The staging dir was wiped twice by disk cleanups. Keep the *scripts* on the root disk and treat the images as regenerable — the kernel recipe's `_deploy` sstate entry still holds the finished `.fastboot` boot image, so a wiped `tmp/deploy` costs an untar, not a rebuild.
 - **`fastboot boot` is not the same test as `fastboot flash boot`** — RAM-booting uses fastboot's own load addresses, so it will not reproduce a load-address bug.
 - **Bisect the boot image before adding logging.** A boot image built from a *known-good* kernel plus *our* initramfs (with `enable_adb`) separates kernel from initramfs in a single flash. On this device `enable_adb` makes the Halium initrd `panic` straight to its debug gadget before it looks for userdata, so a missing `rootfs.img` does not affect the test.
+
+## Corrections and findings from the boot (20 Sep 2026)
+
+LuneOS boots to the lock screen on a BBF100-8: display, touch, power and volume
+work. What follows corrects several claims above.
+
+### The vendor must match the KERNEL version, not just the Android version
+
+**This is the fix that got graphics working, and it invalidates the vendor
+choice recorded above.**
+
+The /e/OS 4.1.1 A15 vendor and the LineageOS 22 vendor are both Android 15
+(`ro.vendor.build.version.sdk=35`), so the "A15 removed VNDK, zero VNDK work"
+reasoning holds for both. But /e/OS athena is a **4.4-kernel** build and its
+Adreno blobs are 2018-era. Against our 4.19 kernel they abort:
+
+```
+E Adreno-GSL: ioctl_kgsl_device_getinfo_ext: Error -2 getting the IB_TIMEOUT property
+W libEGL  : eglInitialize(...) failed (EGL_BAD_ALLOC)
+   -> EGL Version -1.-1, EGL Error 3001 (EGL_NOT_INITIALIZED), grey screen
+```
+
+`KGSL_PROP_IB_TIMEOUT` is a 4.4-era ioctl. Both the LuneOS and LineageOS 4.19
+kernels have byte-identical kgsl and neither serves it. LineageOS 22 v1.21a is
+itself a 4.19 build and its `libgsl.so` (1,712,464 B vs /e/OS's 1,456,624 B)
+contains the string `KGSL_PROP_IB_TIMEOUT not available at build time` - it
+tolerates the absence. After swapping to the LineageOS 22 vendor:
+
+```
+EGL Version 1.5 / Available configurations: 68
+```
+
+**Rule: pick the vendor whose kernel version matches the kernel you boot.**
+Android version parity is necessary, not sufficient.
+
+Extracting it: the OTA ships `vendor.new.dat.br` (Brotli sparse dat) - Brotli
+decompress, then apply `vendor.transfer.list`'s "new" commands into a flat image
+(block size 4096, ranges are pairs `[a,b)`). Result 671,100,928 B,
+md5 `da7ef852edc65bec207b6b2c71b30efb`.
+
+### The ROMs DO ship a wlan module - it just cannot be used
+
+Corrects the "no wlan module in /vendor" claim above. LineageOS 22 v1.21a ships
+`/vendor/lib/modules/wlan.ko`. It still will not load: even with vermagic
+patched from `...-perf-g888495ee4a66` to ours, `insmod` gives
+
+```
+wlan: disagrees about version of symbol module_layout
+```
+
+`module_layout`'s CRC encodes `struct module` itself, so the configs genuinely
+differ. `CONFIG_MODULE_FORCE_LOAD` is not set and forcing it risks memory
+corruption. Build `wlan.ko` from the in-tree qcacld-3.0 - the conclusion stands,
+the premise was wrong.
+
+### athena has no pstore, which is why this took so long
+
+`CONFIG_PSTORE=n` in all four kernels inspected and there is no ramoops DT node.
+With no UART on a retail unit and no working fbcon, **a failure before userspace
+is completely mute**. Adding a ramoops node plus `PSTORE_RAM` would have turned
+much of this investigation into one log read. Do this early on any device with
+no debug UART.
+
+### Settled: a released ROM does boot 4.19
+
+LineageOS 22 ships 4.19.325 for athena and boots it. The caveat recorded above -
+that only the 4.4 tree was proven - is resolved.
+
+### Input map
+
+Seven nodes, and the touchscreen is not the obvious one:
+
+| node | name | what |
+|---|---|---|
+| event0 | `qpnp_pon` | power |
+| event1 | `touch_keypad` | capacitive keys - the old placeholder pointed here |
+| event2 | `stmpe_keypad` | physical QWERTY |
+| **event3** | **`synaptics_dsx_2`** | **touchscreen** |
+| event4 | `qti-haptics` | vibrator |
+| event5 | `nav_key` | navigation |
+| event6 | `gpio-keys` | volume |
+
+Pinned by name in the `athena` luneos-device-config adaptation.
+
+### Do not enable lxc@android
+
+LuneOS starts the container from `android-system.service`
+(`ExecStart=/usr/bin/lxc-start -n android ... /init`), which is enabled via
+`basic.target.requires`. `lxc@android.service` is a *different*, unused unit.
+Enabling it gives two units managing one container, and `lxc-start` exiting
+"Container is already running" makes systemd run that unit's `ExecStop`, which
+tears down the healthy container. If the container is not starting, debug
+`android-system.service`; do not enable `lxc@android`.
+
+### Editing files on the running device
+
+`sed -i` fails with "Device or resource busy" - it renames. Use
+`sed ... > /tmp/x && cat /tmp/x > <file>`, then `sync`. The rootfs is rw
+(`/.writable_image` present), so `/etc` edits persist.
