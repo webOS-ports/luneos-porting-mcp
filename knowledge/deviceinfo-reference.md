@@ -182,6 +182,70 @@ mindphone) can use a machine package instead; devices on the shared
 `halium-arm64` rootfs (MP01) must use these keys, because a machine package never
 reaches that rootfs.
 
+## When the compositor starts but ignores the touchscreen
+
+`surface-manager.env` ships a **placeholder** touch node, and
+`luneos-device-config`'s `20-surface-manager-env` generator substitutes the real
+one at boot, derived from the single input device advertising
+`ID_INPUT_TOUCHSCREEN`. Two ways that goes wrong:
+
+**An old rootfs whose placeholder was a plausible node.** The placeholder used
+to be `/dev/input/event1`, which is the touchscreen on sargo - so on any device
+where it is not, the compositor starts, draws, and silently ignores the panel.
+It is now `/dev/input/PLACEHOLDER`, deliberately invalid, so the failure is
+obvious rather than plausible. If you see a real `eventN` in that file, the
+rootfs predates that change and the node is not evidence of anything.
+
+**A crowded input space.** athena has seven nodes and the touchscreen is not the
+obvious one:
+
+```
+event0  qpnp_pon         power
+event1  touch_keypad     capacitive keys      <- what the old placeholder hit
+event2  stmpe_keypad     physical QWERTY
+event3  synaptics_dsx_2  touchscreen
+event4  qti-haptics      vibrator
+event5  nav_key          navigation
+event6  gpio-keys        volume
+```
+
+A node called `touch_keypad` sitting at `event1` is exactly the shape of trap
+that survives review.
+
+Pin by **name**, never by number - numbering shifts with which drivers register
+on a given boot, and the code prefers names anyway
+(`deviceinfo_touchscreen_by_name`, `deviceinfo_key_devices_by_name`).
+Adaptations all ship together in the generic rootfs and are keyed by codename at
+runtime, so adding one needs no machine-specific rootfs.
+
+Before pinning, check whether the generator ran at all: the unit is
+`luneos-device-config.service`, enabled via `/etc/systemd/system/basic.target.requires`
+(`RequiredBy=basic.target`), not a `*.wants` directory - so looking only in
+`multi-user.target.wants` will wrongly suggest it is disabled.
+
+## Dead configuration keys fail quietly
+
+A key that nothing implements is accepted by the file and ignored by the
+program. LuneOS's `connman-conf/main.conf` carries
+
+```
+# We're supplying our own wpa-supplicant configuration file here which adds
+# some tweaks for running wpa-supplicant like enabling the cli interface …
+WpaSupplicantConfigFile=/etc/wpa_supplicant.conf
+```
+
+`WpaSupplicantConfigFile` exists nowhere else in the tree - no patch, and not in
+upstream connman 2.0 - so the tweaks the comment promises have never been
+applied. connman does say so, once, at startup:
+
+```
+connmand: Unknown option WpaSupplicantConfigFile in /etc/connman/main.conf
+```
+
+Worth grepping your own config files for keys that appear only in the config and
+never in the consuming source, particularly ones carrying a comment that
+describes behaviour you have never actually verified.
+
 ## Cross-references
 
 - Boot-image assembly per layout class, initramfs patches, AVB: see the boot-images notes.
