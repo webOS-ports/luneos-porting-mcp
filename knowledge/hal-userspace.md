@@ -459,3 +459,89 @@ Measured over Chromium's remote debugging port on sargo (1080x2220, 441 PPI):
 | pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | vendor HAL needs its VNDK: `HYBRIS_PREFER_VNDK` per device |
 | `hci0` DOWN, "Invalid request code (56)" | controller rejects a command it advertised (HCI status 0x01); find it with `btmon`, mask it in bluebinder |
 | `nfcd` stopped a few minutes after boot | Waydroid's container start runs `systemctl stop nfcd` (meta-luneos waydroid patch 0010 removes it) |
+
+## Android 15 vendors are AIDL: the HIDL daemons stop finding anything
+
+An Android 15 vendor registers its HALs with **`servicemanager` (AIDL)**, not
+`hwservicemanager` (HIDL). LuneOS daemons that only speak HIDL then fail against
+a vendor that is working perfectly. On athena, with the LineageOS 22 vendor:
+
+```
+servicemanager: Found android.hardware.biometrics.fingerprint.IFingerprint/default …
+init: Could not ctl.start 'fps_hal' … fingerprint@2.1-service: No such file
+biomd: Failed to get fingerprint remote service
+biomd: Failed to initialize HIDL fingerprint backend
+```
+
+The HAL is alive; `biomd` has no AIDL backend. Everything LuneOS asks for by
+HIDL name is absent in that boot:
+
+```
+android.hardware.biometrics.fingerprint@2.1::IBiometricsFingerprint/default
+android.hardware.sensors@2.0::ISensors/default    (and @2.1, and the AIDL name)
+android.hardware.graphics.composer@2.2/2.3/2.4::IComposer/default
+android.hardware.radio.config@1.2::IRadioConfig/default
+```
+
+while the vendor publishes, on AIDL: `biometrics.fingerprint`, `nfc`, `wifi`,
+`wifi.supplicant`, `wifi.hostapd`, `power`, `vibrator`, `light`, `health`,
+`usb`, `usb.gadget`, `memtrack`, `media.c2`.
+
+**This is one root cause behind several "broken" subsystems** - fingerprint,
+NFC and sensors all dead for the same reason. Expect it on every A15+ vendor,
+so diagnose it once rather than per-peripheral.
+
+### Telling a routing bug from a missing backend
+
+`hwservicemanager` being *alive* does not mean HIDL is fine, and its being
+unused does not mean it is dead. On athena it ran as pid 34 and successfully
+served `android.hardware.camera.provider@2.4::ICameraProvider/legacy/0` in the
+same boot where `nfcd` failed - so the transport was healthy and the fault was
+elsewhere.
+
+The cheap discriminator is **the shape of the interface name in the log**:
+
+| style | shape | served by |
+|---|---|---|
+| HIDL | `android.hardware.foo@1.2::IFoo/default` | `hwservicemanager`, `/dev/hwbinder` |
+| AIDL | `android.hardware.foo.IFoo/default` | `servicemanager`, `/dev/binder` |
+
+`nfcd` logged `registerForNotifications(android.hardware.nfc.INfc/default)` -
+an **AIDL-shaped name passed to a HIDL `IServiceManager` method**. That fails
+deterministically against a completely healthy system, in every boot, which is
+what distinguishes it from a race: a name of the wrong shape can never resolve
+on that node no matter how well the vendor is running.
+
+So before writing a new AIDL backend, check which binder node the call actually
+went to. If gbinder routed an AIDL name to `/dev/hwbinder`, the fix is
+servicemanager selection - far smaller than a backend.
+
+Note `-2147483647` (`INT32_MIN+1`) is not a standard binder exception code
+(`EX_TRANSACTION_FAILED` is `-129`), which suggests a local library status
+rather than a remote reply - i.e. the call failed before reaching a remote.
+
+## Bluetooth: bluebinder never owns hci0, and BlueZ binds the wrong one
+
+Symptom: Bluetooth scans but will not connect.
+
+```
+bluebinder: Own hci index: 1
+bluetoothd: Failed to set mode: Blocked through rfkill (0x12)
+bluez adapter list: hci0 only, "powered":false
+audiod: a2dpAdapterName = hci1, adapterName = hci0
+```
+
+Two separate defects:
+
+1. **BlueZ is on a different adapter than bluebinder's proxy.** Across one
+   athena journal bluebinder took index 1 nine times, index 2 five times and
+   index 3 once - **never 0**. Something claims `hci0` first and BlueZ binds it.
+   Worth checking on any Halium device: `hciconfig -a` and compare with
+   bluebinder's reported index. Note `CONFIG_BT_HCIVHCI=y` may be the only BT
+   transport in the kernel, in which case `hci0` cannot be real hardware.
+2. **rfkill soft-block.** `systemd-rfkill` restores saved state from
+   `/var/lib/systemd/rfkill/` on every boot, so a state saved while blocked
+   re-blocks after any manual `rfkill unblock`.
+
+`audiod` disagreeing with itself (`a2dpAdapterName` vs `adapterName`) is a good
+early tell that adapter indices are not what the configuration assumes.
