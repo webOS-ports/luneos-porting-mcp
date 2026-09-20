@@ -812,40 +812,70 @@ mer-kernel-check and it applies here. A long-term stable tree (CIP, and Android
 LTS) can have newer infrastructure than its version number suggests; grep
 `security/selinux/Kconfig` in the actual source before trusting a Kconfig name.
 
-## LSE atomics on an ARMv8.0 SoC, and the broken jump_label that lets them through
+## selinux=0 made mount(2) return ENOENT on a CIP 4.19 tree
+
+On athena, `mount(2)` returned **ENOENT** for every block-backed filesystem
+while tmpfs mounted fine, a bogus fstype correctly gave ENODEV, raw block I/O
+worked and `fsck.ext4 -n` read the same partition happily. `ext4_fill_super` was
+never reached. The fix was removing **`selinux=0`** from the kernel command
+line, leaving only `androidboot.selinux=permissive` (an Android-init property
+the kernel ignores, so the kernel's own SELinux stays enabled).
+
+**The evidence was a two-log comparison, and it is the cheap diagnostic:**
+
+| | cmdline | dmesg | mount |
+|---|---|---|---|
+| our initrd | has `selinux=0` | no SELinux line at all | ENOENT |
+| Android recovery ramdisk | no `selinux=0` | `SELinux: Initializing.` | EXT4 mounts |
+
+Same kernel build in both. When two boots of *identical kernel bytes* differ,
+diff the two `Kernel command line:` lines first - it is one grep and it is often
+the whole answer.
+
+**No mechanism is confirmed.** A denial is EACCES, not ENOENT, and with SELinux
+unregistered there should be no inode hooks at all. The suspicious ingredient is
+that this is a 4.19 tree carrying a **backported 5.x LSM framework** - the built
+`.config` shows `CONFIG_LSM="..."`, `SECURITY_SELINUX_SIDTAB_HASH_BITS` and
+`SECURITY_LOCKDOWN_LSM` on a 4.19 kernel, and
+`CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE` has been deleted in favour of a
+hardcoded `int selinux_enabled_boot __initdata = 1;`. Disabling the default
+major LSM at boot on a partial backport is the kind of thing that leaves LSM
+blob offsets inconsistent between the code that reserved them and the code that
+reads them, which would produce exactly this: an arbitrary errno from a path
+walk that has no business failing. Worth confirming before relying on it.
+
+**Rule: on a Halium port, do not pass `selinux=0`.** The fleet convention is
+`androidboot.selinux=permissive` and nothing else. See the paired-token trap
+above for where the `selinux=0` came from.
+
+## LSE atomics on an ARMv8.0 SoC: turn them off, but they were not the bug
 
 `CONFIG_ARM64_USE_LSE_ATOMICS` builds the ARMv8.1 large-system-extension atomics
-alongside the LL/SC ones and picks between them at runtime with a static key, so
-on paper enabling it on an ARMv8.0 CPU is inert. On athena it was not.
+alongside the LL/SC ones and chooses at runtime with a static key. SDM660 is
+Cortex-A73/A53 - **ARMv8.0**, no LSE - so the feature is dead weight there.
 
-athena is SDM660 - Cortex-A73/A53, **ARMv8.0**, no LSE. Turning
-`CONFIG_ARM64_USE_LSE_ATOMICS` off was the fix for a failure that looked nothing
-like an atomics bug: `mount(2)` returned **ENOENT** for every block-backed
-filesystem while tmpfs mounted fine, raw block I/O worked, and `fsck.ext4 -n`
-read the same partition happily. `ext4_fill_super` was never reached.
+**Turn it off**, for a reason that has nothing to do with correctness: a 4.19
+tree marks clang's assembler `CONFIG_BROKEN_GAS_INST`, so LineageOS and UBports
+never enable LSE. A Yocto build with binutils passes that test, which is how a
+Yocto port acquires a whole-kernel code-generation difference that no shipped
+ROM has. Matching the references is worth more than an unusable optimisation.
 
-The reason "inert" did not hold is visible in dmesg, and is worth checking on
-any old vendor tree before trusting runtime feature gating:
+**It was not, however, the cause of athena's mount ENOENT**, and this file said
+otherwise for one commit. The disproof is in the logs: the *same kernel build*
+with LSE enabled mounted ext4 correctly under Android's recovery ramdisk. The
+discriminator was `selinux=0` (see the section above). The port shipped both
+changes in one image, which is how the wrong one got the credit - **a bundled
+fix attributes itself to whichever change you already suspected.**
+
+One thing here is real regardless, and was separately dismissed as cosmetic:
 
 ```
 can't patch jump_label at 0xffffff939867af80
 WARNING: CPU: 0 PID: 1 at kernel/jump_label.c:385 __jump_label_update+0x98/0xa0
 ```
 
-A static key that cannot be patched does not fail loudly at the use site - it
-just keeps whatever value it had. That is exactly the machinery that is supposed
-to keep an ARMv8.0 CPU off the LSE path. Do not dismiss this warning as cosmetic;
-it was dismissed here as a red herring, and it was not.
-
-**What made it hard to see:** the same kernel mounted the same partition fine
-under a different ramdisk (see the kernel-swap technique in debugging.md). A
-latent atomics fault only shows up on the code paths that hit it, so one
-userspace booted and another did not, on identical kernel bytes.
-
-**Rule:** on a pre-ARMv8.1 SoC, build with `# CONFIG_ARM64_USE_LSE_ATOMICS is
-not set`. It is a performance feature the hardware cannot use anyway. It also
-happens to match what the working references do, for an unrelated reason: a
-4.19 tree marks clang's assembler `CONFIG_BROKEN_GAS_INST`, so LineageOS and
-UBports never enable LSE and never meet this. A Yocto build with binutils does
-pass that test, which is how a Yocto port acquires a whole-kernel code
-generation difference that no shipped ROM has.
+A static key that cannot be patched keeps whatever value it had, and static keys
+are precisely what gates runtime CPU-feature selection. It appears on every boot
+of this tree, working or not, so it explains nothing on its own - but on a tree
+where feature gating is known broken, do not assume any `CONFIG_*_USE_*` runtime
+switch is inert just because the hardware lacks the feature.
