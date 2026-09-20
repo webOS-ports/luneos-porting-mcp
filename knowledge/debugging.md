@@ -916,3 +916,73 @@ Caveats worth stating before you run it:
 - **Check the logs you already have first.** On athena this experiment had
   already been run and was sitting in the log archive the porter had sent;
   an image was built to re-run it anyway.
+
+## Slice a multi-boot journal by boot before you grep totals
+
+A journal collected over a bring-up session spans every boot since the last
+wipe, including all the ones from before the bugs were fixed. A `grep -c` over
+the whole file mostly counts the *first* boot, which is usually the longest and
+the most broken.
+
+This produced three wrong conclusions in one day on athena. Whole-file totals
+said `surface-manager` had crashed 954 times and `keymaster-3-0` 281 times, both
+of which read as live crash loops. Per-boot:
+
+```
+boot  keymaster SIGABRT   surface-manager coredump   nfcd regFN fail
+   1                281                        923                 1
+   4                  0                         31                 1
+2,3,5..13             0                          0                 1
+```
+
+Every keymaster crash was in boot 1. Every compositor crash was in boots 1 and
+4, and both had been fixed by a vendor swap several boots earlier. Meanwhile the
+one genuinely live defect - a daemon failing a binder registration - fired
+exactly once per boot in **all thirteen**, and was invisible in the totals
+because 1 does not stand out next to 281.
+
+**The method:**
+
+```sh
+grep -an "Booting Linux on physical CPU" journal.txt | cut -d: -f1   # boundaries
+LAST=$(grep -an "Booting Linux on physical CPU" journal.txt | tail -1 | cut -d: -f1)
+tail -n +$LAST journal.txt > lastboot.txt                            # then grep this
+```
+
+Then, for anything that looks like a crash loop, count it **per boot** before
+believing it. A defect that appears once per boot in every boot is stable and
+reproducible and is almost always the one worth chasing; a defect with a huge
+count confined to one boot is usually already fixed. Two things co-occurring
+inside boot 1 is not evidence that one causes the other - the boot where
+everything was broken is exactly where every pair of symptoms correlates.
+
+Note also that the RTC on a freshly flashed device starts wrong, so one boot can
+carry several unrelated timestamp bases (`Aug 05` → `Jan 01` → the real date).
+Sort and slice by the boot marker, never by timestamp.
+
+## A kernel `dev_err` is not a failure - read the return path
+
+Kernel drivers log optional and non-fatal conditions at error level all the
+time. Two in athena's NFC driver both look fatal and both return success:
+
+```
+nq-nci 6-0028: nfc_ldo_config: regulator entry not present
+nq-nci 6-0028: nfcc_hw_check: - NFCC HW not Supported
+```
+
+- `nfc_ldo_config()` logs that with `dev_err` and then `return 0`, with the
+  comment *"return success as it's optional to configure LDO"*.
+- `nfcc_hw_check()`'s message is the `default:` arm of a switch on the chip ID
+  **read back from the part**; it logs, breaks, then falls into
+  `ret = 0; goto done`. The genuine failure is a different label and a different
+  string - `err_nfcc_hw_check`, *"NFCC HW not available"*, `-ENXIO`.
+
+Reaching that switch at all proved the chip had answered NCI RESET over i2c -
+so the message that read as "no NFC hardware" was in fact positive evidence that
+the hardware was alive, powered and addressable. A device-tree change was being
+prepared on the strength of the opposite reading.
+
+**Before acting on a kernel error message, open the driver and follow the
+return value to the caller.** Grep the exact string, then check whether that
+path sets a non-zero `ret`. It takes two minutes and it is the difference
+between debugging the hardware and debugging nothing.
