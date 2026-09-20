@@ -878,17 +878,30 @@ experiment confounds the two. The cheap separator:
 only the kernel with yours.** Their ramdisk, their cmdline, their load
 addresses, their page size. One variable.
 
-On athena this settled a week of speculation in one log. Our 4.19 kernel under
-LineageOS's recovery ramdisk mounted the exact partition that failed for us:
+On athena, our 4.19 kernel under LineageOS's recovery ramdisk mounted the exact
+partition that failed for us:
 
 ```
 [5.472028] EXT4-fs (mmcblk0p77): mounted filesystem with ordered data mode
 ```
 
-and Android init reached `enforcing=1`. Kernel exonerated; the fault was the
-initrd environment. That immediately killed three live hypotheses (LSE atomics,
-a config diff against LineageOS, and "this kernel cannot mount block devices"
-as a framing).
+and Android init reached `enforcing=1`.
+
+**Read that result correctly, which I did not.** It proves the kernel *can*
+mount ext4 under some userspace. It does NOT exonerate the kernel, and I wrote
+that it did. The actual athena fix turned out to be a kernel config change -
+turning `CONFIG_ARM64_USE_LSE_ATOMICS` off - confirmed on hardware by the
+porter after I had recorded the opposite here.
+
+Both observations are true at once: a latent kernel fault that only one
+userspace's code path triggers. Android's recovery init mounts through fs_mgr;
+our initrd mounts through busybox. Same kernel, same boot, different outcome.
+
+So the technique's real yield is narrower than it looks: **a swap that works
+tells you the kernel is not *unconditionally* broken - nothing more.** Only a
+swap that *fails* is conclusive on its own. Treat a passing swap as one
+data point against a kernel cause, never as a verdict, and never let it retire
+a suspect that on-device evidence still supports.
 
 Caveats worth stating before you run it:
 

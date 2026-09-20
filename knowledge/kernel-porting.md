@@ -811,3 +811,41 @@ worse, because the line looks correct and greps clean.
 mer-kernel-check and it applies here. A long-term stable tree (CIP, and Android
 LTS) can have newer infrastructure than its version number suggests; grep
 `security/selinux/Kconfig` in the actual source before trusting a Kconfig name.
+
+## LSE atomics on an ARMv8.0 SoC, and the broken jump_label that lets them through
+
+`CONFIG_ARM64_USE_LSE_ATOMICS` builds the ARMv8.1 large-system-extension atomics
+alongside the LL/SC ones and picks between them at runtime with a static key, so
+on paper enabling it on an ARMv8.0 CPU is inert. On athena it was not.
+
+athena is SDM660 - Cortex-A73/A53, **ARMv8.0**, no LSE. Turning
+`CONFIG_ARM64_USE_LSE_ATOMICS` off was the fix for a failure that looked nothing
+like an atomics bug: `mount(2)` returned **ENOENT** for every block-backed
+filesystem while tmpfs mounted fine, raw block I/O worked, and `fsck.ext4 -n`
+read the same partition happily. `ext4_fill_super` was never reached.
+
+The reason "inert" did not hold is visible in dmesg, and is worth checking on
+any old vendor tree before trusting runtime feature gating:
+
+```
+can't patch jump_label at 0xffffff939867af80
+WARNING: CPU: 0 PID: 1 at kernel/jump_label.c:385 __jump_label_update+0x98/0xa0
+```
+
+A static key that cannot be patched does not fail loudly at the use site - it
+just keeps whatever value it had. That is exactly the machinery that is supposed
+to keep an ARMv8.0 CPU off the LSE path. Do not dismiss this warning as cosmetic;
+it was dismissed here as a red herring, and it was not.
+
+**What made it hard to see:** the same kernel mounted the same partition fine
+under a different ramdisk (see the kernel-swap technique in debugging.md). A
+latent atomics fault only shows up on the code paths that hit it, so one
+userspace booted and another did not, on identical kernel bytes.
+
+**Rule:** on a pre-ARMv8.1 SoC, build with `# CONFIG_ARM64_USE_LSE_ATOMICS is
+not set`. It is a performance feature the hardware cannot use anyway. It also
+happens to match what the working references do, for an unrelated reason: a
+4.19 tree marks clang's assembler `CONFIG_BROKEN_GAS_INST`, so LineageOS and
+UBports never enable LSE and never meet this. A Yocto build with binutils does
+pass that test, which is how a Yocto port acquires a whole-kernel code
+generation difference that no shipped ROM has.
