@@ -876,7 +876,8 @@ experiment confounds the two. The cheap separator:
 
 **Take the stock (or LineageOS recovery) boot image for the device and replace
 only the kernel with yours.** Their ramdisk, their cmdline, their load
-addresses, their page size. One variable.
+addresses, their page size - which sounds like one variable and is not. Read
+the warning below before trusting the result.
 
 On athena, our 4.19 kernel under LineageOS's recovery ramdisk mounted the exact
 partition that failed for us:
@@ -887,21 +888,20 @@ partition that failed for us:
 
 and Android init reached `enforcing=1`.
 
-**Read that result correctly, which I did not.** It proves the kernel *can*
-mount ext4 under some userspace. It does NOT exonerate the kernel, and I wrote
-that it did. The actual athena fix turned out to be a kernel config change -
-turning `CONFIG_ARM64_USE_LSE_ATOMICS` off - confirmed on hardware by the
-porter after I had recorded the opposite here.
+**This is not the single-variable test it looks like, and that cost two wrong
+diagnoses on athena.** You swap the kernel, but the donor image brings its own
+**command line** with it. On athena the donor's cmdline lacked `selinux=0`,
+which is what our failing boot's cmdline had - and `selinux=0` turned out to be
+the whole bug. The swap "proved the kernel was fine" only because it had
+quietly changed a second variable.
 
-Both observations are true at once: a latent kernel fault that only one
-userspace's code path triggers. Android's recovery init mounts through fs_mgr;
-our initrd mounts through busybox. Same kernel, same boot, different outcome.
+**So: diff the two `Kernel command line:` lines before drawing any conclusion
+from a swap.** It is one grep, and here it was the entire answer sitting in the
+logs through two wrong theories.
 
-So the technique's real yield is narrower than it looks: **a swap that works
-tells you the kernel is not *unconditionally* broken - nothing more.** Only a
-swap that *fails* is conclusive on its own. Treat a passing swap as one
-data point against a kernel cause, never as a verdict, and never let it retire
-a suspect that on-device evidence still supports.
+Read a passing swap narrowly even after that: it shows the kernel is not
+*unconditionally* broken under the donor's cmdline. Only a swap that *fails* is
+conclusive on its own.
 
 Caveats worth stating before you run it:
 
