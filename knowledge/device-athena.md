@@ -273,3 +273,68 @@ tears down the healthy container. If the container is not starting, debug
 `sed -i` fails with "Device or resource busy" - it renames. Use
 `sed ... > /tmp/x && cat /tmp/x > <file>`, then `sync`. The rootfs is rw
 (`/.writable_image` present), so `/etc` edits persist.
+
+## Status board (20 Sep 2026)
+
+**Boots to the lock screen.** Display, touch, power/volume keys, physical QWERTY.
+
+| works | broken | cause |
+|---|---|---|
+| display, EGL | fingerprint | `biomd` is HIDL-only; vendor is AIDL |
+| touch, keys, QWERTY | NFC | `nfcd` passes an AIDL-shaped name to a HIDL call |
+| WiFi (with `wlan.ko` injected) | sensors | `sensors@2.0/@2.1` and the AIDL name both absent |
+| Android container | Bluetooth | rfkill soft-block + BlueZ on the wrong `hci` |
+| | camera | `announcing 0 droid camera(s)`; unresolved |
+
+Fingerprint, NFC and sensors are **one** root cause - see the A15 AIDL section
+in hal-userspace.md. Fix that once, not three times.
+
+### Kernel fixes that got it booting, in order
+
+1. Remove `swiotlb=1` - fatal on 4.19, harmless on the stock 4.4.
+2. Remove `selinux=0` - this is the one that fixed `mount(2)` returning ENOENT
+   for every block-backed filesystem. Keep `androidboot.selinux=permissive`.
+3. `# CONFIG_ARM64_USE_LSE_ATOMICS is not set` - kept because it matches the
+   references, **not** because it fixed anything. It was credited with the mount
+   fix for one commit; the same kernel with LSE enabled mounts ext4 correctly
+   under Android's recovery ramdisk.
+
+Both 2 and 3 shipped in one image, which is how the wrong one got the credit.
+
+### NFC: the kernel is fine
+
+```
+nq-nci 6-0028: nfc_ldo_config: regulator entry not present   <- optional, returns 0
+nq-nci 6-0028: nfcc_hw_check: - NFCC HW not Supported        <- default: arm, returns 0
+nq-nci 6-0028: nqx_probe: probing NFCC NQxxx exited successfully
+```
+
+Reaching that chip-ID switch means the part answered NCI RESET over i2c, so it
+is powered, addressed and talking. The recognised IDs are `NFCC_NQ_310`,
+`NQ_330`, `PN66T`, `SN100_A`, `SN100_B`; athena's is not among them, which is
+cosmetic. The real failure path is `err_nfcc_hw_check` / *"NFCC HW not
+available"* / `-ENXIO`, and it does not appear. **Do not edit the device tree
+for this** - a DT change was nearly made on the opposite reading.
+
+Node paths, for reference: base `nq@28` is
+`arch/arm64/boot/dts/vendor/qcom/sdm660-mtp.dtsi:62`; athena overrides only
+pinctrl at `sdm660-bbry-athena.dtsi:887`.
+
+### WiFi
+
+`wlan.ko` comes from in-tree qcacld-3.0 and must be injected into `rootfs.img` -
+see the generic-rootfs module section in kernel-porting.md. LineageOS 22 *does*
+ship `/vendor/lib/modules/wlan.ko`, but it will not load
+(`module_layout` CRC mismatch), so ours is the only one.
+
+Also `connmand: Unknown option WpaSupplicantConfigFile` - a dead key in LuneOS's
+own `main.conf`; see deviceinfo-reference.md.
+
+### Do not enable lxc@android
+
+`android-system.service` starts the container (`lxc-start -n android … /init`)
+and is enabled via `basic.target.requires`. `lxc@android.service` is a separate
+unused unit; enabling it gives two units one container, and `lxc-start` exiting
+*"Container is already running"* makes systemd run that unit's `ExecStop` and
+tear down the healthy one. A `lxc@android.service: Failed with result 'timeout'`
+in the journal is the tell.
