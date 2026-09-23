@@ -72,6 +72,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 |---|---|
 | `architecture` | the GSI+GKI model: one rootfs, Treble, Tier A/B, adaptation tiers, on-device layout |
 | `kernel-porting` | GKI/ACK builds, KMI-poison list & CRC verification, Tier B legacy kernels |
+| `kmi-crc-matching` | **the vermagic/CRC playbook**: identify the vendor from its modules, extract its real config from IKCONFIG, read `Unknown symbol` vs `disagrees about version`, and the kconfig/toolchain traps that cost builds |
 | `boot-images` | header v0–v4, the kernel/ramdisk window check, per-layout repack recipes, initramfs init patches, AVB/vbmeta |
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), Halium 16 traps, VNDK snapshots |
 | `device-bringup-yocto` | meta-smartphone machines, gki_bootimg, recipes, bitbake gotchas |
@@ -81,7 +82,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `installing` | flash kits, userdata images, fastboot flows, anti-rollback |
 | `tools` | kmi-crc-check, module-order, payload_extract, mer-kernel-check, … |
 | `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variable reference our Tier 1 format reuses |
-| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` / `device-athena` | per-device reference |
+| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` / `device-athena` / `device-sunfish` | per-device reference |
 
 ### Tools
 
