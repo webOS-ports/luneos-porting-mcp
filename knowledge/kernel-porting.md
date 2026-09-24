@@ -426,18 +426,64 @@ Two lessons worth more than the technique:
 
 ### Stock vendor modules on a rebuilt Tier B kernel
 
-The MTK WMT combo driver (wifi/BT/GPS/FM core) is not in the GPL kernel drop —
-only built-in adapter shims. The real drivers are stock vendor modules
-(`/vendor/lib/modules`: wmt_drv, wmt_chrdev_wifi, wlan_drv_gen2, bt_drv,
-gps_drv). Their CRCs disagree with the rebuilt kernel (module_layout — expected,
-from the LuneOS config fragment), so:
+A rebuilt Tier B kernel refuses the phone's own modules. The LuneOS config
+fragment moves struct layouts (SYSVIPC alone adds two fields to `task_struct`),
+the stock defconfigs set `CONFIG_MODVERSIONS`, and the result is
+`disagrees about version of symbol module_layout` on every one of them. It is not
+a niche problem: on mindphone it is the MTK WMT combo driver (wifi/BT/GPS/FM core,
+which is not in the GPL kernel drop at all — only built-in adapter shims), and on
+sunfish it is **all 44 modules the vendor ships**, taking wifi, audio, the
+vibrator, vold's user-0 storage and both DSPs with them.
 
-- set `CONFIG_MODULE_FORCE_LOAD=y` in luneos.cfg,
-- copy the modules to `/lib/modules/4.14.186/` + depmod,
-- `modprobe --force -a` them (firmware_class path → `/android/vendor/firmware`).
+- set `CONFIG_MODULE_FORCE_LOAD=y` in luneos.cfg — this only makes forcing
+  *possible*; something still has to ask for it,
+- **derive the list and the order from the vendor's own init**, never hand-write
+  one (see hal-userspace.md, "let the vendor's init load them"): `insmod` lines in
+  `/vendor/etc/init/*.rc` for the connac era, `/vendor/etc/init.insmod.<hw>.cfg`
+  for Qualcomm and the MTK GKI devices, `modules.load` as the fallback,
+- escalate per module — plain `modprobe`, then `--force-vermagic`, then `--force`.
+  Starting at `--force` hides a real KMI break on a port where only the vermagic
+  string differs,
+- point `firmware_class.path` at `/android/vendor/firmware` first. The kernel
+  resolves `request_firmware()` against the *host* filesystem, not the
+  container's.
 
-Force-loading stock modules **proved safe in practice** on mindphone (wifi, BT,
-GPS all came up). This is the Tier B analogue of the Tier A KMI discipline.
+Force-loading stock modules **proved safe in practice** — mindphone (wifi, BT and
+GPS all came up) and the sunfish work. This is the Tier B analogue of the Tier A
+KMI discipline.
+
+**Do not stage the modules in `/lib/modules/$(uname -r)`.** The obvious place is
+the wrong one: udev's coldplug autoloads by modalias out of that directory, so a
+depmod'd copy of a whole vendor set there makes the *next* boot insmod every
+matching vendor module before anything is ready. On the MP01 that pulled in
+`mtk_lpm` within a second of udevd starting, froze the SoC, and left the hardware
+watchdog bootlooping the device on every boot after the first. Symlink the vendor
+`.ko` into a private tree under `/run` instead, out of udev's sight and off
+persistent storage, and point `depmod -b` and `modprobe -d` at it. (This
+supersedes the "copy to /lib/modules + depmod" advice this section used to give;
+`mtk-load-modules.sh` carries the fix and the reasoning.)
+
+Two things that are easy to get wrong once the loading itself works:
+
+- **The vendor's cfg does more than load modules.** Qualcomm's
+  `init.insmod.<hw>.cfg` interleaves `enable|<sysfs path>` lines that are what
+  actually start the DSPs, and the node one of them writes to is created by a
+  module earlier on the same list. Walk the file, do not grep the module names
+  out of it. On sunfish, missing `adsp_loader_dlkm.ko` means no
+  `/sys/kernel/boot_adsp/boot` to write to, which means no ADSP, which surfaces
+  as fastrpc "Transport endpoint is not connected" and a device that reports it
+  has no sensors.
+- **A module that is shipped but not listed gets no chance to be forced.**
+  `incrementalfs.ko` is on sunfish's vendor partition and absent from its cfg,
+  because Android loads it itself with `finit_module` — a path with no force
+  option, so it fails with `Exec format error` and vold cannot prepare user 0.
+  Name those separately.
+
+Reason from the **vendor partition**, not from the defconfig: what matters is
+which `.ko` files the phone actually carries, not which symbols are `=m` in the
+kernel tree's defconfig. Guessing from the latter is how sunfish's recipe came to
+predict working audio on a device with no ALSA card. `debugfs -R "ls -l /lib/modules"
+vendor.img` answers it without root or a loop mount.
 
 Caveat noted: luneos.cfg flips `FW_LOADER_USER_HELPER` off (halium default) while
 stock has it on — if MTK wifi/firmware loading misbehaves, revisit.
