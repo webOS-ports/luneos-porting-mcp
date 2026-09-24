@@ -87,6 +87,35 @@ inventing them. UBports and Droidian both publish them as `deviceinfo`
 (`deviceinfo_flash_offset_ramdisk` etc.); Droidian's `kernel-info.mk` calls the same
 value `KERNEL_BOOTIMAGE_INITRAMFS_OFFSET`.
 
+### The window does not bind on every bootloader — surya proves it
+
+surya (POCO X3 NFC, SM7150) carries the same nominal layout as the Qualcomm v0
+devices — `base 0x0`, `kernel 0x8000`, `ramdisk 0x01000000`, so a 16,744,448 B
+window — but its **shipping /e/OS kernel is 17,781,272 B**, a megabyte past the
+line, and the device boots that image every day.
+
+The difference is the bootloader generation, not the device: surya is an
+Android-10-launch device with a header **v2** image loaded by **ABL** (the
+UEFI-based Qualcomm loader), which relocates the images it loads instead of
+honouring the header offsets the way the older `aboot` did. On such a device the
+offsets are close to advisory.
+
+So the rule reads: **assert the window, and when a shipping image for that exact
+device violates it, believe the device.** A stock image that boots is the
+strongest possible evidence about its own bootloader — stronger than the header
+arithmetic. What you must not do is conclude the reverse: an image that fits is
+never evidence that something else is the bug.
+
+It is still worth shrinking. On surya the two config levers above took the LuneOS
+kernel from 18,599,221 B to **14,782,385 B** — a 3.6 MB saving that also put it
+1,962,063 B *inside* a window its own vendor kernel overruns:
+
+| | bytes | vs window |
+|---|---|---|
+| stock /e/OS 4.14.356 | 17,781,272 | over by 1,036,824 |
+| LuneOS, first build | 18,599,221 | over by 1,854,773 |
+| LuneOS, `IKHEADERS`+`KALLSYMS_ALL` off | **14,782,385** | **1,962,063 spare** |
+
 ## Header v0 with an appended device tree (Qualcomm aboot)
 
 Pre-Android-10 Qualcomm devices carry the device tree **concatenated onto the
