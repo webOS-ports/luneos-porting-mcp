@@ -659,16 +659,48 @@ remains is deliberate). Known checker quirks to not chase:
 Interpret errors as "explain or fix", not "fix": on bluejay the final config ships
 with 5 errors, every one accounted for.
 
-## CONFIG_SYSVIPC is not optional on LuneOS (and GKI defaults it off)
+## CONFIG_SYSVIPC — required until 15 Sep 2026, not required since
+
+**Current answer: leave it off.** PmLog moved to POSIX shared memory, so the
+dependency described below is gone. The history stays because the failure it
+produced is the kind that cannot be diagnosed from a journal, and because any
+rootfs built before the change still has it.
+
+Check the rootfs you are about to ship rather than trusting either answer — one
+command, no device needed:
+
+```
+$ readelf --dyn-syms /usr/lib/libPmLogLib.so.3.3.0 | grep -E 'shm|sem'
+  UND shm_open@GLIBC_2.34      <- POSIX, needs no SysV IPC            (current)
+  UND shmget@GLIBC_2.17 …      <- SysV, CONFIG_SYSVIPC=y required   (pre-Sep-15)
+```
+
+Checked on `luneos-dev-image-halium-arm64` 20260924122732 during the surya
+port: only `shm_open`, and no `shmget`/`shmat`/`semget` anywhere in the library.
+A scan of `usr/{lib,bin,sbin,libexec}` for real SysV imports finds libc itself,
+libasound, libdevmapper, libcrypto, libperl, ntpd and the util-linux/valgrind
+IPC tools — **nothing on the LuneOS boot path**. The only `QSharedMemory` users
+are the two Qt Wayland `shm-emulation-server` plugins, which the hwcomposer
+path does not load.
+
+That retires the conflict this section used to describe: a Tier A device no
+longer has to choose between keeping the stock vendor modules loadable and
+having a compositor, and **the `android_kabi` padding patch below is not needed
+on a new port** — it stays documented because MP01 ships it and because the
+same technique applies to any option that grows `task_struct`.
+
+Keep `CONFIG_IPC_NS` off along with it (it depends on SYSVIPC) and tell LXC not
+to unshare the namespace: `lxc.namespace.keep = ipc user`.
+
+### The original finding (MP01, MT6789, 15 Sep 2026)
 
 Android does not use SysV IPC, so GKI configs ship `# CONFIG_SYSVIPC is not set`.
-LuneOS **does** need it: `libPmLogLib.so` calls `shmget()`/`shmat()`. Without
-SysV IPC every `PmLogCtl` invocation blocks forever waiting for
+LuneOS **did** need it: `libPmLogLib.so` called `shmget()`/`shmat()`. Without
+SysV IPC every `PmLogCtl` invocation blocked forever waiting for
 `com.webos.pmlogd` to answer, and PmLog is wired into far more than logging —
 `luna-service2` itself depends on `pmloglib`.
 
-Measured on MP01 (MT6789), 15 Sep 2026. Five units died on 90s timeouts with
-**no output of their own**:
+Five units died on 90s timeouts with **no output of their own**:
 
 ```
 surface-manager-daemon   db8-maindb   db8-mediadb   bluebinder   camera-droid-heal
