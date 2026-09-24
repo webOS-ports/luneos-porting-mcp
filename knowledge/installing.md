@@ -82,9 +82,84 @@ avbtool make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta-disabled
 
 (or `fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img`). MTK lk in unlocked/orange state then boots the unsigned image. Optionally append an unsigned hash footer with avbtool so footer-expecting tooling stays happy — not required once verification is off. Flash **both** boot slots to keep A/B consistent.
 
+### radon (FuriPhone FLX1s, MT6877) — SP Flash Tool / mtkclient, NOT fastboot
+
+Kit: `~/webos/LuneOS/staging/radon-staging/`. **The first kit here that does not
+use fastboot at all.** The FLX1s is flashed over MediaTek's BROM/preloader link
+— SP Flash Tool on Windows, `mtkclient` on Linux. There is no fastboot step in
+the install and no `fastboot getvar` to interrogate the device with, which
+changes several habits this document otherwise assumes.
+
+Entering flash mode: power fully **off**, hold **Volume Down**, plug in USB. A
+bootlooping device presents its preloader on each cycle and mtkclient polls for
+exactly that.
+
+```
+./backup-stock.sh     # reads boot_a/boot_b/expdb - writes nothing
+./install.sh          # boot_a + boot_b -> userdata
+```
+
+Partitions are written **by name** (`mtk w <name> <file>`), never by offset.
+mtkclient's `wo`/`wf` are deliberately unused: a wrong offset overwrites what
+follows, and on this SoC that can include the preloader — the one genuinely
+hard-to-recover MediaTek brick.
+
+What differs from every fastboot kit, and why:
+
+| | fastboot kits | radon |
+|---|---|---|
+| Partition sizes | `fastboot getvar partition-size:x` | parsed from `mtk printgpt` (`name: Offset 0x…, Length 0x…`) |
+| Which slot is active | `fastboot getvar current-slot` | **unknowable from the host** — it lives in `misc`. Both slots are written by default |
+| Unlock state | `fastboot getvar unlocked` | not exposed; BROM does not care |
+| vbmeta | flashed with `--disable-verity --disable-verification` | flashed, from a **generated** empty unsigned AVB image with `flags 0x3` — byte-identical to the one FuriLabs ship |
+| `super` | untouched | untouched, and here it matters more: **FuriLabs' own vendor image lives in it** and the port runs against that vendor |
+
+**Read the vendor's own flash package before deciding a device needs no
+vbmeta.** The first version of this kit flashed none, reasoning from
+`DEVICE_VBMETA_REQUIRED = 0` in FuriLabs' *kernel* packaging. That variable only
+says the kernel .deb builds no vbmeta — their *flash* package ships one anyway
+(`merged/vbmeta.img`, `is_download: true` in the scatter), and it is an empty
+**unsigned** AVB image with `flags = 0x3`
+(HASHTREE_DISABLED | VERIFICATION_DISABLED), `release_string "avbtool 1.2.0"`,
+4096 bytes. Writing it is what lets an unsigned self-built kernel boot.
+
+That file is trivially regenerable — a 256-byte header, `algorithm_type 0`,
+`flags 3`, zero-padded to 4096 — and a generated copy comes out byte-identical,
+so a kit can ship its own rather than redistributing the vendor's.
+
+**MediaTek scatter sizes for the LAST partition are nominal.** The MT6877
+scatter declares `userdata` as 3 GiB (`0xc0000000`) while FuriLabs themselves
+ship a 6.4 GiB `userdata.img` against it — and the MP01 (MT6789) declared the
+same 3 GiB for a partition the device reported as 108.8 GiB. An install script
+should treat a reported `userdata` size at or below the nominal figure as
+suspect and ask, rather than refusing and sending the operator off to shrink an
+image that did not need shrinking.
+
+**MTK lk does not verify the boot header's SHA-1 `id` field.** FuriLabs' own
+shipping `boot.img` has an `id` that matches its contents under no v0/v1/v2
+scheme, and it boots — most likely because they rebuild the ramdisk into an
+already-packed image. Do not spend time chasing an `id` mismatch on a MediaTek
+device.
+
+`expdb` is the debugging channel when USB never comes up — same as mp01, and
+readable over the same preloader link that did the flashing:
+
+```
+( cd ~/mtkclient && python3 mtk.py r expdb expdb.bin )
+strings expdb.bin | grep -iE 'kernel|panic|watchdog' | tail -40
+```
+
+`backup-stock.sh` saves a *baseline* expdb from a healthy phone, which is what
+separates "this line is the failure" from "this line is always there".
+
+**There is no published factory image for this device.** FuriLabs ship their
+kernel as a Debian package (`linux-bootimage-furiphone-radon`), not a
+downloadable `boot.img`, so backing up `boot_a`/`boot_b` before flashing is the
+only cheap way back. `restore-stock.sh` writes it back.
+
 ## Debug boot images and boot-failure entry points
 
-- Every kit ships `boot-<device>-luneos-debug.img`: the same image with `enable_adb` on the cmdline → init drops into the **initramfs adbd debug shell**. It is self-contained (kernel + ramdisk + cmdline), so `fastboot boot boot-<device>-luneos-debug.img` runs it **without flashing anything** — regardless of what the bootloader does with `init_boot` during `fastboot boot`. This is the first tool to reach for when a device doesn't come up.
+- Every kit ships `boot-<device>-luneos-debug.img`: the same image with `enable_adb` on the cmdline → init drops into the **initramfs adbd debug shell**. It is self-contained (kernel + ramdisk + cmdline), so `fastboot boot boot-<device>-luneos-debug.img` runs it **without flashing anything** — regardless of what the bootloader does with `init_boot` during `fastboot boot`. This is the first tool to reach for when a device doesn't come up. **Two exceptions**: MediaTek lk often does not implement `fastboot boot` at all (mp01 flashes the debug image instead of booting it), and radon has no fastboot whatsoever — there the debug image is written to `boot_a` with mtkclient.
 - If normal boot hangs in the initramfs, it panics into an adb gadget named "Halium initrd — Failed to boot" — `adb shell` then and read `/dev/kmsg`.
 - Old mindphone note: the initramfs `machine.conf` had copy-pasted `mmcblk0p27/28` values — harmless (only the panic path uses `system_partition`) but should be by-name paths.
 
