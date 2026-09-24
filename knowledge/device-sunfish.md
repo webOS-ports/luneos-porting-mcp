@@ -17,39 +17,57 @@ A pre-GKI Snapdragon 730G (SM7125, platform `sm7150`) running the generic `haliu
 | boot header | v2, pagesize 4096, kernel 0x00008000, ramdisk 0x01000000, tags 0x00000100, dtb 0x01f00000 (one 425,348 B FDT). Read out of the stock image, which **disagrees with BoardConfig-common.mk** on ramdisk and tags — the shipped image wins |
 | Builds | boot.img + initramfs only. The rootfs is `MACHINE=halium-arm64`; the GSI is chosen at install time |
 
-## The vendor modules are the port
+## The vendor modules are the port — and we build them ourselves
 
-`/vendor/etc/init.insmod.sunfish.cfg` names 48 modules; 44 actually ship in `/vendor/lib/modules`. Against a kernel rebuilt with `luneos.cfg` **none of them load** — `disagrees about version of symbol module_layout`, 44 out of 44, measured 22 Sep 2026. The stock defconfig sets `CONFIG_MODVERSIONS` and the LuneOS delta (SYSVIPC alone adds two fields to `task_struct`) moves the CRCs.
+`/vendor/etc/init.insmod.sunfish.cfg` names 48 modules and the vendor partition
+ships ~41 of them: the whole QTI audio DLKM stack, `qcacld` wlan, `ftm5` touch,
+`drv2624` haptics. The vendor's config has `CONFIG_MODVERSIONS=y`, so they only
+load into a kernel whose exported-symbol CRCs match theirs. Without them there is
+no wifi, no audio, no sensors, no Bluetooth, no camera, no NFC and no
+fingerprint — which is exactly the list the owner reported.
 
-The vendor's `/vendor/bin/init.insmod.sh` calls plain `modprobe`, with no `--force`, and then sets `vendor.all.modules.ready` **unconditionally** — so it cannot recover and nothing downstream notices. `CONFIG_MODULE_FORCE_LOAD=y` makes forcing possible; the force has to come from the host side.
+**Loading the vendor's prebuilt modules is not achievable here, and that is a
+measurement, not an opinion.** The LuneOS config delta moves the CRC of **8158
+of 12823** exported symbols, because the options LuneOS cannot drop are the ones
+touching the most central structures: `SYSVIPC` adds two members to
+`task_struct`, `IPC_NS`/`PID_NS`/`USER_NS` change the namespace structs it points
+at through `nsproxy`, and `FANOTIFY` changes `struct inode`. The
+`#ifndef __GENKSYMS__` patch that took bramble to 0/218 handles *one* struct; it
+does not scale to that set.
 
-**The chain that is easy to misread.** The cfg does not only load modules:
+**So build them instead.** The kernel comes from LineageOS's own tree at the
+revision their build used, so their modules are in it too, and ours match by
+construction:
 
 ```
-modprobe|adsp_loader_dlkm.ko apr_dlkm.ko ... wlan.ko wsa881x_dlkm.ko heatmap.ko ftm5.ko drv2624.ko
-setprop|vendor.all.modules.ready
-enable|/sys/kernel/boot_adsp/boot
-enable|/sys/kernel/boot_cdsp/boot
-enable|/sys/kernel/boot_slpi/boot
-setprop|vendor.all.devices.ready
+vermagic=4.14.357-openela-g28f9290ae067     LineageOS 23.2's modules
+vermagic=4.14.357-openela-g28f9290ae067     ours
 ```
 
-Those three `enable` lines are what actually start the DSPs, and `/sys/kernel/boot_adsp/boot` is created by `adsp_loader_dlkm.ko` — the first entry on the modprobe line. No module → no sysfs node → no write → **the ADSP and SLPI never boot**, and the symptom points somewhere else entirely:
+40 of their 41 are built here; the missing one is `rdbg.ko`, a Qualcomm debug
+transport this port disables on purpose. The mechanism is three machine-local
+lines plus two script changes, all described in kmi-crc-matching.md (Step −1):
 
-- `adsprpc: fastrpc_rpmsg_probe: opened rpmsg channel for cdsp` — cdsp only, never adsp
-- `ADSPRPC: audio_pdr_adsprpc is uninitialzed` / `sensors_pdr_adsprpc is uninitialzed`
-- `adsprpcd: apps_dev_init failed for domain 0, errno Transport endpoint is not connected`, restarting ~4×/s forever (2561 restarts in ten minutes)
-- `chre: remote_handle_open failed for chre_slpi`
-- `sensorfw: HYBRIS CTL invalid sensor type: 1` → `no such sensor "accelerometeradaptor"` → sensorfwd exits 1
+| Where | What |
+|---|---|
+| `sunfish.conf` | `KERNEL_SPLIT_MODULES = "0"` + `ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL = "kernel-modules"` — modules ride in the boot image, next to the kernel they were built against |
+| `init.sh` | `mount_kernel_modules()` — was a never-called stub; now stages `/lib/modules/$(uname -r)` into the rootfs before `switch_root`, idempotently |
+| `mount-android.sh` | `overlay_kernel_modules()` — binds ours over `/android/vendor/lib/modules`, **keeping the vendor's `modules.load`/`dep`/`softdep`** so the container's `init.insmod.sh` loads them in the vendor's order |
 
-Everything else that is dead without the modules: **wifi** (`wlan.ko` — the firmware side is already fine, `icnss: WLAN FW is ready: 0xd87`), **audio** (the whole dlkm stack, so no ALSA card at all: `Cannot get card index for b1`), **the vibrator** (`drv2624` → no `/sys/class/leds/vibrator`, HAL started and exited 124 times), and **vold's user-0 storage** (`incrementalfs`).
+`CONFIG_MODULE_FORCE_LOAD` is no longer needed and the CRC gate no longer
+applies — nothing has to match. Cost: the initramfs grows from 6.6 MB to 13.4 MB
+and the boot image to 35.0 MB, 52% of the 64 MB partition.
 
-**Fix:** the `45-vendor-modules` pre-start hook in `android-system` walks the vendor's own cfg, escalating plain → `--force-vermagic` → `--force` per module, honouring the `enable|` lines. Opt-in per codename via `vendor-modules.d/<codename>`, because force-loading is a per-device judgement. Two details worth keeping:
+Two packaging traps this hit, both in the playbook: `KERNEL_SPLIT_MODULES = "0"`
+is mandatory (under LTO each module's `depends=` names `.lto` intermediates that
+no package provides — LineageOS's own shipped modules have the same field), and
+`MODULE_TARBALL_DEPLOY` cannot be used because the tarball is written by
+`kernel_do_deploy`, the very task that consumes this initramfs — a dependency
+loop, 1705 unbuildable tasks.
 
-- **Not `/lib/modules/$(uname -r)`.** udev coldplug autoloads by modalias from there; a depmod'd vendor set in that directory bootloops the device from the second boot on (measured on MP01 — `mtk_lpm` a second after udevd, SoC freeze, hardware watchdog). Use a private tree under `/run` with `depmod -b` and `modprobe -d`.
-- **`incrementalfs` is not in the cfg.** Android loads it itself with `finit_module`, which cannot force (`Exec format error`), so it has to be named separately.
-
-**Reason from the vendor partition, not from the defconfig.** Only nine symbols on that cfg line are `=m` in `sunfish_defconfig`, which reads as "LineageOS builds the audio stack in, so a first boot has audio". It does not: Google shipped the whole dlkm stack as `.ko` (adsp_loader, apr, q6\*, wcd\*, swr\*, \*_macro, bolero, machine, platform, stub, snd_event). The touchscreen half of that reasoning *is* right — `CONFIG_TOUCHSCREEN_FTS_S5` is built in and touch works on a kernel where not one vendor module loaded.
+**The chain that is easy to misread.** The cfg does not only load modules — it
+also sets `vendor.all.modules.ready` unconditionally afterwards, so a total
+module failure is invisible to everything downstream.
 
 ## Multi-fstab: firmware_mnt, and what it takes down with it
 
@@ -150,22 +168,35 @@ reproducible, which /e/OS 13 was not.
 
 **The health HAL is not stubbed**, unlike sargo's 2.0 equivalent. Stubbing it cost more noise than it saved — 621 `Could not find 'android.hardware.health@2.1::IHealth/default' for ctl.interface_start` in ten minutes, because `storaged` is not the only client: **`gnss_service`** polls for it once a second forever, and GPS is wanted. The vendor rc declares the service with no `interface` line, so init can never satisfy a `ctl.interface_start` for it — the only thing that works is the real HAL registering `IHealth` itself.
 
-## Status (22 Sep 2026)
+## Status (24 Sep 2026)
 
-Up: display, touch (FTS built in), modem and RIL (`Connected to android.hardware.radio@1.4::IRadio/slot1`, `SIM card OK`), cdsp, venus, the GPU.
-Not yet: wifi, audio, sensors, vibrator, bluetooth, telephony — all of the first four behind the vendor modules, bluetooth behind the kernel fragment, telephony behind an **ofono 2.19 SEGV** that fires right after the SIM file reads (`Requested file structure differs from SIM: 6fb7`, `Facility lock query error: INVALID_ARGUMENTS`, `session_read_info not implemented`) and restarts every nine seconds. No backtrace yet: `systemd-coredump` is disabled on the device.
+**Target is LineageOS 23.2**, not the /e/OS 13 the phone arrived with: that
+release is maintained for sunfish, and its build publishes the kernel revision
+(`build-manifest.xml` → `28f9290ae067`), the config it shipped (`IKCFG_ST` in its
+standalone `boot.img`) and its vendor modules (`vendor.img` via
+`payload_extract.py`) — so it can be reproduced exactly rather than inferred.
 
-## Reading the stock vendor image without a device
+Up, on hardware: display, touch (FTS built in), the GPU and EGL, modem and RIL
+(`SIM card OK`), cdsp, venus, the compositor, and the whole userspace — the owner
+has been using Settings, Camera, Photos and Phone. TrustZone works since the
+Clang switch (`scm_call` 44 failures → 0), which is what unblocked PIL, the zap
+shader and therefore the GPU.
 
-Most of the facts above came out of the factory image rather than a phone, and nothing needed root or a loop mount:
+Built but **not yet booted**: our own build of the 40 vendor modules, shipped in
+the boot image (rev 6 of the staging kit). If they load, wifi, audio, sensors,
+Bluetooth, camera, NFC and fingerprint should all return together, since every
+one of them was blocked behind that single problem. The three checks to run
+first:
 
+```sh
+dmesg | grep -iE 'disagrees about version|Unknown symbol'   # expect nothing
+lsmod | wc -l                                               # expect ~40
+dmesg | grep -i 'mount-android: overlaid'                   # the bind-mount
 ```
-unzip -j sunfish-<build>-factory-<hash>.zip '*/image-sunfish-*.zip'
-unzip -j image-sunfish-<build>.zip vendor.img        # already raw ext4, not sparse
-debugfs -R "cat /etc/init.insmod.sunfish.cfg" vendor.img
-debugfs -R "ls -l /lib/modules"                vendor.img
-debugfs -R "cat /etc/fstab.sm7150"             vendor.img
-debugfs -R "dump /bin/hw/<binary> /tmp/x"      vendor.img   # then strings/readelf
-```
 
-Worth doing before guessing at a vendor's behaviour — the module list, the load order, the fstab split and the abort string in the USB gadget HAL were all one `debugfs` call away.
+Still open regardless: an **ofono 2.19 SEGV** right after the SIM file reads
+(`Requested file structure differs from SIM: 6fb7`, restarting every nine
+seconds, no backtrace because `systemd-coredump` is disabled on the device), and
+the dtbo pairing has never been proven — our base dtb carries `__symbols__` as
+stock's does, and the panel comes up, which is the strongest evidence so far.
+

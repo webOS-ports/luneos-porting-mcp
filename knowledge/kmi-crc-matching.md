@@ -11,7 +11,122 @@ modules, the vendor's kernel is the specification and your kernel is the
 implementation.** Everything below is about finding out what that specification
 actually is, rather than what a repository suggests it might be.
 
+But read Step −1 first. The cheapest way to satisfy a specification is often to
+build the thing yourself rather than to reverse-engineer a binary's expectations
+of it — and on a device whose ROM is open, you can.
+
 ---
+
+## Step −1 — first ask whether you need to match at all
+
+**Everything below is about making *their* module binaries load into *your*
+kernel. Before spending a day on it, ask whether you can build the modules
+instead.** On sunfish that question was asked eight builds too late.
+
+If the kernel source is available — and on a LineageOS-supported device it is,
+since that is how the ROM was built — then the modules are in it too. Build them
+from the same tree and the same config as your kernel and they match **by
+construction**:
+
+```
+vermagic=4.14.357-openela-g28f9290ae067     LineageOS's modules
+vermagic=4.14.357-openela-g28f9290ae067     ours, from the same revision
+```
+
+Check it in one command before believing any of it:
+
+```sh
+# what the vendor ships, against what your kernel build produced
+ls vendor-modules/*.ko | sed 's|.*/||' | sort  > /tmp/theirs
+find <kernel build> -name '*.ko' | sed 's|.*/||' | sort > /tmp/ours
+comm -12 /tmp/theirs /tmp/ours | wc -l        # sunfish: 40 of their 41
+```
+
+The one module missing there was `rdbg.ko`, a Qualcomm debug transport this port
+had deliberately disabled — i.e. nothing was missing at all.
+
+### Why this is not merely easier but *necessary*
+
+The CRC route has a hard ceiling, and it is not a matter of finding the right
+option. The LuneOS delta moves the CRC of **8158 of 12823 exported symbols** on
+this kernel (measured: diff the two `Module.symvers`), because the options LuneOS
+cannot do without are exactly the ones that touch the most central structures:
+
+| Option | Changes | Reached by |
+|---|---|---|
+| `SYSVIPC` | `task_struct` (+`sysvsem`, `sysvshm`) | every symbol taking a task |
+| `IPC_NS`, `PID_NS`, `USER_NS` | `ipc_namespace`, `pid_namespace`, `user_namespace` | `task_struct` via `nsproxy` |
+| `FANOTIFY` | `struct inode` | every filesystem and cdev symbol |
+
+The `#ifndef __GENKSYMS__` trick works for **one** struct (it took bramble to
+0/218 for SYSVIPC alone). It does not scale to a set of nested namespace structs
+plus `inode`, and a patch series that hid all of them would be a permanent
+maintenance burden on the most churn-prone headers in the tree.
+
+### How to ship your own modules
+
+Three pieces, all small (sunfish's are the reference implementation):
+
+1. **Put them in the machine initramfs, not the rootfs.** The rootfs is the
+   generic `halium-arm64` one and cannot carry per-machine modules; and shipping
+   modules in the same image as the kernel they were built against is the only
+   arrangement in which the two cannot drift apart.
+
+   ```bitbake
+   KERNEL_SPLIT_MODULES = "0"
+   ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL = "kernel-modules"
+   ```
+
+2. **Stage them into the rootfs from the initramfs**, since the initramfs is
+   freed at `switch_root`. `init.sh` already has a `mount_kernel_modules()` hook
+   for this — it was a never-called stub. Call it after `mountroot` and before
+   `switch_root`, and make it idempotent with a marker file.
+
+3. **Bind them over the vendor's directory** in `mount-android.sh`, so the
+   container's own `init.insmod.sh` does the loading:
+
+   ```sh
+   cp -a "$ANDROID_ROOT/vendor/lib/modules/." "$stage/"   # vendor's index files
+   cp -f <our .ko files> "$stage/"                        # our binaries on top
+   mount --bind "$stage" "$ANDROID_ROOT/vendor/lib/modules"
+   ```
+
+   **DO keep the vendor's `modules.load`, `modules.dep`, `modules.softdep` and
+   `modules.alias`.** They reference modules by *name*, so they stay correct for
+   your binaries, and `modules.load` preserves a load order the vendor spent
+   real effort on. Any module you do not build keeps the vendor's copy and fails
+   to load exactly as it would have anyway.
+
+### Two packaging traps on the way
+
+**`KERNEL_SPLIT_MODULES = "0"` is not optional on an LTO build.** With OE's
+default per-module packaging, each module's `depends=` field becomes package
+RDEPENDS — and under `CONFIG_LTO_CLANG` that field names the LTO intermediates:
+
+```
+q6_dlkm.ko:  depends=apr_dlkm.lto,snd_event_dlkm.lto
+```
+
+No package provides `kernel-module-apr-dlkm.lto`, so `do_rootfs` fails with
+"none of the providers can be installed". This is **not** a defect in your
+build: LineageOS's own shipped `mpq-dmx-hw-plugin.ko` carries the identical
+`depends=mpq-adapter.lto`, and it is harmless on-device because `modprobe`
+resolves against `modules.dep`, not that field. Unsplit, there are no
+inter-module RDEPENDS to be unsatisfiable.
+
+**`MODULE_TARBALL_DEPLOY` cannot be used for this.** The tarball is created
+inside `kernel_do_deploy`, and on these machines `do_deploy` is the task that
+*consumes* the initramfs to assemble the boot image. Depending on it produced
+`1705 unbuildable tasks` and a dependency loop. **Depend on the kernel's
+package, never on its deploy.**
+
+### When you still have to match
+
+Keep reading below when the source is genuinely unavailable — a GPL-incomplete
+vendor drop, an out-of-tree combo driver (mindphone's MTK WMT stack), or a Tier A
+GKI device where preserving the *stock* KMI is the whole point of the port
+(bluejay, panther). Those are real cases. "The ROM ships modules" is not one of
+them.
 
 ## Step 0 — ask the modules, they know
 
@@ -333,10 +448,19 @@ Two ways to have both, in order of preference:
 
 ## Checklist before flashing a rebuilt Tier B kernel
 
+0. **asked whether the modules can be built instead** (Step −1) — if the ROM's
+   kernel source exists, they almost certainly can, and steps 3 and 5 then stop
+   applying
 1. `vermagic` of the vendor's modules identified, and the `-g<sha>` commit pinned
 2. vendor's real config extracted from `IKCONFIG` and used as the build base
 3. vendor's modules extracted, `kmi-crc-check.py` run → **0 would fail to load**
+   *(only when loading their binaries; skip if shipping your own)*
 4. baseline (`LUNEOS_KERNEL_FRAGMENT = "0"`) also gated at least once
 5. no feature disabled that the modules import (`strings`-check it)
-6. boot-window check passes (kernel end < ramdisk load address)
+   *(likewise)*
+6. boot-window check passes (kernel end < ramdisk load address) — and remember
+   the initramfs grew if it now carries modules
 7. built with the toolchain family the tree's own `build.config.common` names
+8. if shipping your own modules: they are in the boot image, `lsmod` on the
+   device shows roughly the count the vendor's `modules.load` names, and
+   `dmesg` shows neither "disagrees about version" nor "Unknown symbol"
