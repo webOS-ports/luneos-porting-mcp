@@ -120,6 +120,96 @@ inside `kernel_do_deploy`, and on these machines `do_deploy` is the task that
 `1705 unbuildable tasks` and a dependency loop. **Depend on the kernel's
 package, never on its deploy.**
 
+### Shipping your own modules: the two device shapes
+
+Where the modules have to *land* differs, and getting it wrong fails silently -
+the build is green and the device behaves exactly as if nothing changed.
+
+**Shape A - modules live on /vendor (sunfish, most Tier B Qualcomm).** The
+vendor's `init.insmod.sh` modprobes from `/vendor/lib/modules` inside the
+container. Bind our own directory over it from `mount-android.sh`:
+
+```sh
+cp -a "$ANDROID_ROOT/vendor/lib/modules/." "$stage/"   # vendor's index files
+cp -f <our .ko>                            "$stage/"   # our binaries on top
+mount --bind "$stage" "$ANDROID_ROOT/vendor/lib/modules"
+```
+
+The modules must reach the rootfs first: ship them in the machine **initramfs**
+(`KERNEL_SPLIT_MODULES = "0"` + `ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL =
+"kernel-modules"`) and stage them across in `init.sh`'s `mount_kernel_modules()`
+hook, because the generic halium-arm64 rootfs cannot carry per-machine modules
+and the initramfs is freed at `switch_root`.
+
+**Shape B - modules live in the vendor_boot ramdisk (bramble, Tensor GKI).** The
+bootloader merges vendor_boot's ramdisk and then ours, and `init.sh`'s
+`load_kernel_modules()` modprobes whatever is at `/lib/modules`. Two traps here:
+
+1. **cpio layering will not do the substitution for you.** A later archive
+   replaces an earlier entry only at the *same path*. The vendor keeps a real
+   `/lib/modules` directory; our rootfs is usrmerge so our modules are packaged
+   at `/usr/lib/modules`; and our `/lib -> usr/lib` symlink cannot be created
+   over the directory the vendor already made. Result: two separate directories
+   and no override, so the vendor's binaries get loaded against your kernel.
+2. So copy explicitly, before anything is modprobed - `init.sh`'s
+   `stage_our_kernel_modules()` does this, logs the count, and no-ops when both
+   paths already resolve to the same place (Shape A).
+
+**DO keep the vendor's `modules.load`, `modules.dep`, `modules.softdep` and
+`modules.alias` in both shapes.** They address modules by name, so they stay
+correct for your binaries, and `modules.load` preserves a load order the vendor
+tuned. Anything you do not build keeps the vendor's copy and fails as it would
+have anyway.
+
+**DO match the layout exactly.** LineageOS keeps bramble's 221 modules flat at
+`/lib/modules/*.ko` while `modules_install` writes
+`/lib/modules/<version>/kernel/...`; flatten in `do_install` or the override
+never happens.
+
+### A standalone kernel recipe: the packaging shape that works
+
+A recipe that builds with the vendor's own Clang cannot `inherit kernel`, so it
+gets none of `kernel.bbclass`'s packaging arrangements. Five failures came out of
+adding a working `do_install` to one (bramble) - all of them downstream of
+`do_install` having been `noexec` for the recipe's whole life, and none of them
+in the kernel itself:
+
+```bitbake
+# 1. usrmerge: modules must be under /usr, and kbuild always writes lib/modules
+install -d ${D}${nonarch_base_libdir}
+${KERNEL_MAKE} INSTALL_MOD_PATH=${WORKDIR}/modinst INSTALL_MOD_STRIP=1 modules_install
+mv ${WORKDIR}/modinst/lib/modules ${D}${nonarch_base_libdir}/modules
+
+# 2. ownership: pseudo records only what it is asked to. Files kbuild copies in
+#    keep the builder's uid, and do_package then refuses them with
+#    "getpwuid(): uid not found: 1000". An explicit chown IS intercepted.
+do_install[fakeroot] = "1"
+chown -R root:root ${D}${nonarch_base_libdir}/modules
+
+# 3. ...but do NOT make do_deploy fakeroot: bitbake creates sstate-build-deploy
+#    outside pseudo, and the sstate hashing then trips over its ownership.
+#    Set ownership in the archive instead.
+tar --owner=0 --group=0 --numeric-owner -czf ${DEPLOYDIR}/modules-${MACHINE}.tgz ...
+
+# 4. no debug splitting: there is no ${HOST_PREFIX}objcopy under
+#    INHIBIT_DEFAULT_DEPS, and INSTALL_MOD_STRIP already stripped them
+INHIBIT_PACKAGE_STRIP = "1"
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+FILES:${PN} += "${nonarch_base_libdir}/modules"
+
+# 5. packaging must still RUN. PACKAGES = "" breaks buildhistory's postfunc, and
+#    do_package*[noexec] breaks image builds: oe.package_manager walks
+#    do_rootfs's dependencies for do_package_write_ipk edges and demands an
+#    sstate manifest for each.
+```
+
+And on the image side, `ANDROID_INITRAMFS_KERNEL_MODULES` must depend on the
+recipe that really deploys the tarball: on a GKI machine `virtual/kernel` is
+`linux-dummy`, so use `GKI_KERNEL_PROVIDER`. Depending on the kernel's
+`do_deploy` is only safe when a *different* recipe assembles the boot image -
+where the kernel's own `do_deploy` builds it (`kernel_android`), that is a
+dependency loop (1705 unbuildable tasks).
+
 ### When you still have to match
 
 Keep reading below when the source is genuinely unavailable — a GPL-incomplete

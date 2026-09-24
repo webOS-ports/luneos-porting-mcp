@@ -168,6 +168,37 @@ reproducible, which /e/OS 13 was not.
 
 **The health HAL is not stubbed**, unlike sargo's 2.0 equivalent. Stubbing it cost more noise than it saved — 621 `Could not find 'android.hardware.health@2.1::IHealth/default' for ctl.interface_start` in ten minutes, because `storaged` is not the only client: **`gnss_service`** polls for it once a second forever, and GPS is wanted. The vendor rc declares the service with no `interface` line, so init can never satisfy a `ctl.interface_start` for it — the only thing that works is the real HAL registering `IHealth` itself.
 
+## Two traps found on hardware, both about which image carries the fix
+
+**The boot image stages the modules; the rootfs swaps them in.** A revision of the
+staging kit said "boot image only" and the device behaved exactly as before:
+
+```
+initrd: staged 40 kernel modules into the rootfs       <- boot image did its half
+snd_event_dlkm: disagrees about version of symbol module_layout   <- and nothing swapped them
+```
+
+`overlay_kernel_modules()` lives in `/usr/bin/mount-android.sh`, i.e. in the
+**rootfs** (38,201 bytes before it, 40,528 after). Shipping a new boot image with
+an old rootfs stages modules that nothing then uses. Flash both, or check the
+rootfs actually contains the function before claiming a fix is in.
+
+**Atlas's db8 "invalid wildcard" is a red herring.** Every boot rejects five
+permission files:
+
+```
+configurator: {"errorCode":-3989,"errorText":
+  "db: invalid wildcard in - 'org.webosports.app.atlas*'"}   (Partial configuration - 5 failed)
+```
+
+db8 accepts `*` only after a dot (`com.palm.*` works), and the regression landed
+in the Atlas repo on 2026-07-04 (`0e8eb08`, which replaced files listing exact
+callers with one wildcard). It is real and worth fixing - but **it does not stop
+Atlas launching**: sargo rejects the identical file, on the identical rootfs, and
+Atlas runs there. Diagnosed by querying the working device over adb, not by
+reasoning. When an app fails to launch, get a log that contains the launch and
+walk the nine-stage chain in the notes for sargo instead.
+
 ## Status (24 Sep 2026)
 
 **Target is LineageOS 23.2**, not the /e/OS 13 the phone arrived with: that

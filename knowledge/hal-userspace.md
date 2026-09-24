@@ -491,6 +491,82 @@ while the vendor publishes, on AIDL: `biometrics.fingerprint`, `nfc`, `wifi`,
 NFC and sensors all dead for the same reason. Expect it on every A15+ vendor,
 so diagnose it once rather than per-peripheral.
 
+### Before blaming AIDL: is libgbinder even speaking the right protocol?
+
+**Check this first, on every device, before writing or hunting a backend.** It is
+one line of configuration and it invalidates the diagnosis below when wrong.
+
+`libgbinder` chooses its servicemanager protocol from `ApiLevel` in
+`/etc/gbinder.conf` (or any `/etc/gbinder.d/*.conf`, which override it). It picks
+the highest preset **<=** that number, and presets exist only for
+**28, 29, 30, 31, 33, 35 and 36** (`gbinder_config.c`). So `ApiLevel = 32`
+silently selects the **API 31** preset, and the value must match the **vendor**
+the device boots against, not the device's age or the GSI.
+
+Get the vendor's real level from the vendor image itself:
+
+```sh
+debugfs -R "cat /build.prop" vendor.img | grep -E "ro.vendor.build.version.sdk|ro.board.api_level|ro.vndk.version"
+```
+
+or on the device: `getprop ro.board.api_level` (then `ro.vndk.version`, then
+`ro.build.version.sdk`).
+
+**The failure looks exactly like a missing backend.** On sunfish the NFC HAL was
+running (`vendor.st_nfc_hal_service`, pid 283), `nfcd` was healthy and had AIDL
+support (`nfcd-binder-plugin` 1.2.1, `libgbinder` 1.1.52 = upstream HEAD,
+including "Support for AIDL registration notifications"), and the *only* symptom
+was:
+
+```
+nfcd: [gbinder] WARNING! registerForNotifications(
+      android.hardware.nfc.INfc/default) tx error -2147483647
+```
+
+with the device on `ApiLevel = 32` (API 31 preset) against an **SDK 36** vendor.
+A call whose protocol changed across those levels is precisely what breaks first
+while everything else looks fine.
+
+#### The build-time setting cannot serve most devices, and once lied
+
+`GBINDER_API_LEVEL` in `libgbinder.bb` is per-machine and works **only for
+machines that build their own rootfs image**. Verified by reading the value back
+out of the deployed images rather than trusting metadata:
+
+| machine | own rootfs image? | what shipped |
+|---|---|---|
+| halium-arm64, halium-arm, mindphone | yes | 32 / 30 / 30 |
+| athena | yes (`tar.gz`, no `ext4`) | **35** |
+| sargo, sunfish, bramble, bluejay, tangorpro, mp01, tissot-halium, mido-halium | no - they install the shared halium-arm64 image | **32**, always |
+
+And the trap that matters: **every staging kit checked (athena, sargo, bluejay,
+sunfish) shipped the shared halium-arm64 `rootfs.ext4`**, so athena ran the API
+31 preset against an A15 vendor for its entire life *even though its recipe
+correctly said 35*. The metadata was right; kit assembly discarded it. Where a
+machine builds its own image, package from that image.
+
+#### How it is handled now
+
+`luneos-device-config` reads the vendor's API level at boot and writes
+
+```
+/etc/gbinder.d/10-luneos-device.conf
+[General]
+ApiLevel = <vendor SDK>
+```
+
+`gbinder_config.c` states outright that *"Files in the config directory overwrite
+/etc/gbinder.conf"*, so this serves devices with no image of their own and
+self-corrects a stale baked-in value. Verify on-device with:
+
+```sh
+journalctl -b | grep -i "gbinder ApiLevel"
+```
+
+**Consequence for the athena/A15 diagnosis below: it was formed while the
+protocol level was four presets stale.** Re-test fingerprint, NFC and sensors at
+the correct level before concluding a backend is missing.
+
 ### Telling a routing bug from a missing backend
 
 `hwservicemanager` being *alive* does not mean HIDL is fine, and its being
