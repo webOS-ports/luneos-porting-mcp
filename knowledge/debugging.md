@@ -8,6 +8,59 @@ A stage-by-stage playbook for "the device doesn't come up", distilled from real 
 
 ---
 
+
+## 0. Before anything else: diff your .config against the vendor's
+
+If the device's vendor publishes a working kernel config — a stock defconfig, a
+`/proc/config.gz`, a factory image's `merged/.config` — then **diff your built
+`.config` against it before adding a single debugging aid**. It costs two
+minutes, needs no hardware, and on a port that fails to boot it is the highest
+information-per-effort step available.
+
+```sh
+grep -v '^#' built.config    | grep -v '^$' | LC_ALL=C sort > ours.cfg
+grep -v '^#' stock_defconfig | grep -v '^$' | LC_ALL=C sort > stock.cfg
+LC_ALL=C comm -23 ours.cfg stock.cfg     # what we added
+LC_ALL=C comm -13 ours.cfg stock.cfg     # what we changed or dropped
+```
+
+Anything in the first list that touches **early boot** — console drivers,
+netconsole built in rather than modular, memory parameters, LSM or cgroup
+changes — is a boot-failure suspect before any of your porting work is.
+
+**radon (FuriPhone FLX1s), 23 Sep 2026** is the case that motivates this. The
+device hung at the bootloader splash with no console, no USB gadget, no pstore
+and no initramfs trace. The diff was eight lines, of which two were the cause:
+`CONFIG_FRAMEBUFFER_CONSOLE=y` and `CONFIG_NETCONSOLE=y` (stock had it `=m`).
+Both had been added *by the porter* as bring-up instrumentation. Reaching that
+diff took a trace harness, two hybrid boot images and several device
+round-trips; running it first would have cost two minutes.
+
+### Corollary: instrumentation is a change to the thing under test
+
+The fbcon/netconsole block existed to make a first boot observable. It made the
+first boot fail — and then made the failure unobservable, because the kernel
+died while bringing up the console. Every downstream observation (no adb even in
+an `enable_adb` image, empty pstore despite `PSTORE_CONSOLE=y`, nothing written
+by the initramfs trace) was the same symptom, misread as evidence about
+userspace.
+
+Prefer instrumentation that does **not** alter the kernel: an initramfs trace
+written to an unused flash partition (see `device-radon` / `tools.md`) needs no
+config change at all.
+
+### Corollary: substitute in BOTH directions
+
+Hybrid boot images are the right tool for splitting kernel from ramdisk, but one
+direction is not a result:
+
+| test | reading |
+|---|---|
+| vendor kernel + your ramdisk → hangs | "the ramdisk is at fault" — **wrong on its own** |
+| your kernel + vendor ramdisk → hangs | both hang ⇒ the common factor is *your* kernel |
+
+Run the second before concluding anything from the first.
+
 ## Stage 0 — Does the kernel even boot?
 
 Nothing on the screen, no adb, device reboots or sits dead. Two tools before anything else:
@@ -440,7 +493,7 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 
 ### Wifi
 - A `wifi-module-load.service` modprobing a module that doesn't exist on this device (copy-paste from another port) produces a 2 s restart loop — check whether the driver is built-in (`CONFIG_MTK_COMBO=y` on mindphone: no module to load).
-- MTK combo (WMT) pattern: the real drivers are the **stock vendor modules** (`/vendor/lib/modules`: wmt_drv, wmt_chrdev_wifi, wlan_drv_gen2, bt_drv, gps_drv). Their CRCs disagree with a reconfigured kernel (module_layout) — `CONFIG_MODULE_FORCE_LOAD=y` + `modprobe --force` proved safe in practice. Set the firmware path (`firmware_class.path` → `/android/vendor/firmware`) before loading.
+- MTK combo (WMT) pattern: the real drivers are the **stock vendor modules** (`/vendor/lib/modules`: wmt_drv, wmt_chrdev_wifi, wlan_drv_gen2, bt_drv, gps_drv). Their CRCs disagree with a reconfigured kernel (module_layout) — `CONFIG_MODULE_FORCE_LOAD=y` + `modprobe --force` proved safe in practice. Set the firmware path (`firmware_class.path` → `/android/vendor/firmware`) before loading, and stage the modules in a private tree under `/run`, **not** `/lib/modules/$(uname -r)` — udev coldplug autoloads from there and bootloops the device on the next boot (kernel-porting.md).
 - The container's `wmt_loader` needs the MTK connectivity `/dev` nodes exposed to the container; then power-on is `echo 1 > /dev/wmtWifi` **retried until wlan0 exists** (the container wmt daemons patch CONSYS firmware first).
 - This is generalized in `meta-android/recipes-core/mtk-connectivity`: three condition-gated units keyed on `ConditionPathExists |wmt_drv.ko |conninfra.ko`, driven by the connectivity subset of the vendor's `modules.load` (grep `wmt|wlan|conn|bt_drv|gps|fmradio`) — no hardcoded module list, inert on non-MTK.
 - Module-load error decoding (Halium docs, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = module signature enforcement — disable `CONFIG_MODULE_SIG*` (Tier B only; stock GKI leaves MODULE_SIG_FORCE unset anyway, per bluejay). `"Invalid module format"` = kernel/module version-config mismatch — the non-GKI cousin of our CRC story. Broadcom `bcmdhd` is best built `=m`, not `=y` — as a module it picks up the device MAC address; built-in it doesn't. Legacy Qualcomm (pre-2016 SoCs): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath`.
