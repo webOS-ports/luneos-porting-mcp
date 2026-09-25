@@ -32,6 +32,12 @@ Bootloader ARB was bumped by Android 13 and **again by the May 2025 update**. A 
 > `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
 > with it. Anything below that treats it as mandatory, or describes working around
 > its CRC damage, is history - see kmi-crc-matching.md.
+>
+> **It does not follow that the KMI got better.** Measured on sunfish: drift was
+> 8158 of 12823 exported symbols with SYSVIPC on and 8158 of 12823 with it off,
+> because `FANOTIFY` and `CGROUP_DEVICE` poison the same symbols independently.
+> Poison sets overlap, so drift is a max and not a sum - removing one poisoner
+> while another stays shows up as no improvement at all.
 - Userland consequences of the poison list staying off: no SysV IPC (watch Qt QSharedMemory/QSystemSemaphore), no fanotify (systemd fine), no VRF (ofono fine), and **LXC must not unshare the IPC namespace** (PID_NS is available, IPC_NS is not).
 - ACK pin bumped to tag `android14-6.1-2026-06_r7` (6.1.172) for the vendor-hook tracepoints `vh_mm.ko`/`vh_sched.ko` need → **203/203 factory modules load, 0 CRC drift**. Caveat: `repo sync` reverts the pin — re-checkout the tag and re-apply the modules.bzl trim. Also `CONFIG_UEVENT_HELPER=y` added (mdev hotplug).
 - Kernel comes from the **kernel-only** build (`out-luneos-tierA/`), not the full dist — manifest-pinned google-modules don't compile against 6.1.172 headers (irrelevant for Tier A; if option B is ever needed, build at the manifest-matched 6.1.124 state).

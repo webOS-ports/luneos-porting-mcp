@@ -26,20 +26,39 @@ load into a kernel whose exported-symbol CRCs match theirs. Without them there i
 no wifi, no audio, no sensors, no Bluetooth, no camera, no NFC and no
 fingerprint — which is exactly the list the owner reported.
 
-**Loading the vendor's prebuilt modules is not achievable here, and that is a
+**Loading the vendor's prebuilt modules is not needed here, and that is a
 measurement, not an opinion.** The LuneOS config delta moves the CRC of **8158
-of 12823** exported symbols, because the options LuneOS cannot drop are the ones
-touching the most central structures: `SYSVIPC` adds two members to
+of 12823** exported symbols. Two options account for all of it:
+
+`FANOTIFY` adds `fanotify_listeners` to `struct user_struct`, which `struct cred`
+points at and which nearly every core type reaches; and `CGROUP_DEVICE` bumps
+`CGROUP_SUBSYS_COUNT`, which dimensions arrays inside `struct css_set`. Sampled
+over 164 CRCs from `fs/inode.o`, `drivers/base/{core,platform}.o`,
+`kernel/sched/core.o` and `kernel/module.o`: whole delta 143, `FANOTIFY` alone
+143, `SYSVIPC` alone 143, `CGROUP_DEVICE` alone 118, **delta minus those two: 0**.
+Everything else is CRC-free — including `PID_NS` and `USER_NS`, which move nothing
+(`struct nsproxy` is unconditional and `user_namespace`'s members are gated only by
+`PERSISTENT_KEYRINGS`/`SYSCTL`), so the namespace options were never the problem
+they look like. The `#ifndef __GENKSYMS__` patch that took bramble to 0/218 handles
+*one* struct; it does not scale to `user_struct` plus a config-sized array
+dimension.
+
+Both stay on: `CGROUP_DEVICE` is used by 7 units in the shipped rootfs
+(`DeviceAllow=`/`DevicePolicy=`: logind, both journald units, hostnamed,
+bluebinder, both openvpn templates), and dropping `FANOTIFY` alone would buy
+nothing while it does.
 
 > **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
 > `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
 > `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
 > with it. Anything below that treats it as mandatory, or describes working around
 > its CRC damage, is history - see kmi-crc-matching.md.
-`task_struct`, `IPC_NS`/`PID_NS`/`USER_NS` change the namespace structs it points
-at through `nsproxy`, and `FANOTIFY` changes `struct inode`. The
-`#ifndef __GENKSYMS__` patch that took bramble to 0/218 handles *one* struct; it
-does not scale to that set.
+>
+> **It does not follow that the KMI got better.** Measured on sunfish: drift was
+> 8158 of 12823 exported symbols with SYSVIPC on and 8158 of 12823 with it off,
+> because `FANOTIFY` and `CGROUP_DEVICE` poison the same symbols independently.
+> Poison sets overlap, so drift is a max and not a sum - removing one poisoner
+> while another stays shows up as no improvement at all.
 
 **So build them instead.** The kernel comes from LineageOS's own tree at the
 revision their build used, so their modules are in it too, and ours match by
@@ -50,8 +69,14 @@ vermagic=4.14.357-openela-g28f9290ae067     LineageOS 23.2's modules
 vermagic=4.14.357-openela-g28f9290ae067     ours
 ```
 
-40 of their 41 are built here; the missing one is `rdbg.ko`, a Qualcomm debug
-transport this port disables on purpose. The mechanism is three machine-local
+All 41 are built here. It was 40 until Sep 2026, the gap being `rdbg.ko`: that
+driver had been disabled because `drivers/char/rdbg.c` trips
+`-Werror=designated-init`, which is a **GCC-only** warning added via `cc-option`,
+so it never reaches the clang build this kernel now uses — verified by compiling
+`drivers/char/rdbg.o` on its own with no `-Wno-error`. `CONFIG_MSM_RDBG=m` is back
+on, it moves zero CRCs, and with it the overlay replaces the vendor's module set
+outright, which is what makes the CRC drift above a non-issue rather than a
+blocker. The mechanism is three machine-local
 lines plus two script changes, all described in kmi-crc-matching.md (Step −1):
 
 | Where | What |

@@ -71,6 +71,12 @@ KMI-poison list is the Q25's, re-measured here: `CONFIG_SYSVIPC` (with
 > `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
 > with it. Anything below that treats it as mandatory, or describes working around
 > its CRC damage, is history - see kmi-crc-matching.md.
+>
+> **It does not follow that the KMI got better.** Measured on sunfish: drift was
+> 8158 of 12823 exported symbols with SYSVIPC on and 8158 of 12823 with it off,
+> because `FANOTIFY` and `CGROUP_DEVICE` poison the same symbols independently.
+> Poison sets overlap, so drift is a max and not a sum - removing one poisoner
+> while another stays shows up as no improvement at all.
 `SYSVIPC_SYSCTL`, `IPC_NS`) and `CONFIG_USER_NS`. `PID_NS` and
 `CHECKPOINT_RESTORE` are clean.
 

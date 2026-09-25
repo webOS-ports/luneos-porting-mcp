@@ -43,25 +43,80 @@ comm -12 /tmp/theirs /tmp/ours | wc -l        # sunfish: 40 of their 41
 ```
 
 The one module missing there was `rdbg.ko`, a Qualcomm debug transport this port
-had deliberately disabled — i.e. nothing was missing at all.
+had deliberately disabled — i.e. nothing was missing at all. It is now built too
+(`CONFIG_MSM_RDBG=m`, Sep 2026), so the overlay covers all 41 and no prebuilt
+vendor module is loaded on this device at all. Check this before spending a day on
+CRCs: **count what your kernel already builds against what the vendor ships.** The
+answer on sunfish was 40 of 41, and the gap was one option we had switched off
+ourselves.
 
 ### Why this is not merely easier but *necessary*
 
 The CRC route has a hard ceiling, and it is not a matter of finding the right
 option. The LuneOS delta moves the CRC of **8158 of 12823 exported symbols** on
-this kernel (measured: diff the two `Module.symvers`), because the options LuneOS
-cannot do without are exactly the ones that touch the most central structures:
+this kernel (measured: diff the two `Module.symvers`), because two of the options
+LuneOS wants reach a struct that almost every prototype reaches:
 
 | Option | Changes | Reached by |
 |---|---|---|
-| `SYSVIPC` | `task_struct` (+`sysvsem`, `sysvshm`) | every symbol taking a task |
-| `IPC_NS`, `PID_NS`, `USER_NS` | `ipc_namespace`, `pid_namespace`, `user_namespace` | `task_struct` via `nsproxy` |
-| `FANOTIFY` | `struct inode` | every filesystem and cdev symbol |
+| `FANOTIFY` | `atomic_t fanotify_listeners` in `struct user_struct` (`include/linux/sched/user.h`) | `struct cred.user`, and `cred` is reachable from `file`, `sock`, `task_struct`, and from `device` via `class` → `kobj_ns_type_operations` → `sock` |
+| `CGROUP_DEVICE` | `SUBSYS(devices)` bumps `CGROUP_SUBSYS_COUNT`, which dimensions `subsys[]`, `e_cset_node[]`, `e_csets[]` in `struct css_set` / `struct cgroup` | `task_struct.cgroups` |
+| `SYSVIPC` | `sysvsem`, `sysvshm` in the middle of `task_struct` | every symbol taking a task |
+
+**The poison sets overlap, so the drift is a max and not a sum.** This is the
+single most important thing to know before trying to fix drift by removing
+options: dropping `SYSVIPC` from sunfish changed the whole-tree figure by
+*nothing at all* — 8158 of 12823 before, 8158 of 12823 after — because `FANOTIFY`
+and `CGROUP_DEVICE` independently poison the same symbols. A change that removes
+one poisoner while another stays shows up as zero improvement, which reads exactly
+like "the option was innocent" and is not.
+
+Everything else in the fragment is CRC-free. Measured per option on sunfish, over
+164 CRCs sampled from `fs/inode.o`, `drivers/base/{core,platform}.o`,
+`kernel/sched/core.o`, `kernel/module.o`:
+
+| Config under test | CRCs moved vs LineageOS-verbatim |
+|---|---|
+| the whole LuneOS delta | 143 / 164 |
+| `FANOTIFY` alone | 143 / 164 |
+| `SYSVIPC` alone | 143 / 164 |
+| `CGROUP_DEVICE` alone | 118 / 164 |
+| `PID_NS` + `USER_NS` | 0 |
+| `VT` + `VT_CONSOLE` + `HW_CONSOLE` + `DUMMY_CONSOLE*` + `CONSOLE_TRANSLATIONS` | 0 |
+| `DEVTMPFS` (+`_MOUNT`) | 0 |
+| `FHANDLE` / `AUTOFS4_FS` / `MODULE_FORCE_LOAD` / `MSM_RDBG` | 0 each |
+| the 9 `BT_*` options | 0 |
+| **the whole delta minus `FANOTIFY` and `CGROUP_DEVICE`** | **0** |
+
+Note what is *not* in that list: the namespace options. `struct nsproxy` is
+unconditional and `struct user_namespace`'s members are gated only by
+`PERSISTENT_KEYRINGS`/`SYSCTL`, so `PID_NS` and `USER_NS` are KMI-free — the
+opposite of what the shape of the problem suggests, and worth checking rather
+than assuming for any option you are about to fight.
 
 The `#ifndef __GENKSYMS__` trick works for **one** struct (it took bramble to
-0/218 for SYSVIPC alone). It does not scale to a set of nested namespace structs
-plus `inode`, and a patch series that hid all of them would be a permanent
-maintenance burden on the most churn-prone headers in the tree.
+0/218 for SYSVIPC alone). It does not scale to `user_struct` plus a config-sized
+array dimension in `css_set`, and a patch series hiding all of them would be a
+permanent maintenance burden on the most churn-prone headers in the tree.
+
+### How to attribute drift in minutes instead of hours
+
+Do not rebuild the kernel once per option. CRCs come out of genksyms on
+*preprocessed source*, so they are visible in a handful of objects:
+
+```sh
+make -C $src O=$objdir ARCH=arm64 CC=clang LD=ld.lld LLVM_IAS=1      CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig prepare
+make ... fs/inode.o drivers/base/core.o kernel/sched/core.o kernel/module.o
+llvm-nm $objdir/fs/inode.o | awk '$2 ~ /^[Aa]$/ && $3 ~ /^__crc_/'
+```
+
+About three minutes per config instead of an hour, and a private `O=` objdir
+never touches the builder's tree. One catch: **turn LTO off for the measurement**
+(`CONFIG_LTO_NONE=y`, and `CFI_CLANG`/`SHADOW_CALL_STACK` off with it). With LTO
+on, each `.o` is LLVM bitcode, Kbuild's `cmd_modversions_c` sees no `__ksymtab`
+in `objdump -h` and skips the CRC step, so `__crc_*` stays an unresolved weak
+symbol and every config looks identical. Turning LTO off is safe here precisely
+because CRCs do not depend on codegen.
 
 ### How to ship your own modules
 
@@ -511,7 +566,7 @@ the switch.
 
 ---
 
-## The LuneOS delta: SYSVIPC was the worst of it, and it is gone
+## The LuneOS delta: SYSVIPC is gone, and that did not help the KMI
 
 LuneOS needs a small set of options an Android defconfig omits (see
 kernel-porting.md). Most are CRC-neutral.
@@ -526,11 +581,21 @@ removed from PmLogLib - verifiable rather than assumed:
 nm -D libPmLogLib.so.3.3.0 | grep -cE ' U (shmget|shmat|shmdt)'   # 0
 ```
 
-**This is the single biggest simplification available to a Tier B port**, because
-SYSVIPC was also the most KMI-hostile option there is: it inserts `sysvsem` and
-`sysvshm` into the middle of `task_struct`, shifting every member after them, so
-the CRC of every exported symbol whose prototype mentions a task changes -
-`module_layout` included. `CONFIG_IPC_NS` depends on it and disappears with it.
+This is a real simplification of the *fragment* - one fewer option to justify,
+and `CONFIG_IPC_NS` depends on it and disappears with it. SYSVIPC is genuinely
+KMI-hostile: it inserts `sysvsem` and `sysvshm` into the middle of `task_struct`,
+shifting every member after them, so the CRC of every exported symbol whose
+prototype mentions a task changes - `module_layout` included. Measured on sunfish:
+143 of 164 sampled CRCs, on its own.
+
+**But dropping it bought no KMI improvement, and expecting one was a mistake worth
+recording.** sunfish's drift against LineageOS was 8158 of 12823 exported symbols
+with SYSVIPC on and 8158 of 12823 with it off - identical, because `FANOTIFY` and
+`CGROUP_DEVICE` poison the same symbols on their own (143 and 118 of the same 164).
+Poison sets overlap, so **drift is a max, not a sum**: removing one poisoner while
+another remains reads as "no effect" and tells you nothing about the option you
+removed. Attribute per option (see the three-minute harness above) before claiming
+a config change will fix module loading.
 
 So: **check whether it is still in the fragment before doing any work to
 accommodate it.** On sunfish and bramble the correct setting is now
@@ -540,8 +605,31 @@ accommodate it.** On sunfish and bramble the correct setting is now
 ```
 
 and the genksyms patches that existed only to make it survivable have been
-deleted from both recipes. Scale of what that removes: with SYSVIPC and the
-namespaces on, sunfish's delta moved **8158 of 12823** exported-symbol CRCs.
+deleted from both recipes. What is left poisoning sunfish is `FANOTIFY` (added for
+systemd) and `CGROUP_DEVICE`; dropping both takes the sampled drift to 0, but
+neither is worth dropping on this device - see the sunfish note below.
+
+### sunfish: why `FANOTIFY` and `CGROUP_DEVICE` stay on anyway
+
+Both could go — the sampled drift reaches 0 with them reverted — and neither is
+worth removing, because this port does not need CRC compatibility at all.
+
+- `FANOTIFY` sits in the fragment under systemd's mount/automount machinery.
+  Nothing in the LuneOS or meta-android recipes references fanotify, so it is
+  probably droppable. On its own it buys nothing while `CGROUP_DEVICE` remains.
+- `CGROUP_DEVICE` is used: 7 units in the shipped rootfs carry `DeviceAllow=` or
+  `DevicePolicy=` (`systemd-logind`, both `systemd-journald` units,
+  `systemd-hostnamed`, `bluebinder`, both `openvpn@` templates). Without the
+  controller systemd logs a warning and skips the restriction rather than failing
+  the unit, so it is confinement rather than a boot dependency — and the Android
+  container does not need it either (its `/var/lib/lxc/android/config` has zero
+  `lxc.cgroup` directives). Losing the confinement to gain a CRC match we do not
+  need is the wrong trade.
+
+The decision that makes both moot: the kernel builds every module LineageOS ships
+in `vendor/lib/modules`, so the overlay replaces the vendor set outright. Treat the
+CRC gate's "41 would fail to load" on sunfish as informational — it describes
+modules that are never loaded.
 
 ### If some future component needs it again
 

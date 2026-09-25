@@ -35,6 +35,12 @@ directly answers the migration plan's open question 2 for a real GKI device:
 > `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
 > with it. Anything below that treats it as mandatory, or describes working around
 > its CRC damage, is history - see kmi-crc-matching.md.
+>
+> **It does not follow that the KMI got better.** Measured on sunfish: drift was
+> 8158 of 12823 exported symbols with SYSVIPC on and 8158 of 12823 with it off,
+> because `FANOTIFY` and `CGROUP_DEVICE` poison the same symbols independently.
+> Poison sets overlap, so drift is a max and not a sum - removing one poisoner
+> while another stays shows up as no improvement at all.
 - `TMPFS_POSIX_ACL`, `TMPFS_XATTR`
 - `VT`
 - netfilter/PPP/L2TP error items: `NF_LOG_IPV4/6`, `IP_NF_MATCH_RPFILTER`,
@@ -79,7 +85,15 @@ Drift measured with `symvers-drift.py`, load-compatibility with `kmi-crc-check.p
 | 4 | PID_NS back in | **0** | **2/203** |
 
 **RESULT — KMI-poison list (final): `SYSVIPC` (+`IPC_NS`), `FANOTIFY`,
-`NET_L3_MASTER_DEV`.** Everything else in the fragment — DEVTMPFS(+MOUNT), FHANDLE,
+`NET_L3_MASTER_DEV`, and `CGROUP_DEVICE`.** `CGROUP_DEVICE` was added from a later
+sunfish bisect (118 of 164 sampled CRCs on its own: `SUBSYS(devices)` bumps
+`CGROUP_SUBSYS_COUNT`, which dimensions arrays inside `struct css_set` and
+`struct cgroup`); whether it shows up on a given tree depends on whether the
+vendor config already enables it, so check rather than assume. Note also that the
+table above is cumulative and therefore hides the overlap: step 1 removes the
+SYSVIPC group and *still* leaves 190/203 failing, because FANOTIFY alone poisons
+almost the same set. **Drift is a max, not a sum** — attribute one option at a
+time (kmi-crc-matching.md has a three-minute per-object harness for it). Everything else in the fragment — DEVTMPFS(+MOUNT), FHANDLE,
 TMPFS_XATTR/POSIX_ACL, AUTOFS_FS, PID_NS, CHECKPOINT_RESTORE, VT,
 STATIC_USERMODEHELPER=n, QUOTA_NETLINK, the whole netfilter/PPP/L2TP block — is
 KMI-clean: zero CRC drift, 201/203 stock modules load (the 2 failures were
