@@ -511,30 +511,61 @@ the switch.
 
 ---
 
-## The LuneOS delta, and the one option that always conflicts
+## The LuneOS delta: SYSVIPC was the worst of it, and it is gone
 
 LuneOS needs a small set of options an Android defconfig omits (see
-kernel-porting.md). Most are CRC-neutral. The exception is structural:
+kernel-porting.md). Most are CRC-neutral.
 
-**`CONFIG_SYSVIPC` is not optional** — `libPmLogLib` calls `shmget()`/`shmat()`,
-`surface-manager.sh` runs `PmLogCtl` on its first line, and without SysV IPC the
-compositor never starts and nothing says why. It is also the most KMI-hostile
-option there is, because it adds `sysvsem`/`sysvshm` to the middle of
-`task_struct` and moves every CRC downstream.
+**`CONFIG_SYSVIPC` used to be mandatory and is not any more (Sep 2026).** It was
+required because `libPmLogLib` called `shmget()`/`shmat()` and
+`surface-manager.sh` runs `PmLogCtl` on its first line, so without SysV IPC the
+compositor never started and nothing said why. That dependency has since been
+removed from PmLogLib - verifiable rather than assumed:
 
-Two ways to have both, in order of preference:
+```sh
+nm -D libPmLogLib.so.3.3.0 | grep -cE ' U (shmget|shmat|shmdt)'   # 0
+```
+
+**This is the single biggest simplification available to a Tier B port**, because
+SYSVIPC was also the most KMI-hostile option there is: it inserts `sysvsem` and
+`sysvshm` into the middle of `task_struct`, shifting every member after them, so
+the CRC of every exported symbol whose prototype mentions a task changes -
+`module_layout` included. `CONFIG_IPC_NS` depends on it and disappears with it.
+
+So: **check whether it is still in the fragment before doing any work to
+accommodate it.** On sunfish and bramble the correct setting is now
+
+```
+# CONFIG_SYSVIPC is not set
+```
+
+and the genksyms patches that existed only to make it survivable have been
+deleted from both recipes. Scale of what that removes: with SYSVIPC and the
+namespaces on, sunfish's delta moved **8158 of 12823** exported-symbol CRCs.
+
+### If some future component needs it again
+
+Two ways to have SysV IPC and a stable KMI, in order of preference. Both are now
+historical on these devices - do not reintroduce them without first confirming
+the requirement is real:
 
 1. **Android KABI padding** (5.x trees): park the members in
-   `ANDROID_KABI_RESERVE` slots. Needs three free slots — check, because on
+   `ANDROID_KABI_RESERVE` slots. Needs three free slots - check, because on
    4.19/redbull only slot 8 was free and this did not fit.
 2. **Hide the growth from genksyms** (any tree): declare the members at the very
    end of `task_struct`, below `thread`, inside `#ifndef __GENKSYMS__`. genksyms
    then computes the ABI of a `CONFIG_SYSVIPC=n` kernel while the compiler sees
    the fields. Safe because no module allocates a `task_struct`, and on arm64
-   `thread_struct` is fixed-size, so no pre-existing offset moves. Measured on
-   bramble: full LuneOS delta, **0 of 218 modules failing**.
+   `thread_struct` is fixed-size, so no pre-existing offset moves. Measured at
+   the time on bramble: full LuneOS delta, **0 of 218 modules failing**.
 
----
+The trick generalises to any single struct, but it does **not** scale: the
+namespace structs (`ipc_namespace`, `pid_namespace`, `user_namespace`, reached
+from `task_struct` via `nsproxy`) and `struct inode` under `FANOTIFY` would each
+need the same treatment, across the most churn-prone headers in the tree. That
+is why "build the vendor's modules instead" (Step -1) is the better answer when
+the source is available - and why dropping the requirement outright is better
+than either.
 
 ## Checklist before flashing a rebuilt Tier B kernel
 

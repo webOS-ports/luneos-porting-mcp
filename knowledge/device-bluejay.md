@@ -26,6 +26,12 @@ Bootloader ARB was bumped by Android 13 and **again by the May 2025 update**. A 
 - LuneOS fragment: `luneos/luneos_defconfig`, applied via `--//build/kernel/kleaf:defconfig_fragment=//luneos:luneos_defconfig`. Archived at `gsigki/bluejay/luneos_defconfig`.
 - Stock config (via IKCONFIG → `stock-gki-config-6.1.145-bp4a.txt`): `mer_verify_kernel_config` reports 23 errors / 59 warnings — **gki_defconfig alone is NOT enough**, the delta is small and known (DEVTMPFS+MOUNT, FHANDLE, TMPFS ACL/XATTR, VT, netfilter/PPP/L2TP, etc.).
 - **KMI-poison list (final, from CRC bisect): `SYSVIPC` (+`IPC_NS`), `FANOTIFY`, `NET_L3_MASTER_DEV`.** These change core struct layouts under MODVERSIONS — with them on, all 203 stock modules fail (3145 symbol CRCs drift). Everything else in the fragment is KMI-clean (0 drift). Property of GKI, not gs101.
+
+> **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
+> `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
+> `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
+> with it. Anything below that treats it as mandatory, or describes working around
+> its CRC damage, is history - see kmi-crc-matching.md.
 - Userland consequences of the poison list staying off: no SysV IPC (watch Qt QSharedMemory/QSystemSemaphore), no fanotify (systemd fine), no VRF (ofono fine), and **LXC must not unshare the IPC namespace** (PID_NS is available, IPC_NS is not).
 - ACK pin bumped to tag `android14-6.1-2026-06_r7` (6.1.172) for the vendor-hook tracepoints `vh_mm.ko`/`vh_sched.ko` need → **203/203 factory modules load, 0 CRC drift**. Caveat: `repo sync` reverts the pin — re-checkout the tag and re-apply the modules.bzl trim. Also `CONFIG_UEVENT_HELPER=y` added (mdev hotplug).
 - Kernel comes from the **kernel-only** build (`out-luneos-tierA/`), not the full dist — manifest-pinned google-modules don't compile against 6.1.172 headers (irrelevant for Tier A; if option B is ever needed, build at the manifest-matched 6.1.124 state).

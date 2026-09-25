@@ -29,6 +29,12 @@ directly answers the migration plan's open question 2 for a real GKI device:
 - `DEVTMPFS` (+ `DEVTMPFS_MOUNT`)
 - `FHANDLE`
 - `SYSVIPC` (+ `IPC_NS`) — *but see the KMI-poison list below*
+
+> **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
+> `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
+> `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
+> with it. Anything below that treats it as mandatory, or describes working around
+> its CRC damage, is history - see kmi-crc-matching.md.
 - `TMPFS_POSIX_ACL`, `TMPFS_XATTR`
 - `VT`
 - netfilter/PPP/L2TP error items: `NF_LOG_IPV4/6`, `IP_NF_MATCH_RPFILTER`,

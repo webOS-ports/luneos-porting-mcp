@@ -30,6 +30,12 @@ fingerprint — which is exactly the list the owner reported.
 measurement, not an opinion.** The LuneOS config delta moves the CRC of **8158
 of 12823** exported symbols, because the options LuneOS cannot drop are the ones
 touching the most central structures: `SYSVIPC` adds two members to
+
+> **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
+> `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
+> `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
+> with it. Anything below that treats it as mandatory, or describes working around
+> its CRC damage, is history - see kmi-crc-matching.md.
 `task_struct`, `IPC_NS`/`PID_NS`/`USER_NS` change the namespace structs it points
 at through `nsproxy`, and `FANOTIFY` changes `struct inode`. The
 `#ifndef __GENKSYMS__` patch that took bramble to 0/218 handles *one* struct; it

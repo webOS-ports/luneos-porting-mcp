@@ -65,6 +65,12 @@ Two things that fall out of building a different tree than the config came from:
   and an empty `.scmversion`.
 
 KMI-poison list is the Q25's, re-measured here: `CONFIG_SYSVIPC` (with
+
+> **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
+> `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
+> `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
+> with it. Anything below that treats it as mandatory, or describes working around
+> its CRC damage, is history - see kmi-crc-matching.md.
 `SYSVIPC_SYSCTL`, `IPC_NS`) and `CONFIG_USER_NS`. `PID_NS` and
 `CHECKPOINT_RESTORE` are clean.
 

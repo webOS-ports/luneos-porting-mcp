@@ -36,6 +36,12 @@ python3 ../bluejay/kmi-crc-check.py \
 
 Including `vh_mm.ko`/`vh_sched.ko` (the bumped ACK tag covers panther too). The KMI-poison list (`SYSVIPC`+`IPC_NS`, `FANOTIFY`, `NET_L3_MASTER_DEV` stay off) transfers unchanged. `modules.load` is non-topological here as well — **332 hard-dependency pairs backwards across 107 of 204 modules, plus 15 softdep edges** (`clk_exynos_gs.ko` line 16, exporter `cmupmucal.ko` line 45) — so the init v4 dependency-resolving loader is required, same as bluejay.
 
+> **Sep 2026: the SYSVIPC requirement was dropped.** PmLogLib no longer calls
+> `shmget()`/`shmat()` (`nm -D libPmLogLib.so.3.3.0 | grep -c shmget` -> 0), so
+> `# CONFIG_SYSVIPC is not set` is now correct everywhere and `CONFIG_IPC_NS` goes
+> with it. Anything below that treats it as mandatory, or describes working around
+> its CRC damage, is history - see kmi-crc-matching.md.
+
 ## Images built
 
 | file | bytes | partition | headroom |
