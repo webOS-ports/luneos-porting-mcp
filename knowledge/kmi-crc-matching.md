@@ -609,27 +609,56 @@ deleted from both recipes. What is left poisoning sunfish is `FANOTIFY` (added f
 systemd) and `CGROUP_DEVICE`; dropping both takes the sampled drift to 0, but
 neither is worth dropping on this device - see the sunfish note below.
 
-### sunfish: why `FANOTIFY` and `CGROUP_DEVICE` stay on anyway
+### Does anything actually need `FANOTIFY` or `CGROUP_DEVICE`?
 
-Both could go — the sampled drift reaches 0 with them reverted — and neither is
-worth removing, because this port does not need CRC compatibility at all.
+Asked and answered on sunfish, because it is the obvious next question once you
+know they are the only two poisoners.
 
-- `FANOTIFY` sits in the fragment under systemd's mount/automount machinery.
-  Nothing in the LuneOS or meta-android recipes references fanotify, so it is
-  probably droppable. On its own it buys nothing while `CGROUP_DEVICE` remains.
-- `CGROUP_DEVICE` is used: 7 units in the shipped rootfs carry `DeviceAllow=` or
-  `DevicePolicy=` (`systemd-logind`, both `systemd-journald` units,
-  `systemd-hostnamed`, `bluebinder`, both `openvpn@` templates). Without the
-  controller systemd logs a warning and skips the restriction rather than failing
-  the unit, so it is confinement rather than a boot dependency — and the Android
-  container does not need it either (its `/var/lib/lxc/android/config` has zero
-  `lxc.cgroup` directives). Losing the confinement to gain a CRC match we do not
-  need is the wrong trade.
+**`FANOTIFY`: nothing needs it. Dropped (Sep 2026).** Two independent checks:
 
-The decision that makes both moot: the kernel builds every module LineageOS ships
-in `vendor/lib/modules`, so the overlay replaces the vendor set outright. Treat the
-CRC gate's "41 would fail to load" on sunfish as informational — it describes
-modules that are never loaded.
+- bluejay, panther, tangorpro and mindphone boot the *same* halium-arm64 rootfs
+  with `# CONFIG_FANOTIFY is not set` — meta-android's shared GKI fragment already
+  lists it as KMI-poison and leaves it out. Same systemd build, no fallout. This is
+  the strongest evidence available and it costs nothing to look up.
+- Scanning every regular file in the shipped rootfs for `fanotify` finds only
+  syscall *name tables*: `strace`, the valgrind tools, gdb's `syscalls/*.xml`,
+  `libseccomp`, `enosys`, perfetto's trace processor, and glibc's own wrapper.
+  The one real library reference is `libsystemd-shared-257.so`, which does not need
+  the kernel side present. No LuneOS component calls it.
+
+It was in sunfish's fragment under a "systemd's mount/automount machinery" comment
+— an assumption, never a measurement, and the most expensive one in the file.
+
+**`CGROUP_DEVICE`: kept, because it does something.** 7 units in the shipped rootfs
+carry `DeviceAllow=`/`DevicePolicy=` (`systemd-logind`, both `systemd-journald`
+units, `systemd-hostnamed`, `bluebinder`, both `openvpn@` templates). Without the
+controller systemd logs a warning and skips the restriction rather than failing the
+unit, so it is confinement, not a boot dependency — and the Android container does
+not need it either (`/var/lib/lxc/android/config` has zero `lxc.cgroup` directives).
+It is worth knowing it *can* go if a port ever needs the CRCs; the GKI devices run
+without it.
+
+**Neither removal would let you use the vendor's prebuilts anyway.** The
+CRC-verbatim sunfish build — LineageOS's config exactly, no LuneOS delta — still
+fails 5 of the 41 modules:
+
+```
+FAIL incrementalfs.ko: 29/175   FAIL q6_dlkm.ko: 3/132   FAIL rdbg.ko: 3/36
+FAIL wglink_dlkm.ko: 3/53       FAIL wlan.ko: 7/395
+```
+
+`wlan.ko` is in that list, so "drop the poison options and load the vendor's
+modules" does not buy a working device. Build your own and overlay them; sunfish's
+kernel builds all 41. Treat the gate's "41 would fail to load" there as
+informational — it describes modules that are never loaded.
+
+**Workaround of last resort, if an option genuinely cannot go:** the
+`#ifndef __GENKSYMS__` trick applies to `FANOTIFY` — it is one member
+(`atomic_t fanotify_listeners`) and moving it to the end of `struct user_struct`
+keeps every pre-existing offset. It does **not** apply to `CGROUP_DEVICE`: that
+changes an array *dimension* in the middle of `css_set`/`cgroup`, so hiding it from
+genksyms would publish a CRC for an offset layout the kernel does not have — a
+silent wrong answer instead of a loud refusal.
 
 ### If some future component needs it again
 
