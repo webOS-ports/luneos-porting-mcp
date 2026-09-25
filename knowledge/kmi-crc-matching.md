@@ -614,7 +614,8 @@ neither is worth dropping on this device - see the sunfish note below.
 Asked and answered on sunfish, because it is the obvious next question once you
 know they are the only two poisoners.
 
-**`FANOTIFY`: nothing needs it. Dropped (Sep 2026).** Two independent checks:
+**`FANOTIFY`: nothing appears to need it. Removable, pending one control test.**
+Three checks, the third still outstanding:
 
 - bluejay, panther, tangorpro and mindphone boot the *same* halium-arm64 rootfs
   with `# CONFIG_FANOTIFY is not set` — meta-android's shared GKI fragment already
@@ -626,8 +627,27 @@ know they are the only two poisoners.
   The one real library reference is `libsystemd-shared-257.so`, which does not need
   the kernel side present. No LuneOS component calls it.
 
+- **Provenance, which is the part worth knowing:** it comes from the Mer/SFOS kernel
+  config checker, which lists `CONFIG_FANOTIFY  y,!  # optional, required for
+  systemd readahead.` — and whose own header defines `!` as *"Failure will be warned,
+  not errored"*. So it was never a requirement even there, and its stated reason,
+  `systemd-readahead`, was **removed from systemd in v217 (2014)**. The LuneOS rootfs
+  ships systemd 257, with no readahead unit or binary. If a Tier B fragment carries
+  an option justified only by a Mer-checker line, check the notation and the date
+  before paying a KMI price for it.
+
 It was in sunfish's fragment under a "systemd's mount/automount machinery" comment
-— an assumption, never a measurement, and the most expensive one in the file.
+— an assumption inherited from that checker, never a measurement, and the most
+expensive one in the file.
+
+**The outstanding test, and why it is worth doing anyway:** the GKI devices prove
+systemd *starts* without fanotify, not that a complete LuneOS stack is unaffected.
+sargo is the reference device with a full working stack (UI, Atlas), so it is where
+to prove it — `LUNEOS_TEST_NO_FANOTIFY=1` in its recipe flips the option for one
+build, and `staging/sargo-staging/check-fanotify-users.sh` answers the same question
+with no rebuild at all by counting live fanotify fds on a booted device (`total: 0`
+on a FANOTIFY=y kernel means nothing would be taken away). sunfish keeps
+`CONFIG_FANOTIFY=y` until that comes back clean.
 
 **`CGROUP_DEVICE`: kept, because it does something.** 7 units in the shipped rootfs
 carry `DeviceAllow=`/`DevicePolicy=` (`systemd-logind`, both `systemd-journald`
