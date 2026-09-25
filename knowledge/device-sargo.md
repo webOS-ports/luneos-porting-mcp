@@ -58,8 +58,65 @@ All GSI work targets `Herrie82/meta-smartphone` → `herrie/wrynose`; build tree
 - Its vendor rc gates carry **no quotes** — sargo will never catch the quoted-property bug that wedged mindphone.
 - The RIL crash `Missing path for slot slot2` proved the plugin enumerates slots from the HAL, not from `ril_subscription.conf` → the committed `ofono-conf/sargo/*` files are Tier 2 debt, to be replaced by derivation.
 - Shipped-placeholder rule was learned here: `luna-platform.conf` shipped `DPI=445` and the generator read it back as a fallback — a plausible constant silently wrong on every device without an adaptation. Placeholders must be obviously invalid.
+- The PMIC RTC **cannot be written** - SPMI refuses it even with the device tree flipped - so the clock starts at 1970 every boot and RTC alarms are armed ~56 years out. See the RTC section below.
 - 4.9 kernel has **no `CONFIG_OVERLAY_FS`** → adaptation overlays must fall back to bind-mounts on sargo.
 - Atlas browser UI scaling: no LuneOS-side config fixes it — both fixes (CSS zoom, collapsing toolbar) belong in Atlas itself (`gsigki/atlas-scaling-findings.md`).
+
+## The RTC cannot be written, and no kernel change fixes it (25 Sep 2026)
+
+sargo boots with its hardware clock reading **1970-02-14** and nothing can correct
+it. Measured, in the order that establishes it:
+
+- `/sys/class/rtc/rtc0/date` reads 1970-02-14 while the system clock is right —
+  they legitimately disagree, because `sntp`/ntpd set the *system* clock and
+  nothing writes the RTC (see nyx-modules.md: nyx has no set-RTC call, and
+  meta-luneos removes timesyncd on purpose).
+- `hwclock -w` first fails with EBUSY, because **sleepd holds `/dev/rtc0`
+  exclusively for its whole life** — the char device admits one opener, so any
+  writer, and `nyx-test-system`, must have sleepd stopped first.
+- With sleepd stopped it fails with **EINVAL**: `pm660.dtsi` carries
+  `qcom,qpnp-rtc-write = <0>`, and qpnp-rtc only installs `qpnp_rtc_rw_ops` when
+  that is true. The read-only table (`qpnp_rtc_ro_ops`) has `read_time`,
+  `set_alarm`, `read_alarm` and `alarm_irq_enable` but **no `set_time`** — which is
+  why alarms can be armed on this device while its clock cannot be corrected.
+  (`rtc_set_time()` returns EINVAL for ops-without-set_time and ENODEV for no ops
+  at all; the errno tells you which.)
+- **Flipping the device tree was tried and it does not help.** A kernel with
+  `&pm660_rtc { qcom,qpnp-rtc-write = <1>; }` was built and booted with
+  `fastboot boot`, and `hwclock -w` then failed with ENODEV and this in dmesg:
+
+      spmi spmi-0: error: impermissible write to peripheral sid:0 addr:0x6046
+      qcom,qpnp-rtc ...: SPMI write failed
+      qcom,qpnp-rtc ...: Disabling of RTC control reg failed with error:-19
+
+  `qpnp_rtc_set_time()` did run — it got as far as disabling the RTC control
+  register, which read-only ops could never reach — so the flip took effect and the
+  **SPMI permission map refused the write one layer below the driver**. `0x6046` is
+  the RTC control register. Qualcomm's `<0>` is not caution; it reflects who owns
+  that peripheral on this platform, and only a TZ/bootloader change could alter it.
+  The patch was reverted.
+
+Consequences worth carrying to any Qualcomm port:
+
+- **RTC alarms never fire here.** `qpnp_rtc_set_alarm()` compares the request
+  against the RTC's own clock, finds a 2026 expiry comfortably in a 1970 future,
+  and arms it about 56 years out. `set-alarm` succeeds and `next-alarm` round-trips
+  perfectly, which makes this look like it works.
+- **The `CLOCK_REALTIME_ALARM` timerfd is the only usable alarm mechanism**, since
+  `CLOCK_REALTIME` is correct even when the RTC is not. That is what the watch
+  added to `alarm.c` delivers, and it is why alarms now fire on sargo.
+- The clock jumping mid-boot (1970 → real time, journald logging "Time jumped
+  backwards, rotating") is a consequence of the same gap, so **timestamps inside a
+  single sargo boot cannot be trusted** and anything using wall-clock deadlines can
+  misfire across the jump.
+- When testing an RTC, never judge it by comparing against the system clock alone:
+  on a fresh boot both read 1970 and a delta of zero looks like success. Require a
+  sane system clock first and honour `hwclock`'s exit status.
+
+Test kit: `staging/sargo-nyx-system/` — `test-rtc-write.sh` (the above, with the
+three outcomes named), `test-system-alarm.sh` (13 passed / 0 failed / 4 skipped on
+25 Sep, the skips all being these device properties), and `install.sh` with adb or
+ssh transport and a `--revert`.
 
 ## Idle-health triage (12 Sep 2026)
 

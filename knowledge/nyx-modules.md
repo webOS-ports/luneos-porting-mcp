@@ -98,7 +98,7 @@ an Android API was removed, flip that one module to `NYXMOD_OW_<X> TRUE` rather 
 pinning older headers (the headers version must track the GSI — see the device-bringup
 notes).
 
-## nyx-modules-hybris internals: alarms no longer need /dev/alarm
+## Wakeup alarms: out of /dev/alarm, out of nyx-modules-hybris, and watched
 
 The hybris system module's RTC-alarm path historically used the legacy Android
 `/dev/alarm` device, which many newer vendor kernels simply lack — tissot's
@@ -112,6 +112,72 @@ itself moved to — verified working on both devices. The port also fixed a
 latent timezone bug: `android_alarm_read()` used `localtime_r()` while its
 caller used `timegm()`, putting "now" one UTC offset in the future and pushing
 near-term alarms out by that much.
+
+**Moved into nyx-modules (25 Sep 2026), because after that it was not Android
+code at all.** Tofee asked exactly that on webOS-ports/nyx-modules-hybris#15, and
+it checks out: the hybris system module's CMake links nothing but glib, gio, pmlog
+and nyx-lib, and the only Android left anywhere in it was the `android_` prefix on
+the alarm functions. Branches: nyx-modules `herrie/system-alarm`,
+nyx-modules-hybris `herrie/drop-system-module`.
+
+What the move involves, and what to check when doing this kind of relocation:
+
+- **Both system modules registered the identical twelve nyx methods**, so they are
+  interchangeable at the API boundary and the swap is invisible to callers. Check
+  this before assuming two same-named modules are alternatives rather than forks.
+- **nyx-modules' `system.c` was the evolved one**: logind-based suspend with the
+  direct `/sys/power/state` path kept underneath, where the hybris copy only ever
+  had the direct path. Not two platform backends — an old copy and a new one.
+- `rtc.c` was the only genuinely forked file (18 hunks). It cost a spin fix
+  written twice in one afternoon, which is the concrete argument for not forking.
+- `util.c`/`util.h` in the hybris copy were in neither the CMake `SOURCES` nor any
+  include — dead files nobody noticed because nothing built them.
+- The switch is one line: `NYX_MODULES_REQUIRED:halium` gains `NYXMOD_OW_SYSTEM`.
+  The gate in nyx-modules-hybris was already `if(NOT NYXMOD_OW_SYSTEM)`, so that
+  repo has always stood down when nyx-modules provides a system module. **Both**
+  halium lists need it (`:halium` and `NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS`,
+  used by athene/hammerhead-halium/mako/onyx/oxygen/sagit) before the deletion
+  lands, or those devices end up with no system module at all.
+
+**Then watch the timer, do not only arm it.** The timerfd was armed and never
+read, so the only thing that could report an expiry was the RTC's own interrupt —
+and on a device whose RTC cannot be set, that never happens. `alarm.c` now takes a
+callback (`wakeup_alarm_set_callback()`, registered by `rtc.c` with the same
+function it gives `rtc_add_watch()`), drains the timer on expiry and delivers it.
+Measured on sargo: the alarm callback check failed identically with the moved
+module *and* with the pre-move one restored, and passes with the watch. Where the
+RTC works, `rtc_clear_alarm()` disarms the timer before reporting its own expiry,
+so only one of the two is delivered.
+
+**Who owns time in webOS, which is why none of this touches the RTC.**
+LunaSysService is the authority: `NTPClock.cpp` spawns `sntp` itself and
+`TimePrefsHandler.cpp` applies the result with `settimeofday()`; `ClockHandler`
+tracks sources by tag — `manual`, `micom`, `system`. **nyx has no set-RTC call at
+all** (`nyx_system_query_rtc_time` has no write counterpart, and there is no
+`NYX_SYSTEM_SET_RTC_*` method), so nothing in this stack was ever meant to write
+the hardware clock. meta-luneos also removes `timesyncd`, `timedated`, `networkd`,
+`resolved` and `nss-resolve` from systemd's PACKAGECONFIG on purpose — those roles
+belong to webOS services, which is also why there is no `timedatectl` on a device.
+Do not "fix" a clock problem by adding timesyncd; it fights the design.
+
+The gap that leaves: on a TV the `micom` keeps time while the set is unplugged. A
+phone has no micom, so if its RTC cannot be written, **nothing persists time at
+all** and the system starts at 1970 until sntp reaches the network. See
+device-sargo.md for what that costs and why the kernel cannot fix it there.
+
+### Host tests for this module
+
+`src/system/tests/run-host-tests.sh` — 15 cases, no device and no root. Ten cover
+the alarm layer (arming at the absolute expiry, the two-second floor, the same
+expiry twice being a no-op, clear, calls before open, the read/timegm round trip in
+four timezones, and the three delivery cases) and five cover the RTC watch against
+a pipe standing in for `/dev/rtc`. Each group was mutation-checked: restoring the
+old `return TRUE`, the old read guard, or removing the two
+`_wakeup_alarm_watch()` calls each fails a specific case. `nyx-test-system` drives
+the same paths through the real module on a device (`rtc-time`, `next-alarm`,
+`set-alarm`, `clear-alarm`, `watch`), and reports who holds `/dev/rtc` when it
+cannot open it — which on a running system is always sleepd, exclusively, for its
+whole life.
 
 ## Copy-paste is fiction until verified on hardware
 
