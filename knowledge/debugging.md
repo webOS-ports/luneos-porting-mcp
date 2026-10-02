@@ -103,6 +103,96 @@ was killing it — none of which was visible from outside.
 reset the SoC rather than the kernel panicking, which is a completely different
 problem (1.10).
 
+**expdb can also come back empty where it matters.** On the Titan Pocket (MT6771,
+UFS) lk logs `kedump add: SYS_PSTORE_RAW ... kedump mini done` on every reset,
+yet the first 17 MiB of expdb, where that kedump goes, read back as zeros over
+mtkclient, twice. lk's own log in the same partition was intact: it showed lk
+jumping to the kernel and then `lk boot reason = 4`
+(`androidboot.bootreason=kernel_panic`, `exp_type 0x2` = kernel exception), so it
+told us *that* the kernel panicked and nothing about *why*. Do not wait for the
+crash record in expdb; read DRAM instead (next section).
+
+### MediaTek: read ramoops straight out of DRAM over the preloader
+
+The kernel's own console, panic included, is usually still in RAM. MediaTek lk
+passes ramoops on the command line (look in lk's log in expdb for the
+`cmdline:` lines, e.g. `ramoops.mem_address=0x54410000 ramoops.mem_size=0xe0000
+ramoops.console_size=0x40000 ramoops.pmsg_size=0x10000`), runs with
+`kedump: ddr reserve mode enabled`, and the panic reset is a *warm* reset. So
+DRAM still holds the dying kernel's log when the preloader comes past on the
+next loop, and mtkclient's DA can read memory:
+
+```
+mtk da peek 0x54410000 0xe0000 --filename pstore.bin    # address/size from lk's cmdline
+```
+
+Requirements and traps, all measured on the Titan Pocket (2 Oct 2026):
+
+- the kernel needs `CONFIG_PSTORE_RAM=y` (stock MTK defconfigs have it),
+- **catch the preloader while it is bootlooping.** Holding Power to switch off,
+  or the Volume-Down BROM route from a powered-off phone, loses DRAM. Catching
+  the preloader on the warm reset kept it. Read DRAM first and do expdb and the
+  other partitions in a second session,
+- the region is a set of `persistent_ram_buffer` zones, each starting with
+  `DBGC` (0x43474244 LE), then `u32 start`, `u32 size` and a ring buffer. A zone
+  with `start == size` never wrapped; otherwise `size` is the capacity and the
+  oldest byte is at `start`. On the Pocket the console zone was at +0x4f000 and
+  pmsg (Android userspace logging) at +0xd0000. The other ~80 4 KiB zones are
+  empty dmesg-dump slots.
+- `loglevel=` does not hide the panic: oops and panic lines are emitted at
+  emergency level.
+
+That read gave the whole answer in one go, after five flash rounds of
+instrumenting the initramfs had shown nothing:
+
+```
+[22.059503] mtk_wmtd_worker: Unable to handle kernel paging request at 0055aa8d704b2800
+[22.060725] pc : 0x55aa8d704b2800   lr : __dev_xdp_attached+0x48/0xa0
+ rtnl_fill_ifinfo <- register_netdevice <- register_netdev
+ <- [wlan_drv_gen3] <- wmt_lib_init [wmt_drv]    Tainted: GFS W O
+```
+
+i.e. a force-loaded vendor module crashing on a struct-layout mismatch, the
+Tier B KMI problem described in kernel-porting.md ("Stock vendor modules on a
+rebuilt Tier B kernel"). The pmsg zone showed userspace too: the Android
+container up and surface-manager loading the vendor hwcomposer. So the port was
+otherwise healthy, and the 22 s timing meant the initramfs was long done.
+
+The staging kit's `dump-expdb.sh` (titanpocket-staging) does both passes: DRAM
+first, then `mtk r expdb,cache` in one session, and decodes everything.
+
+### Recording the initramfs to a spare partition: `initrd_log_fail`
+
+`initramfs-scripts-halium` (meta-android) can write its own dmesg to flash, for
+devices where nothing else survives:
+
+- `initrd_log_fail` on the kernel command line turns it on. A background loop
+  writes dmesg, mounts and the current stage every 3 s, and `panic()` writes a
+  failure record. With it set, a failing initramfs **holds** (gadget and adbd
+  up) instead of returning, so the device stops rebooting and the record stays
+  the last thing written. Without the hold, `/bin/sh` with no console returns at
+  once, init eventually exits, and the kernel panics into another loop.
+- the default targets are `init_boot_a` (failure) and `init_boot_b` (progress),
+  spare on the MT6789. **`initrd_log_part=<partname>`** names one partition
+  instead: progress at 0 MiB, failure at 64 MiB. The Titan Pocket uses `cache`,
+  which LuneOS bind-mounts over from userdata, so it is free (stock Android
+  reformats it if it ever boots again).
+- with `initrd_log_part=` the logger starts right after `/proc`, `/sys` and
+  devtmpfs, retrying for 10 s until the partition appears. That only works with
+  built-in storage. Without it, logging starts after module load and mdev, and
+  a boot that dies earlier writes nothing. That is how the Pocket's first
+  `cache.bin` came back as an untouched ext4 filesystem.
+- the boot-image header command line is the cheap way to set it on MediaTek: lk
+  prints the cmdline it hands the kernel, so you can confirm in expdb that the
+  flags arrived. Repacking the header needs no kernel rebuild, but a boot image
+  with an AVB footer needs a fresh footer (meta-android `lib/halium/avb.py`).
+
+Absence is informative too. If the faillog image demonstrably booted (lk shows
+the flags) and the partition holds no record, the boot died before the logger
+started, or somewhere the initramfs never sees. On the Pocket that turned out
+to be the latter: the panic came from the Android container's module loading,
+after switch_root.
+
 ### The debug boot image (`fastboot boot`, no flashing)
 
 Every device kit ships a `boot-<device>-luneos-debug.img`: the same kernel + initramfs with `enable_adb` on the cmdline. `fastboot boot` runs it without flashing (on Pixels this works even for images that would normally live in `init_boot` — the debug image is deliberately self-contained, kernel + ramdisk in one image). With `enable_adb`, init panics into the initramfs adbd debug shell: the device enumerates as a USB gadget named **"Halium initrd — Failed to boot"**. Then:
@@ -132,7 +222,7 @@ The Halium-family initramfs also exposes a telnet path that works when adb doesn
 **The LuneOS initramfs now has this too (2026-09-06).** The panic/debug path in `initramfs-scripts-halium` `init.sh` (meta-smartphone/meta-android) starts `telnetd` at **`192.168.2.15` port 23** alongside the adbd gadget, with `udhcpd` serving the host `192.168.2.20–90` so no host-side configuration is needed, and announces itself in the gadget's iSerial string (`LuneOS initrd telnet 192.168.2.15: <reason>`). The gadget network function is auto-selected per kernel: it tries `rndis.usb0` and `ecm.usb0` and links whichever the kernel supports — **stock GKI 6.1 (bluejay/panther) ships ECM only, MTK 4.14 (mindphone) RNDIS only, athena's 4.19 (SDM660) RNDIS only**. Fixed gadget MACs (`FA:75:7F:BB:F4:E6`/`:E7`, first byte even) avoid the all-zeros-MAC refusal and give the host a stable connection. One caveat: ECM has no native Windows driver, so on GKI Pixels use a Linux or macOS host (or adb, which still works — both channels come up together). All tools are busybox applets already in the initramfs (`FEATURE_TELNETD_STANDALONE`, `UDHCPD`, `ip`, `getty` verified in the shipped build). Two more channels ride along:
 
 - **ACM serial console** — an `acm.usb0` gadget function with a shell on `/dev/ttyGS0`; on the host just `screen /dev/ttyACM0 115200`, no networking involved. `CONFIG_USB_CONFIGFS_ACM=y` in stock GKI 6.1 and mindphone's 4.14 (athena's defconfig lacks it — the function silently doesn't appear there).
-- **netconsole (Tier B only)** — after the debug network is up, init attaches a dynamic netconsole target streaming kmsg to UDP broadcast port 6666; the host listens with `nc -ul 6666`, and the stream **survives switch_root into the full boot**. Right after attaching, init **replays the early printk buffer** into the stream (`dmesg` re-injected line-by-line into `/dev/kmsg`, prefixed `replay:`), so the host gets history from power-on — boot-param netconsole targets get this via `CON_PRINTBUFFER`, dynamic ones don't. The replay needs `printk.devkmsg=on` on the cmdline (athena's `ANDROID_BOOTIMG_CMDLINE` now carries it; stock bluejay already does). Requires `CONFIG_NETCONSOLE=y` + `CONFIG_NETCONSOLE_DYNAMIC=y`, now in the athena and mindphone fragments. **Do not add it to a Tier A GKI fragment: NETCONSOLE selects NETPOLL, which adds a field to `struct net_device` — KMI-poison of the SYSVIPC class.**
+- **netconsole (Tier B only)** — after the debug network is up, init attaches a dynamic netconsole target streaming kmsg to UDP broadcast port 6666; the host listens with `nc -ul 6666`, and the stream **survives switch_root into the full boot**. Right after attaching, init **replays the early printk buffer** into the stream (`dmesg` re-injected line-by-line into `/dev/kmsg`, prefixed `replay:`), so the host gets history from power-on — boot-param netconsole targets get this via `CON_PRINTBUFFER`, dynamic ones don't. The replay needs `printk.devkmsg=on` on the cmdline (athena's `ANDROID_BOOTIMG_CMDLINE` now carries it; stock bluejay already does). Requires `CONFIG_NETCONSOLE=y` + `CONFIG_NETCONSOLE_DYNAMIC=y`, now in the athena and mindphone fragments. **Do not add it to a Tier A GKI fragment: NETCONSOLE selects NETPOLL, which adds a field to `struct net_device` — KMI-poison of the SYSVIPC class.** **Nor to a Tier B fragment where the container force-loads vendor network modules.** NETPOLL also turns on `NET_POLL_CONTROLLER`, which inserts three pointers into the middle of `struct net_device_ops`. On the Titan Pocket the stock-built `wlan_drv_gen3.ko` then had `register_netdev()` call `ndo_bpf` through the shifted table, and the kernel panicked 22 s into every boot (see Stage 0, "read ramoops straight out of DRAM"). Only use netconsole where no prebuilt network driver loads, or where you build those drivers yourself.
 
   **Cmdline netconsole (`netconsole=...@/usb0,...`) is mainline-only — and actively harmful on configfs-gadget devices.** Verified in the athena 4.19 source: `netpoll_setup()` aborts with `-ENODEV` when the target interface doesn't exist at init, and `init_netconsole()` then unwinds *everything* — including the dynamic configfs interface — so a cmdline entry naming a not-yet-existing `usb0` silently kills dynamic netconsole too. Tenderloin can use it (`netconsole=6665@172.16.42.2/usb0,6666@172.16.42.1/` in `CONFIG_CMDLINE`, webOS-heritage `172.16.42.x` addressing) only because its mainline kernel sets `CONFIG_USB_ETH=y` — the built-in `g_ether` gadget creates `usb0` before userspace. Enabling `g_ether` on an Android-style kernel would claim the UDC and cost the configfs gadget (adb + everything else) — not worth it. Note also: athena has **no pstore/ramoops at all** (nothing in the defconfig, no DT node), so a panic before the initramfs is currently invisible there; a ramoops DT node + `PSTORE_RAM` would be the fix but needs a carefully chosen reserved-memory region.
 
@@ -498,6 +588,126 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 - This is generalized in `meta-android/recipes-core/mtk-connectivity`: three condition-gated units keyed on `ConditionPathExists |wmt_drv.ko |conninfra.ko`, driven by the connectivity subset of the vendor's `modules.load` (grep `wmt|wlan|conn|bt_drv|gps|fmradio`) — no hardcoded module list, inert on non-MTK.
 - Module-load error decoding (Halium docs, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = module signature enforcement — disable `CONFIG_MODULE_SIG*` (Tier B only; stock GKI leaves MODULE_SIG_FORCE unset anyway, per bluejay). `"Invalid module format"` = kernel/module version-config mismatch — the non-GKI cousin of our CRC story. Broadcom `bcmdhd` is best built `=m`, not `=y` — as a module it picks up the device MAC address; built-in it doesn't. Legacy Qualcomm (pre-2016 SoCs): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath`.
 
+#### Regulatory domain: `country 00`, and no 5 GHz on any device
+
+Until Sep 2026 **nothing in the LuneOS tree installed `wireless-regdb`** except
+one accidental edge — `linux-firmware-pine64`'s RDEPENDS — so pinephone,
+pinephonepro and pinetab2 had `/lib/firmware/regulatory.db` and all seventeen
+other machines, every phone, did not. It was never dropped: oe-core only ever
+wires it into `packagegroup-base-wifi` (added 2019-06-19, `00c5a665b4`), and
+LuneOS builds its images from `packagegroup-luneos-*`, so `packagegroup-base`
+is never installed. `git log -S wireless-regdb` over meta-webos-ports returns
+zero commits, and connman does not reference it either.
+
+It went unnoticed for years because **the world domain is a fully usable
+2.4 GHz radio** and only cripples 5 GHz:
+
+```
+country 00:
+  (2402 - 2472 @ 40), (6, 20), (N/A)          <- no PASSIVE-SCAN, normal
+  (5170 - 5250 @ 80), ... PASSIVE-SCAN
+  (5250 - 5330 @ 80), ... DFS, PASSIVE-SCAN
+  (5490 - 5730 @ 160), ... DFS, PASSIVE-SCAN
+  (5735 - 5835 @ 80), ... PASSIVE-SCAN
+```
+
+Channels 1-11 work; every 5 GHz band is passive-scan-only, so 5 GHz APs are
+simply never found. On a phone that just presents as "Wi-Fi works".
+
+**Shipping the file is only half the fix.** cfg80211 is built in on these
+kernels, so it requests `regulatory.db` during its own initcalls, before any
+rootfs exists. Boot log from radon (MT6877, 4.19):
+
+```
+cfg80211: Loaded X.509 cert 'sforshee: ...'
+cfg80211: Loaded X.509 cert 'wens: ...'
+platform regulatory.0: Direct firmware load for regulatory.db failed, error -2
+platform regulatory.0: Falling back to syfs fallback for: regulatory.db
+ueventd: firmware: could not find firmware for regulatory.db
+ueventd: firmware: attempted /vendor/firmware/regulatory.db, open failed
+cfg80211: failed to load regulatory.db
+```
+
+On Halium the process answering the sysfs firmware fallback is the **Android
+container's ueventd**, which searches `/etc/firmware`, `/odm/firmware`,
+`/vendor/firmware` and `/firmware/image` — never the LuneOS root — so it always
+answers "not found". The failure is then **latched**: `regdb_fw_cb()` sets
+`regdb = ERR_PTR(-ENODATA)` and `query_regdb()` returns that for the rest of the
+uptime without ever issuing another `request_firmware()`. So the db sits on disk
+unread, and `iw reg set XX` returns 0 while changing nothing — a very
+convincing dead end.
+
+`NL80211_CMD_RELOAD_REGDB` (`iw reg reload`) is the only thing that clears it.
+
+Diagnosis, in order:
+
+```sh
+iw reg get | head -1                     # "country 00" => broken
+ls -l /lib/firmware/regulatory.db        # missing => package not installed
+journalctl -k -b | grep -iE "regulatory|regdb"
+iw reg reload && iw reg set NL && iw reg get | head -1
+```
+
+In tree: `wireless-regdb-static` plus the `cfg80211-regdb-reload` service
+(meta-luneos/recipes-connectivity), both gated on the `wifi` MACHINE_FEATURE in
+`packagegroup-luneos-extended`. Signing caveat for old kernels: upstream signs
+the db with the **wens** key since 2023, and
+`CONFIG_CFG80211_USE_KERNEL_REGDB_KEYS=y` trusts only `net/wireless/certs/*.hex`
+— check `wens.hex` is there before assuming it will verify (FuriLabs' 4.19 has
+both wens and sforshee).
+
+#### Never gate a unit on `/sys/module/<driver>` — it assumes a module
+
+A built-in driver has **no `/sys/module` entry at all**, so every
+`ConditionPathExistsGlob=/sys/module/wlan*` silently excludes the machines where
+the driver is compiled in, and systemd reports `ConditionResult=no` rather than
+an error. This has now bitten three separate units on radon
+(`CONFIG_MTK_COMBO=y`): the mtk-connectivity BT unit (`.ko` globs only),
+`mtk-connectivity-wifi`, and `wlan-suspend-mode`, which had **never run once**.
+
+The same assumption hides in *driver detection*, which is worse because the unit
+appears to work. `wlan-suspend-mode`'s `driver_layout()` chose its private-ioctl
+struct by looking for `/sys/module/wlan_drv_gen4m*`, so with gen4m built in it
+returned `qcom` and sent the wrong layout. Measured on radon:
+
+```
+SETSUSPENDMODE 0   layout=qcom -> FAIL [Errno 22] Invalid argument
+SETSUSPENDMODE 0   layout=mtk  -> OK
+```
+
+Gate on something that exists either way: the character devices
+(`/dev/wmtWifi`, `/dev/conninfra_dev`, `/dev/stpbt` for MTK combo), or the
+network interface itself — and where you must wait for an interface, bound the
+wait and exit with a status in `RestartPreventExitStatus` so a machine with no
+WLAN does not spin forever.
+
+#### "Wi-Fi associates, ping works, but TCP hangs"
+
+Establish **where** the loss is before touching the port. This exact symptom on
+radon — SSH emitting a banner and then dying — cost days across sshd, entropy,
+host keys, socket activation, MTU, DSCP, CPU starvation and power save, all of
+which were wrong. It was the *router*, bridging between its 2.4 GHz and 5 GHz
+radios: the phone was on 2.4 GHz, the dev host on 5 GHz, and only flows crossing
+between the two radios died. Consumer routers accelerate TCP/UDP in hardware and
+leave ICMP on the slow path, so ping is not evidence that TCP will work.
+
+Run this matrix; it takes two minutes and answers it outright:
+
+| test | what it isolates |
+|---|---|
+| `ping -c5 -M do -s 1472 <peer>` | L2/L3 path and MTU, both directions |
+| device `wget` a few MB from the internet | device↔AP leg only — if this is fast, the radio and driver are fine |
+| device connects **out** to a listener on the peer | device-initiated TCP |
+| peer connects **in** to a listener on the device | peer-initiated TCP |
+| same tests with peer on the **same band** | isolates cross-band bridging |
+
+Read `ss -ti` on the *sending* side, not the application's symptoms.
+`bytes_acked:1` with a climbing `bytes_retrans` means your data was never
+acknowledged — the receiver never got it — which is a completely different
+problem from "the far end is not replying". Use a plain socket listener, not
+sshd, so the application is out of the picture.
+
+
 ### Modem
 - mindphone: `md1.status = "exception"`, RIL daemon stopped. Root cause was **fstab selection**: `mount-android.sh` picked `fstab.enableswap` (sorts before `fstab.mt6739` under the glob), so the modem NV partitions (nvcfg/nvdata/protect1/protect2 — MTK calibration + IMEI) never mounted. Fix: prefer `fstab.$(getprop ro.hardware)`, skip `*.enableswap`. Generic to any multi-fstab MTK device. After the fix: `md1.status=ready`, IRadio em1/em2 registered, ofono `/ril_0` + `/ril_1` both Powered (dual-SIM).
 - MTK exposes NV partitions under `/dev/disk/by-partlabel` only (no by-name) — `find_partition_path` must cover that.
@@ -542,6 +752,7 @@ Four proven failure patterns, generalized:
 | Symptom | Likely cause | Where to look |
 |---|---|---|
 | Device resets, nothing visible | Kernel panic | pstore/ramoops console dump |
+| MediaTek: reboots ~20-30 s in, lk says `boot reason = 4` / `kernel_panic`, expdb has no kernel log | Panic after userspace started; often a force-loaded vendor module on a struct-layout mismatch | ramoops out of DRAM with `mtk da peek` while it loops; then diff struct-affecting config vs stock ikconfig (kernel-porting.md) |
 | USB gadget "Halium initrd — Failed to boot" | initramfs couldn't finish (often rootfs.img not found) | `adb shell`, `cat /dev/kmsg` |
 | `deferred probe timeout` wall, then timer/clock panic | Module load order — `modules.load` isn't topological | init v4 loader; `tools/module-order.py` |
 | Driver panics on unset params (e.g. FMP self test) | `<module>.param=` cmdline not passed to insmod | init `module_cmdline_args()`; compare `/proc/cmdline` |

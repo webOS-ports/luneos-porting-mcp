@@ -24,6 +24,15 @@ The knowledge was distilled from real ports and bring-ups:
 - **mp01** (Minimal Phone MP01, MT6789) — E Ink QWERTY phone on the shared
   `halium-arm64` rootfs, with no published kernel source; vendor-driven module
   loading, per-device `deviceinfo` workarounds for audio and Bluetooth
+- **fajita** (OnePlus 6T, SDM845) — the cheapest Tier B port in the tree: a
+  LineageOS 22.2 vendor that ships no vendor kernel modules at all, no dynamic
+  partitions, and the first header-v1 boot image here (which found a bbclass bug
+  that silently dropped the appended device tree). Also the device that found two
+  bugs affecting others: adaptations are keyed by `ro.product.vendor.device`,
+  which OnePlus sets to `OnePlus6T` rather than the codename, and an Android 15
+  vendor's *dated* `ro.board.api_level` (202404) was selecting libgbinder's
+  Android 16 servicemanager protocol — suspected cause of surya's open sensors
+  issue. Pre-hardware
 - **athena** (BlackBerry KEY2, SDM660) — Tier B on a 4.19 CAF tree built with
   Yocto's own GCC 15; source of the **boot-image window** rule (the kernel plus
   its appended device trees must end below `ramdisk_offset`) and of the
@@ -82,7 +91,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `installing` | flash kits, userdata images, fastboot flows, anti-rollback |
 | `tools` | kmi-crc-check, module-order, payload_extract, mer-kernel-check, … |
 | `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variable reference our Tier 1 format reuses |
-| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` / `device-athena` / `device-sunfish` | per-device reference |
+| `device-bluejay` / `device-panther` / `device-mindphone` / `device-sargo` / `device-zinwa-q25` / `device-mp01` / `device-athena` / `device-sunfish` / `device-surya` / `device-fajita` | per-device reference |
 
 ### Tools
 

@@ -447,7 +447,8 @@ Two lessons worth more than the technique:
 ### Stock vendor modules on a rebuilt Tier B kernel
 
 A rebuilt Tier B kernel refuses the phone's own modules. The LuneOS config
-fragment moves struct layouts (SYSVIPC alone adds two fields to `task_struct`),
+fragment can move struct layouts (SYSVIPC, when it was still on, added two fields
+to `task_struct`),
 the stock defconfigs set `CONFIG_MODVERSIONS`, and the result is
 `disagrees about version of symbol module_layout` on every one of them. It is not
 a niche problem: on mindphone it is the MTK WMT combo driver (wifi/BT/GPS/FM core,
@@ -468,9 +469,78 @@ vibrator, vold's user-0 storage and both DSPs with them.
   resolves `request_firmware()` against the *host* filesystem, not the
   container's.
 
-Force-loading stock modules **proved safe in practice** — mindphone (wifi, BT and
-GPS all came up) and the sunfish work. This is the Tier B analogue of the Tier A
-KMI discipline.
+Force-loading stock modules worked on mindphone (wifi, BT and GPS all came up)
+and on sunfish. **It is only safe while every struct those modules touch has the
+stock layout.** `--force` skips the CRC check that would have caught a layout
+change, so a mismatch shows up as memory corruption, not as a load error. Tier B
+has an ABI to keep after all: not a KMI in the GKI sense, but the stock kernel's
+layout as seen by every prebuilt `.ko` on the vendor partition. This is the Tier
+B analogue of the Tier A KMI discipline, and it needs the same care.
+
+#### What happens when it breaks: Titan Pocket, 2 Oct 2026
+
+Our MT6771 kernel (TheKit's reverse-engineered ALPS tree + luneos.cfg) booted and
+started LuneOS. The Android container then force-loaded the stock connectivity
+modules (`wmt_drv`, `wlan_drv_gen3`, `bt_drv`, `gps_drv`, `fmradio_drv`, taint
+`FO`), and 22 s into every boot:
+
+```
+mtk_wmtd_worker: Unable to handle kernel paging request at 0055aa8d704b2800
+pc : 0x55aa8d704b2800   lr : __dev_xdp_attached+0x48/0xa0
+ rtnl_fill_ifinfo <- rtmsg_ifinfo <- register_netdevice <- register_netdev
+ <- [wlan_drv_gen3] <- wmt_lib_init [wmt_drv]
+```
+
+The cause was `CONFIG_NETCONSOLE`, added to luneos.cfg as a debug channel.
+It selects NETPOLL, which turns on `NET_POLL_CONTROLLER`, which inserts
+`ndo_poll_controller`/`ndo_netpoll_setup`/`ndo_netpoll_cleanup` into the
+middle of `struct net_device_ops`. `wlan_drv_gen3`'s ops table was laid out
+for stock, so the kernel read `ndo_bpf` from the wrong slot and jumped to
+whatever was there. (It was found by reading ramoops out of DRAM, see
+debugging.md Stage 0. expdb and two rounds of initramfs instrumentation showed
+nothing.)
+
+#### The check: diff struct-affecting options against stock, before flashing
+
+1. Get the stock config from the stock kernel itself. MediaTek stock kernels
+   carry IKCONFIG: unpack `boot.img`, gunzip the kernel, then
+   `scripts/extract-ikconfig Image > stock.config`.
+2. Diff it against your `.config`, including options that are absent on one
+   side (treat absent as `n`).
+3. For every differing symbol, check whether it appears inside the struct
+   bodies prebuilt modules use: `task_struct`, `net_device`,
+   `net_device_ops`, `sk_buff`, `sock`, `inode`, `file`, `device`,
+   `dev_pm_info`, `wiphy`, `wireless_dev`, `mm_struct`, `cred`. A regex over
+   `struct X { ... };` in the tree's headers is enough to list the candidates.
+4. Anything that hits gets reverted to stock unless you build every module that
+   uses that struct yourself.
+
+What step 3 found on the Pocket, and what was done:
+
+| Option (luneos.cfg) | Struct changed | Fix |
+|---|---|---|
+| NETCONSOLE → NETPOLL, NET_POLL_CONTROLLER | `net_device`, `net_device_ops` | off; the panic above |
+| CGROUP_NET_PRIO | `net_device` (`priomap`, which changes `sizeof`, so `netdev_priv()` of every vendor netdev points at the wrong place) | off |
+| BLK_CGROUP (+ MEMCG, already on) → CGROUP_WRITEBACK | `inode` | BLK_CGROUP off, as stock. CGROUP_WRITEBACK has no prompt, so it cannot be turned off on its own |
+| SYSVIPC (→ IPC_NS) | `task_struct`, after `comm`, before `files`/`nsproxy`/`signal` | off. Not needed since 15 Sep 2026 (section below); the container keeps the host IPC namespace (`lxc.namespace.keep = ipc user`) |
+
+What did *not* hit any of those structs and stayed on: FHANDLE, the namespaces
+except IPC_NS, CGROUP_DEVICE/FREEZER/PERF, NET_CLS_CGROUP, BT, RFKILL, VT,
+DEVTMPFS, FANOTIFY, CHECKPOINT_RESTORE, SQUASHFS, AUTOFS4. Also note what is
+not a KMI concern at all: options that change *built-in* code only (e.g. the BT
+stack) are invisible to vendor modules unless they call into it.
+
+Caveats:
+
+- `CONFIG_MODVERSIONS` CRCs would have flagged all of this if the modules had
+  been loaded without `--force`. If the vendor kernel's vermagic is the only
+  thing that differs, match the vermagic instead of forcing (debugging.md 1.14);
+  then a struct change fails loudly at insmod instead of corrupting memory.
+- Struct bodies are not the whole ABI: inline helpers and macros also bake
+  offsets into the module. The struct list above is a practical filter, not a
+  proof.
+- The comment that used to head the Unihertz luneos.cfg, "Tier B, so there is
+  no KMI to preserve", is the assumption this section exists to retire.
 
 **Do not stage the modules in `/lib/modules/$(uname -r)`.** The obvious place is
 the wrong one: udev's coldplug autoloads by modalias out of that directory, so a

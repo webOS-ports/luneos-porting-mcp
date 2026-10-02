@@ -149,3 +149,29 @@ identity, initramfs contents, config) are verified; these are not:
   `ANDROID_BOOTIMG_DTB`.
 - **SM7150 under libhybris on a Halium 16 GSI** has no precedent in this project;
   the closest is sargo (SDM670, A12 vendor) and sunfish (SDM730).
+
+## Its A15 vendor reports a dated API level, which mis-selected the binder protocol
+
+Found while porting fajita (OnePlus 6T) and confirmed against this device's own
+`vendor.img` in `surya-staging`:
+
+```
+ro.board.api_level=202404      <- Android 15 vendor API level, a YYYYMM date
+ro.vendor.build.version.sdk=35
+ro.vndk.version                <- absent; VNDK is deprecated from A15
+```
+
+`luneos-device-config` wrote `ro.board.api_level` straight into gbinder's
+`ApiLevel`, and libgbinder picks the highest preset **≤** that value from
+`{36,35,33,31,30,29,28}` — so a date always selects the newest, preset 36
+(servicemanager `aidl6`), against a vendor that speaks preset 35's `aidl5`.
+
+That is the shape of the open sensors problem recorded in
+`stubbed-services-surya`: `sensorfwd`'s AIDL backend failing to reach
+`android.hardware.sensors.ISensors/default` through libgbinder while the
+container's own servicemanager resolves it fine, which that note had already
+narrowed to "a libgbinder servicemanager API-level problem". **Retest sensors on
+a rootfs built after the fix** before adding anything to the stub list for them.
+
+Full reasoning and the eight-case test matrix: see the dated-API-level section in
+device-fajita.md.
