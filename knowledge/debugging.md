@@ -498,6 +498,126 @@ libhybris also ships per-subsystem smoke binaries usable before any middleware e
 - This is generalized in `meta-android/recipes-core/mtk-connectivity`: three condition-gated units keyed on `ConditionPathExists |wmt_drv.ko |conninfra.ko`, driven by the connectivity subset of the vendor's `modules.load` (grep `wmt|wlan|conn|bt_drv|gps|fmradio`) — no hardcoded module list, inert on non-MTK.
 - Module-load error decoding (Halium docs, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = module signature enforcement — disable `CONFIG_MODULE_SIG*` (Tier B only; stock GKI leaves MODULE_SIG_FORCE unset anyway, per bluejay). `"Invalid module format"` = kernel/module version-config mismatch — the non-GKI cousin of our CRC story. Broadcom `bcmdhd` is best built `=m`, not `=y` — as a module it picks up the device MAC address; built-in it doesn't. Legacy Qualcomm (pre-2016 SoCs): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath`.
 
+#### Regulatory domain: `country 00`, and no 5 GHz on any device
+
+Until Sep 2026 **nothing in the LuneOS tree installed `wireless-regdb`** except
+one accidental edge — `linux-firmware-pine64`'s RDEPENDS — so pinephone,
+pinephonepro and pinetab2 had `/lib/firmware/regulatory.db` and all seventeen
+other machines, every phone, did not. It was never dropped: oe-core only ever
+wires it into `packagegroup-base-wifi` (added 2019-06-19, `00c5a665b4`), and
+LuneOS builds its images from `packagegroup-luneos-*`, so `packagegroup-base`
+is never installed. `git log -S wireless-regdb` over meta-webos-ports returns
+zero commits, and connman does not reference it either.
+
+It went unnoticed for years because **the world domain is a fully usable
+2.4 GHz radio** and only cripples 5 GHz:
+
+```
+country 00:
+  (2402 - 2472 @ 40), (6, 20), (N/A)          <- no PASSIVE-SCAN, normal
+  (5170 - 5250 @ 80), ... PASSIVE-SCAN
+  (5250 - 5330 @ 80), ... DFS, PASSIVE-SCAN
+  (5490 - 5730 @ 160), ... DFS, PASSIVE-SCAN
+  (5735 - 5835 @ 80), ... PASSIVE-SCAN
+```
+
+Channels 1-11 work; every 5 GHz band is passive-scan-only, so 5 GHz APs are
+simply never found. On a phone that just presents as "Wi-Fi works".
+
+**Shipping the file is only half the fix.** cfg80211 is built in on these
+kernels, so it requests `regulatory.db` during its own initcalls, before any
+rootfs exists. Boot log from radon (MT6877, 4.19):
+
+```
+cfg80211: Loaded X.509 cert 'sforshee: ...'
+cfg80211: Loaded X.509 cert 'wens: ...'
+platform regulatory.0: Direct firmware load for regulatory.db failed, error -2
+platform regulatory.0: Falling back to syfs fallback for: regulatory.db
+ueventd: firmware: could not find firmware for regulatory.db
+ueventd: firmware: attempted /vendor/firmware/regulatory.db, open failed
+cfg80211: failed to load regulatory.db
+```
+
+On Halium the process answering the sysfs firmware fallback is the **Android
+container's ueventd**, which searches `/etc/firmware`, `/odm/firmware`,
+`/vendor/firmware` and `/firmware/image` — never the LuneOS root — so it always
+answers "not found". The failure is then **latched**: `regdb_fw_cb()` sets
+`regdb = ERR_PTR(-ENODATA)` and `query_regdb()` returns that for the rest of the
+uptime without ever issuing another `request_firmware()`. So the db sits on disk
+unread, and `iw reg set XX` returns 0 while changing nothing — a very
+convincing dead end.
+
+`NL80211_CMD_RELOAD_REGDB` (`iw reg reload`) is the only thing that clears it.
+
+Diagnosis, in order:
+
+```sh
+iw reg get | head -1                     # "country 00" => broken
+ls -l /lib/firmware/regulatory.db        # missing => package not installed
+journalctl -k -b | grep -iE "regulatory|regdb"
+iw reg reload && iw reg set NL && iw reg get | head -1
+```
+
+In tree: `wireless-regdb-static` plus the `cfg80211-regdb-reload` service
+(meta-luneos/recipes-connectivity), both gated on the `wifi` MACHINE_FEATURE in
+`packagegroup-luneos-extended`. Signing caveat for old kernels: upstream signs
+the db with the **wens** key since 2023, and
+`CONFIG_CFG80211_USE_KERNEL_REGDB_KEYS=y` trusts only `net/wireless/certs/*.hex`
+— check `wens.hex` is there before assuming it will verify (FuriLabs' 4.19 has
+both wens and sforshee).
+
+#### Never gate a unit on `/sys/module/<driver>` — it assumes a module
+
+A built-in driver has **no `/sys/module` entry at all**, so every
+`ConditionPathExistsGlob=/sys/module/wlan*` silently excludes the machines where
+the driver is compiled in, and systemd reports `ConditionResult=no` rather than
+an error. This has now bitten three separate units on radon
+(`CONFIG_MTK_COMBO=y`): the mtk-connectivity BT unit (`.ko` globs only),
+`mtk-connectivity-wifi`, and `wlan-suspend-mode`, which had **never run once**.
+
+The same assumption hides in *driver detection*, which is worse because the unit
+appears to work. `wlan-suspend-mode`'s `driver_layout()` chose its private-ioctl
+struct by looking for `/sys/module/wlan_drv_gen4m*`, so with gen4m built in it
+returned `qcom` and sent the wrong layout. Measured on radon:
+
+```
+SETSUSPENDMODE 0   layout=qcom -> FAIL [Errno 22] Invalid argument
+SETSUSPENDMODE 0   layout=mtk  -> OK
+```
+
+Gate on something that exists either way: the character devices
+(`/dev/wmtWifi`, `/dev/conninfra_dev`, `/dev/stpbt` for MTK combo), or the
+network interface itself — and where you must wait for an interface, bound the
+wait and exit with a status in `RestartPreventExitStatus` so a machine with no
+WLAN does not spin forever.
+
+#### "Wi-Fi associates, ping works, but TCP hangs"
+
+Establish **where** the loss is before touching the port. This exact symptom on
+radon — SSH emitting a banner and then dying — cost days across sshd, entropy,
+host keys, socket activation, MTU, DSCP, CPU starvation and power save, all of
+which were wrong. It was the *router*, bridging between its 2.4 GHz and 5 GHz
+radios: the phone was on 2.4 GHz, the dev host on 5 GHz, and only flows crossing
+between the two radios died. Consumer routers accelerate TCP/UDP in hardware and
+leave ICMP on the slow path, so ping is not evidence that TCP will work.
+
+Run this matrix; it takes two minutes and answers it outright:
+
+| test | what it isolates |
+|---|---|
+| `ping -c5 -M do -s 1472 <peer>` | L2/L3 path and MTU, both directions |
+| device `wget` a few MB from the internet | device↔AP leg only — if this is fast, the radio and driver are fine |
+| device connects **out** to a listener on the peer | device-initiated TCP |
+| peer connects **in** to a listener on the device | peer-initiated TCP |
+| same tests with peer on the **same band** | isolates cross-band bridging |
+
+Read `ss -ti` on the *sending* side, not the application's symptoms.
+`bytes_acked:1` with a climbing `bytes_retrans` means your data was never
+acknowledged — the receiver never got it — which is a completely different
+problem from "the far end is not replying". Use a plain socket listener, not
+sshd, so the application is out of the picture.
+
+
 ### Modem
 - mindphone: `md1.status = "exception"`, RIL daemon stopped. Root cause was **fstab selection**: `mount-android.sh` picked `fstab.enableswap` (sorts before `fstab.mt6739` under the glob), so the modem NV partitions (nvcfg/nvdata/protect1/protect2 — MTK calibration + IMEI) never mounted. Fix: prefer `fstab.$(getprop ro.hardware)`, skip `*.enableswap`. Generic to any multi-fstab MTK device. After the fix: `md1.status=ready`, IRadio em1/em2 registered, ofono `/ril_0` + `/ril_1` both Powered (dual-SIM).
 - MTK exposes NV partitions under `/dev/disk/by-partlabel` only (no by-name) — `find_partition_path` must cover that.

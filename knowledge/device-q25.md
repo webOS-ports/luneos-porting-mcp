@@ -328,53 +328,75 @@ Things that will want attention on first boot, in likely order:
 
 ## The install kit
 
-Built 13 Sep 2026: **`/media/herrie/LuneOS/q25-staging/`**, distributable as
-`q25_20260913.zip` (1.22 GiB compressed, 4.15 GiB of payload).
+Re-cut **27 Sep 2026**: `/media/herrie/LuneOS/q25-staging/`, distributable as
+`q25_20260927.zip` (1.22 GiB compressed, 4.15 GiB of payload, integrity verified).
 
 | File | |
 |---|---|
-| `boot-q25-luneos.img` | 27 MB into the 64 MiB `boot` partition |
+| `boot-q25-luneos.img` | 22.4 MB into the 64 MiB `boot` partition; carries the patched keyboard driver, and `kernel.release` = `5.10.198-android12-9-gfcab0aff02db` |
 | `boot-q25-luneos-debug.img` | `enable_adb` variant |
-| `userdata-luneos.img` | 4.2 GiB ext4 labelled `userdata`, holding `rootfs.img` (2.9 GiB, halium-arm64 wrynose 20260913) and `android-rootfs.img` (1.0 GiB, Halium 16 GSI `halium-luneos-16.0-20260910-1-halium_arm64`) side by side |
+| `userdata-luneos.img` | 4.2 GiB ext4 labelled `userdata`: `rootfs.img` (2.9 GiB halium-arm64) + `android-rootfs.img` (1.0 GiB, Halium 16 GSI `halium-luneos-16.0-20260910-1-halium_arm64`) side by side |
 | `vbmeta.img` | Zinwa's own stock vbmeta |
 | `install.sh`, `make-userdata.sh`, `README.md`, `SHA256SUMS` | |
 | `userdata-src/` | the two images loose, for rebuilds (not zipped) |
 
-Three deliberate differences from the bluejay kit:
+`install.sh` gained two checks over the September version, both from the MP01:
+a **lock-state check** (a locked MediaTek lk does not report itself locked; it
+refuses individual critical partitions with "No support by lock control", which
+reads like a problem with that partition) and a **partition-size report** (the
+scatter nominally declares `userdata` as 3 GiB; the real one is ~228 GiB and the
+image relies on the initramfs growing into it).
 
-1. **No `fastboot boot` anywhere.** MediaTek's lk frequently does not implement
-   it, so the debug image is *flashed* rather than booted out of RAM, and the
-   install never depends on the debug-boot + `adb push` dance bluejay uses.
-2. **A prefilled `userdata` image rather than `fastboot format:ext4` + push.**
-   `fastboot flash userdata <img>` is the route the Droidian port proves on this
-   exact hardware; `fastboot format` would need lk to cooperate. The image is
-   much smaller than the 228 GiB partition and grows on first boot.
-3. **A confirmation prompt and a board-name check** (`q20_v12_factory` /
-   `q20_v1_factory` / `Q25`), because this kit wipes the phone and nobody has
-   ever booted it.
+The GSI had to be regenerated: `bluejay-staging/android-rootfs.img` is gone with
+the rest of the old staging dirs. The tarball in `DL_DIR` unpacks to a **raw**
+ext4 `system.img`, so it is a rename rather than a `simg2img` — worth knowing,
+because the recipe path does convert and the assumption is easy to carry over.
 
-Two things were checked before trusting the shipped-image flow, since it is the
-part with no bluejay precedent to lean on:
+**Use the `halium-arm64` rootfs, not the `luneos-dev-image` built for
+`MACHINE=q25`.** Both appear in `tmp/deploy/images` if someone builds the latter,
+and only the former is correct: the whole point of the generic rootfs is that it
+carries nothing device-specific, and `generic-rootfs-qa` exists to keep it so.
 
-- `resize_userdata_if_needed()` in the shipped `halium-boot.sh` reads
-  `/sys/class/block/<dev>/size` rather than grepping `/proc/partitions` for
-  `mmcblk*`/`disk*`. The Q25 is UFS, so its userdata resolves to `/dev/sd*` and
-  the old code would have left the filesystem at image size — silently.
-- `identify_android_image()` searches `/tmpmnt/android-rootfs.img` first under
-  the halium `file_layout`, which is what makes "the GSI sits next to rootfs.img
-  on userdata" work.
+### The bug that assembling the kit exposed
 
-The initramfs also carries e2fsprogs 1.47.4, so the `orphan_file` /
-`metadata_csum_seed` features a modern host `mke2fs` writes are understood by
-the `resize2fs` that has to grow the thing.
+`kbdscroll` **was not in the rootfs at all** — `/usr/sbin/kbdscroll: File not
+found` — so every bit of the relative-pad work was dead on this device. Caught
+only by checking the assembled image rather than trusting the build.
 
-### Keeping Android
+`packagegroup-luneos-extended` gated it on
 
-`install.sh` flashes the current slot, so Android there stops booting. The A/B
-alternative — Android on A, LuneOS on B, switch with
-`fastboot --set-active=other reboot` — is documented in the kit README but not
-automated: it is only safe once slot B holds a complete matching firmware, and
-getting that wrong leaves neither OS bootable.
+```bitbake
+RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'keyboard-touch trackpad', ...)}"
+```
+
+which is evaluated for the machine that **builds the rootfs**. That is
+`halium-arm64`, whose `MACHINE_FEATURES` has neither flag; `trackpad` lives in
+`q25.conf` and `keyboard-touch` in `athena.conf`, and neither of those machines
+builds a rootfs. So the package could never reach either device.
+
+This is the **same architectural gap as the kbdscroll profiles, one level up**:
+anything gated on a device machine's `MACHINE_FEATURES` is invisible to the
+shared rootfs. The fix matches how `70-q25.rules` and the
+`luneos-device-config` adaptations already work — ship it on the generic image
+and let the runtime decide:
+
+```bitbake
+RDEPENDS:${PN}:append:halium-arm64 = " ${KEYBOARD_TOUCH_RDEPENDS}"
+RDEPENDS:${PN}:append:halium-arm   = " ${KEYBOARD_TOUCH_RDEPENDS}"
+```
+
+Safe because it is already how kbdscroll behaves: with no touch surface besides
+the touchscreen it logs "nothing to do" and exits 0 deliberately, and its own
+comment says the package is expected on machines that have none.
+
+**Worth generalising: when a device builds only a boot image, every
+`MACHINE_FEATURES`-gated package is a candidate for the same bug.** Grep
+`contains_any('MACHINE_FEATURES'` in the packagegroups and ask, for each, whether
+a q25/mp01/athena-style machine would ever see it.
+
+Verified in the re-cut image: `kbdscroll` present (67,880 bytes, carrying the
+relative code paths), `by-codename/{athena,q25}.conf` installed, the Q25 Tier 1
+adaptation with all four MediaTek keys, and `70-q25.rules`.
 
 ## Install sketch (the manual sequence)
 
@@ -401,6 +423,340 @@ chosen yet:
 
 Anti-rollback: unknown on this device. Assume it exists, never flash older
 firmware than what is on it.
+
+## The boot blocker: vermagic (26 Sep 2026)
+
+The port as it stood on 13 Sep **would not have booted**, and the reason is worth
+stating in full because every individual check had passed.
+
+`check-kmi.sh` said 344 of 344 stock modules load with 0 CRC mismatches, and
+`mtk-load-modules.sh` escalates `modprobe` -> `--force-vermagic` -> `--force`, so
+a vermagic that differed looked covered. Both true; both irrelevant to the
+modules that decide whether the device comes up.
+
+Those are loaded by the **initramfs**, not by that script. On this device the
+storage and USB controllers are themselves vendor modules -
+`ufs-mediatek-mod.ko`, `phy-mtk-ufs.ko`, `mtk-mmc.ko`, `musb_hdrc.ko`, all in the
+stock `vendor_boot` ramdisk's `/lib/modules` - so `init.sh` must insmod them
+before it can find userdata at all. The initramfs carries only **busybox**
+insmod/modprobe, which has no `--force-vermagic`, and `CONFIG_MODULE_FORCE_LOAD`
+is not set in the stock config either. Vermagic therefore has to genuinely match
+or nothing loads, there is no userdata, and the phone is mute: no console (no
+debug UART), no adb (the USB controller is one of the modules that did not load).
+
+```
+stock modules want:  5.10.198-android12-9-gfcab0aff02db SMP preempt mod_unload modversions aarch64
+we were producing:   5.10.198-g2a873a3511ee             SMP preempt mod_unload modversions aarch64
+now:                 5.10.198-android12-9-gfcab0aff02db   <- kernel.release, deployed as a build artefact
+```
+
+Everything after the release string already matched, because we build the
+device's own config. The sublevel needed no rewriting either - the xelex tree is
+genuinely 5.10.198, exactly what the stock kernel reports - so the fix is two
+lines in `files/vermagic.cfg` (`CONFIG_LOCALVERSION`, `LOCALVERSION_AUTO` off)
+plus an empty `.scmversion` written in `do_configure:prepend`, without which
+`scripts/setlocalversion` appends a `+` and the match misses by one character.
+
+Merged **unconditionally, including for the `LUNEOS_KERNEL_FRAGMENT="0"`
+baseline**: it belongs to "reproduce the vendor's kernel", not to the LuneOS
+delta, so the baseline must carry it or the baseline is not a baseline.
+
+### Why not "build the vendor's modules instead" (kmi-crc-matching.md step -1)
+
+That is the better answer on most devices and the wrong one here, for two
+measured reasons:
+
+1. **Nothing to buy.** The CRCs already match, 344 of 344. The binaries the
+   device already has are fine; only the vermagic string blocked them.
+2. **Actively risky on MT6789.** The MP01 embedded its 180 vendor modules
+   (5.5 MB compressed), the boot image went 28 MB -> 31.6 MB, and lk then
+   stopped loading it at all - no kmsg, no panic, nothing in expdb, on six
+   consecutive images. The 64 MiB partition was never the constraint; the
+   combined ramdisk the kernel must decompress is.
+
+ThinLTO (`KERNEL_LTO_THIN = "1"`) is the other change worth having: it took the
+kernel from 20.4 MB to **16.0 MB** and the boot image to ~22.6 MB, which is more
+headroom under that ceiling as well as a much shorter build (the stock config's
+full-LTO `vmlinux.o` link is ~20 minutes of a single core). KMI-neutral by
+construction and re-verified 0/344.
+
+## What else came from the MP01 (26 Sep 2026)
+
+The MP01 is the same SoC, the same MediaTek `mgk` android12-5.10 kernel, and it
+**boots to the LuneOS UI**. Read `device-mp01.md` alongside this. Taken from it:
+
+| Change | Why |
+|---|---|
+| `cgroup_disable=net_prio` on the boot cmdline | Breaks a boot- *and* shutdown-time deadlock: `net_prio`'s `cgrp_css_online()` takes rtnl under cgroup_mutex, connmand holds rtnl in `ccmni_close()` waiting on an "events" work item, and every events kworker waits on cgroup_mutex in `cgroup_bpf_release()`. PID 1 then blocks in `proc_cgroup_show`. Nothing device-specific: `net_prio` is the only controller whose `css_online` takes rtnl, `ccmni` is MediaTek's shared cellular netdev, and LXC + connman are the same on every port |
+| `deviceinfo_hybris_prefer_vndk="1"` | **Verified on this device, not assumed**: the Q25's own `/vendor/lib64/libnvram.so` (out of super.img) imports `android::base::Basename(const std::string&)`, which the Android 16 GSI's libbase no longer exports. Without it pulseaudio crashes on start |
+| `deviceinfo_audio_sample_rate="48000"` | MediaTek's HAL runs its downlink paths at 48 kHz; at pulseaudio's default 44.1 kHz it resamples everything |
+| `deviceinfo_bluebinder_ext_features_page_2_mask="0x0400000000000000"` | The MT6789 claims Synchronization Train support and then answers Read Synchronization Train Parameters with "Unknown HCI Command", aborting hci init - hci0 never comes up. Attributed to the chip, and this is the same chip with the same connac1x Bluetooth |
+| `deviceinfo_force_hwc2="1"` | `ro.hardware.hwcomposer=mtk_common`, as on the MP01, where the compositor otherwise spun trying to become DRM master |
+
+The same three userspace keys appear independently in the **radon** (MT6877)
+adaptation, which is what makes them MediaTek-A12-vendor properties rather than
+board ones.
+
+Deliberately **not** copied, each with its reason recorded in the file that would
+have carried it:
+
+- `GKI_RAMDISK_COMPRESSION = "lz4-legacy"` - both of the Q25's stock ramdisks are
+  **gzip** (checked with `file` on the unpacked stock `boot.img` and
+  `vendor_boot.img`), which is what `initramfs-android-image` already produces.
+  The MP01's are LZ4 and AOSP requires the compression to match across the
+  bootloader's concatenation.
+- `initcall_debug=0 loglevel=4` - these undo an MP01 vendor_boot cmdline that
+  turns both on. The Q25's is `bootopt=64S3,32N2,64N2 buildvariant=user` and
+  turns on neither.
+- `deviceinfo_battery_critical_percent="0"` - different charging hardware
+  entirely (mt6358_battery + hodafone_battery, upm6922/upm6722, mt6375 PD). If
+  the phone powers off within a minute on a charger, check
+  `/sys/class/power_supply/battery/capacity` first - that is the MP01's symptom.
+- `deviceinfo_backlight_outdoor_scale` (E Ink only) and
+  `deviceinfo_compositor_geometry` (the MP01's panel is mounted rotated; the
+  Q25's is square).
+
+## Module audit: what our tree can and cannot build (26 Sep 2026)
+
+Prompted by a good question - whether we actually have source for the keyboard
+driver, given the `.o_shipped` objects sitting next to it in the LineageOS repo.
+
+**We do.** kbuild's `%.o: %.c` rule wins wherever the `.c` exists, and
+`.bbqX0kbd_main.o.cmd` in the build tree is a full 133 KB clang invocation, not a
+`cp`. Our `bbqX0kbd.ko` carries the same 43 text symbols as the stock binary -
+including Zinwa's own `hodafone_q20_*`, `q20_switch_key_mouse_*`,
+`q20_spec_power_flag_*` and `firmware_upgrade_*` - differing only by ThinLTO's
+`$<hash>` CFI suffixes on static functions. The `.o_shipped` files are ignored
+dead weight.
+
+Systematically, our build produces **333 of the device's 344 stock modules**. The
+11 it does not:
+
+| Missing | What it is | Source | Matters? |
+|---|---|---|---|
+| `met.ko` + 9 × `met_*_api.ko` | MediaTek Extensive Tracing (profiling) | **absent from the tree** | No - debug tooling |
+| `fpsgo.ko` | an older FPS governor; we build `mtk_fpsgo.ko` from `performance/fpsgo_v3/` | v3 only | No - perf tuning |
+
+None of them blocks anything: the device keeps all 344 stock modules and they now
+load.
+
+### A naming bug worth fixing before it bites
+
+`mali_mgm_mt6789.ko` and `mali_prot_alloc_mt6789.ko` were in that missing list
+until 26 Sep, and the reason was not missing source. MediaTek's Mali tree sets
+
+```make
+MTK_PLATFORM_VERSION := $(CONFIG_MTK_PLATFORM:"%"=%)      # midgard/Makefile:21
+```
+
+without exporting it, and the two **sibling** directories name their modules from
+it:
+
+```make
+obj-m += mali_mgm_$(MTK_PLATFORM_VERSION).o
+obj-m += mali_prot_alloc_$(MTK_PLATFORM_VERSION).o
+```
+
+kbuild descends into them with the variable unset, so we produced `mali_mgm_.ko`
+and `mali_prot_alloc_.ko`. `mali_kbase` escapes it because
+`drivers/gpu/mediatek/Makefile` *exports* `MTK_PLATFORM`, which is what names
+that one. Android's build passes the variable in the environment, which is why
+the vendor never hit it.
+
+Harmless while we ship no modules of our own, but it is exactly the silent
+failure kmi-crc-matching.md warns about under *"DO match the layout exactly"*:
+the vendor's `modules.load` and `modules.dep` address modules by name, so a
+future module override would quietly skip these two and load the vendor's
+binaries against our kernel. Fixed with `MTK_PLATFORM_VERSION=mt6789` on the
+recipe's make line; overlap went 331 -> 333 and the KMI check stayed at 0/344.
+
+## The keyboard: what actually reaches Qt
+
+Established 26 Sep by reading the driver, and it is a real gap rather than a
+tuning question.
+
+The Q20 keyboard hardware reports **uppercase ASCII scancodes**; the driver
+resolves them and reports both `EV_MSC/MSC_SCAN` (the raw scancode) and an
+`EV_KEY` keycode. **Android reads the scancode** through
+`Q25_keyboard.kl`/`.kcm`, which is why punctuation works there. **Qt's
+evdevkeyboard plugin reads only `EV_KEY`**, and the driver's two layer maps cover
+only:
+
+- `bbqX0kbd_get_num_lock_keycode()` - digits: W->1, E->2, R->3, S->4, D->5,
+  F->6, Z->7, X->8, C->9, `$`->0. And it is gated on a **latched num-lock**
+  (Alt then RightShift), not on Alt being held.
+- `bbqX0kbd_get_altgr_keycode()` - navigation and volume only: PageUp/PageDown,
+  arrows, Home, Menu, VolUp/VolDown, Mute, Delete.
+
+Every symbol in the Q20 layout - `# ( ) _ - + @ * / : ; ' " ? ! , . \ ^ = { } [ ]
+< > &` - falls through `default: returnValue = keycode`, so Qt sees the bare
+letter keycode with Alt or Sym reported as an ordinary modifier. **On LuneOS as
+it stands the keyboard types letters, digits, arrows and Enter/Space/Backspace,
+and no punctuation at all.**
+
+There is no per-device keymap file to fix it with, which is worth writing down
+because it is the obvious first assumption:
+
+- `generate_qmap` (qt-features-webos) takes **only an output path** and emits a
+  fixed built-in table (Qt's default plus `webos_keymap`). There is no input
+  keymap, so a `.qmap` cannot be device-specific without patching that shared
+  recipe - which would change Alt+letter behaviour on every other device.
+- `kbdscroll`'s `profiles/<machine>.conf` is the right *shape* of answer but the
+  wrong tool: it reads **absolute** touch surfaces and says so explicitly - "an
+  optical pad that reports REL_X/REL_Y is already a pointer to the compositor
+  and is not what this reads". The Q25's trackpad is relative.
+- The `.kl`/`.kcm` in the LineageOS device tree are Android's, read via
+  `MSC_SCAN`, which Qt never looks at.
+
+Which also means **`trackpad` in q25.conf's MACHINE_FEATURES is questionable**:
+it gates `KEYBOARD_TOUCH_RDEPENDS` and so installs kbdscroll, which by its own
+documentation cannot read this pad.
+
+### Closed: the symbol layers are resolved in the driver (26 Sep 2026)
+
+`meta-zinwa/recipes-kernel/linux/files/0001-bbqX0kbd-Q20-symbol-layers.patch`
+maps both layers to the keycode and shift state a US layout needs, taken from the
+diagram in `bbq20kbd_pmod_codes.h` (character printed *above* a key = Alt,
+*below* = Sym). `q20_layers=0` as a module parameter restores stock behaviour
+without a rebuild.
+
+Three things it has to get right, each of which would fail silently:
+
+- **Declare the new keycodes.** `KEY_MINUS`, `KEY_SLASH`, `KEY_SEMICOLON`,
+  `KEY_APOSTROPHE`, `KEY_COMMA`, `KEY_DOT`, `KEY_BACKSLASH`, `KEY_LEFTBRACE`,
+  `KEY_RIGHTBRACE` are not in the base table, and the input core **drops** an
+  event for a key the device never set in `input->keybit`. The probe now sets
+  them from the two tables.
+- **Remember what was emitted, per scancode.** Releasing Alt before the key
+  would otherwise report a release for a keycode never pressed and leave the
+  symbol held down for ever.
+- **Do not fight a physical shift.** The synthetic `KEY_LEFTSHIFT` is injected
+  only when neither physical shift is down.
+
+Alt and Sym are no longer reported to userspace at all: on this keyboard they are
+layer selectors printed on the keys, not PC modifiers, and reporting them makes
+the toolkit see `Alt+Shift+3` rather than `#`.
+
+**The patch alone would have been dead code**, and this is the part worth
+remembering. `bbqX0kbd.ko` is a *module*, in the stock `vendor_boot` ramdisk's
+`modules.load` (line 129 of 160), and the Q25 ships none of its own modules - so
+the device would have loaded the vendor's binary and never seen the patch. The
+fix is the MP01's arrangement for its patched `mediatek-drm.ko`:
+
+- the recipe's `do_install` puts the stripped module in the machine initramfs,
+- `q25.conf` sets `ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL = "linux-zinwa-q25"`,
+- `init.sh`'s `stage_our_kernel_modules()` copies `/usr/lib/modules/*.ko` over the
+  vendor's `/lib/modules/` before anything is modprobed - necessary because
+  usrmerge packages ours at `/usr/lib/modules` while the vendor ramdisk creates a
+  real `/lib/modules`, and cpio only substitutes at an identical path,
+- `load_kernel_modules()` then loads in the vendor's own `modules.load` order, so
+  the dependency order stays theirs and only the binary is ours.
+
+It logs `initrd: installed 1 of our own kernel modules over the vendor's` to
+kmsg, which is the thing to grep for on first boot.
+
+One 66 KB module, not the 344-module wholesale copy: the boot image is 22.4 MB,
+against the ~28 MB at which the MP01 measured lk refusing to load one at all.
+
+Verified: patch applies cleanly, driver compiles with no warnings, the new
+`q20_alt_layer`/`q20_sym_layer`/`q20_held_*` symbols are in the built module, it
+is present in the initramfs at `/usr/lib/modules/bbqX0kbd.ko`, and the KMI check
+is still 344 of 344.
+
+**Untested on hardware.** The layout transcription, whether suppressing Alt/Sym
+breaks any shortcut worth having, and whether the shift injection reads correctly
+through Qt all want checking on the device.
+
+### Scrolling: kbdscroll now reads a relative pad (26 Sep 2026)
+
+The keyboard types; the *pad* is what scrolls, and it did nothing. Two facts
+decide the design:
+
+- **The LuneOS shell scrolls under a finger, not a cursor.** kbdscroll exists
+  precisely because nothing in a Wayland stack does anything useful with a
+  secondary surface, and it injects a synthetic touch contact so "every toolkit
+  (Mojo, Enyo, QML, Chromium) scrolls - and flings - exactly as it would under a
+  real finger". Moving a pointer around buys almost nothing here.
+- **The Q25's pad is relative.** The driver advertises `EV_REL` `REL_X`/`REL_Y`
+  and nothing else - signed int8 deltas - so there is no coordinate space, no
+  touch-down and no touch-up. kbdscroll excluded relative pads by design, on the
+  grounds that "the compositor already turns that into a pointer… a device that
+  has one does not need this". True on a desktop, false on a touch-first shell,
+  and the Q25 is the device that falls through the gap.
+
+So kbdscroll now reads relative pads, with the gesture boundaries synthesised:
+first movement after stillness is the contact coming down, `rel-lift-ms` (120 ms)
+of stillness is it lifting. The deltas accumulate into a virtual surface
+(`rel-width`/`rel-height`, defaulting to the screen's size so one pad unit is one
+screen pixel at scale 1.0), and everything downstream - slop, axis locking,
+scale, the fling, the cursor modifier, typing-cancels-the-gesture - is the same
+code the absolute path uses. The lift feeds one synthetic `SYN_REPORT` through
+the same loop rather than duplicating the end-of-stroke handling, so there is
+exactly one code path.
+
+It deliberately does **not** grab the device: on the Q25 the pad and the whole
+QWERTY are one input node (`Q25_keyboard`), so a grab would swallow typing. If a
+cursor turns out to move and fight the injected finger, that belongs in the
+compositor's input configuration, not here.
+
+`profiles/q25.conf` is the config file. Two entries in it are judgements rather
+than measurements and are the first things to check on hardware:
+
+- `cursor-modifier = rightalt`, not the default Alt. On this keyboard **Alt is
+  the symbol layer** - Alt+Q is `#` - so leaving the modifier on Alt would make
+  every punctuation mark move the text cursor instead. Sym already carries the
+  printed arrow keys, which is the same idea.
+- `arrows = uinput`. A Classic layout has no dedicated arrow keys, so a device of
+  our own is the only way to send them.
+
+### The profile mechanism had to change too
+
+kbdscroll installed `profiles/${MACHINE}.conf` at build time. That cannot work
+for this device, or for mp01, or for any other Halium target: they build **no
+rootfs of their own** and run the generic `halium-arm64` one, where `${MACHINE}`
+is `halium-arm64` and a `q25.conf` would simply never be installed.
+
+So profiles now ship together and are selected at runtime by codename, from
+`LUNEOS_DEVICE_CODENAME` in `/run/luneos-device/device.env` - the same
+arrangement `luneos-device-config` uses for its Tier 1 adaptations, for the same
+reason. Codenames are not reliably lowercase (`Q25`, `MP01`) while profiles are
+named after the machine, so the exact spelling is tried first and then lowercase.
+
+A machine that *does* build its own rootfs keeps its build-time drop-in as well,
+so athena's tuning does not become conditional on codename derivation working.
+Verified: the generic rootfs gets `by-codename/{athena,q25}.conf`, athena gets
+those **plus** its original `10-athena.conf`.
+
+Verified: compiles clean under `-Wall -Wextra` and in the cross environment for
+both machines, the new options appear in `--help`, and `--list` degrades
+gracefully. **Not run against hardware** - there is no `/dev/uinput` or
+`/dev/input` access on the build host, so the state machine has been reasoned and
+compiled but never exercised. The test on the device is
+`kbdscroll --list` (is `Q25_keyboard` chosen as the pad, and reported as
+`relative`?) then `kbdscroll --debug` while sliding: expect
+`relative contact down`, then `touch at x,y`, then
+`relative contact up: N ms still`.
+
+### What is still worth doing
+
+`keyd` stays the deferred alternative, and is still worth doing later for what
+the driver route cannot give: the three layout variants (qwerty/qwertz/azerty)
+switchable without a rebuild, latched/one-shot modifiers, remapping the toolbelt
+keys to Ctrl/Alt when held as Droidian does, and a user-editable config. What the
+driver route gives that keyd cannot: it works in the initramfs and a TTY, needs
+no daemon or evdev grab, and keeps one source of truth for the layout.
+
+### The two routes, as assessed before choosing
+
+1. **Patch the driver** - extend the two lookup functions to cover the symbols,
+   synthesise `KEY_LEFTSHIFT` around the shifted ones, make Alt work held rather
+   than latched, and stop reporting Alt/Sym as modifiers so Qt does not see
+   `Alt+Shift+3`. Self-contained in our own kernel, and now known to be viable
+   since the source is complete.
+2. **Port `keyd`** and ship the Droidian port's `q25-qwerty`/`qwertz`/`azerty`
+   configs, which are already tested on this exact hardware. A new recipe, but it
+   sits between evdev and everything, so Qt, maliit and Waydroid all benefit, and
+   the layout becomes a user-editable file per layout.
 
 ## How much of mindphone transfers (both are MediaTek)
 

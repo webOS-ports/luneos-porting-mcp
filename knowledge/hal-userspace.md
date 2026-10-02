@@ -222,6 +222,18 @@ whole MediaTek family. Three condition-gated systemd units + two helpers, gated 
 Container node access matters generally: `wmt_loader` could not open `/dev/wmtdetect`
 until the MTK connectivity nodes were exposed to the container.
 
+**The `.ko` conditions are a trap on a built-in driver.** `CONFIG_MTK_COMBO=y`
+(radon) compiles the combo driver into the kernel, so no `wmt_drv.ko` and no
+`/sys/module/wlan*` ever exist and systemd reports `ConditionResult=no` — the
+units never run, silently, with nothing in the journal to say so. Widen them to
+the character devices, which exist either way:
+`ConditionPathExists=|/dev/stpbt`, `|/dev/conninfra_dev`, `|/dev/wmtWifi`.
+The same assumption broke `wlan-suspend-mode` twice over (its unit condition
+*and* its `driver_layout()` ioctl-struct detection); see debugging.md,
+"Never gate a unit on `/sys/module/<driver>`". In built-in mode the driver also
+waits for `CONNINFRA_IOCTL_DO_MODULE_INIT` before any sub-driver comes up — see
+the conninfra note below.
+
 **GKI-era MediaTek (MT6789, MP01, Sep 2026) — what changed:**
 
 - **The modules live in `vendor_dlkm`, not `vendor`.** All three units' conditions
