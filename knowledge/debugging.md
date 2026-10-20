@@ -221,6 +221,22 @@ Start a loop from the initramfs (chrooted into the rootfs, before switch_root) t
 
 Neither fastboot nor the initramfs runs a charging policy (`get_charger_charging_current: ... failed: -95`). Hours of reflash cycles flatten the battery, and "rebooted to a battery symbol after some minutes" looks exactly like a crash or watchdog reset. Charge it powered-off on a real charger.
 
+### Remote bring-up through a tester
+
+When someone else holds the device, every round is a kit, a flash and a log archive, and a round lost
+to the tooling costs as much as one lost to the port (found on goyavewifi; see device-goyavewifi.md).
+
+- **Never let a collector wait on something that can stay alive.** An `strace -p` of a service that
+  stopped crashing hung the tester's script. Bound every wait by time.
+- **Check where the tester's tools look.** Two rounds went to an update script that wrote to
+  `/data/luneos-data` while the installed rootfs was `/data/luneos`. Have the collector list the real
+  paths first, and end with a result block the tester can paste.
+- **The recovery's BusyBox is not GNU:** no `ls --full-time`, no `head -N`, no `timeout`, maybe no
+  `sha256sum`. Test the scripts against it.
+- **Debug patches go in the kernel recipe, not on the branch,** marked remove-me, with the kernel
+  otherwise unchanged so the next round compares. A debug patch that prints nothing is an answer too.
+- **Collect the container's logcat from the first round** (§ 2.4).
+
 ## Stage 1 — Initramfs failures
 
 The init fixes below are described in full in boot-images.md § Init patch history; this stage is how to recognise them.
@@ -342,6 +358,11 @@ Inside the LXC container init often has no usable `/dev/kmsg`, so KernelLogger d
 ### 2.4 Read the container's logcat, not just journalctl — the ashmem case
 
 `systemctl is-system-running = running`, 0 failed units, 32 audio sinks, working nyx/ofono — and the bootloader splash forever, with nothing in journalctl. Only the **container's logcat** showed it: from Android 12, libcutils opens `/dev/ashmem<boot_id>`, not `/dev/ashmem`; the container's init creates that node inside the container, but hybris runs on the host, so every `ashmem_create_region()` failed, libfmq could not allocate, the HIDL composer's command queue was never created and the compositor sent no display commands. Fix: create `/dev/ashmem<boot_id>` on the host (`mount-android.sh`). Applies to any A12+ GSI.
+
+Collect it from the first boot, not after the journal runs dry: `lxc-attach -n android -- logcat -d -b all`.
+HAL services log through logd only; a service that exits 1 at every start may say nothing in dmesg or
+the journal and say why in one logcat line (goyavewifi: gralloc and the composer, gsi-building.md
+§ Before deriving, item 5).
 
 ### 2.5 The property service: enabled, but not running
 
@@ -620,6 +641,19 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | pulseaudio busy while silent; sink RUNNING forever | Uncorked stream (Qt EOS bug) | Stage 5 §3 |
 | Idle flash writes high | Kernel driver debug_mask / log spam | Stage 5 §4 |
 | Journal of a crashed boot ends after a few seconds | journald flushes every 5 min by default | tooling appendix |
+| `CANNOT LINK EXECUTABLE … cannot locate symbol "strdup8to16"` (or similar) from a LineageOS vendor blob | A LineageOS linker shim the GSI's linker does not load | gsi-building.md § Before deriving, item 1 |
+| `Service android.hardware.<hal>@x::I…/default must be in VINTF manifest in order to register/get` | The vendor declares the HAL passthrough | gsi-building.md § Before deriving, item 2; device-bringup-yocto.md § Shipping fixes through /odm |
+| sensorfwd logs "Could not find 'android.hardware.sensors@1.0::ISensors/default'" and exits | No sensors service on a passthrough-only vendor | hal-userspace.md § Sensors |
+| The library name resolves, a symbol does not (`PermissionCache`, `checkCallingPermission`) | A blob linked against the system libbinder; the vendor has its own | gsi-building.md § Before deriving, item 3 |
+| `library "libicu.so" not found` | ICU is in the i18n APEX, not /system/lib | gsi-building.md § Before deriving, item 4 |
+| Allocator and composer HAL services (`vendor.gralloc-2-0`, `vendor.hwcomposer-2-1`) exit status 1 at every start, nothing in dmesg or the journal; logcat: `vndksupport: Could not load /vendor/lib/hw/gralloc.<soc>.so … library "libft2.so" not found: needed by /vendor/lib/libpdfium.so` (or `libhwui.so`) | The LLNDK list names libft2.so, the vendor namespace does not hand it over | gsi-building.md § Before deriving, item 5 |
+| `service 'X' overrides another service across the treble boundary` | /odm or /vendor override of a system service | device-bringup-yocto.md § Shipping fixes through /odm |
+| `No user specified for service 'X', so it would have been root` | Old vendor rc; Android 16 init drops the service | add `user` in an override |
+| Bluetooth: `BluetoothHci::close()` → `__throw_bad_function_call` abort loop, bluebinder times out | initialize never finished; on Qualcomm UART parts a force-started `wcnss_filter` | hal-userspace.md § Bluetooth |
+| `droid-extevdev.c: Unable to open device /dev/input/eventN … Permission denied`; headphones ignored | `pulse` not in group `input` | hal-userspace.md § Audio |
+| `kgsl_get_unmapped_area … failed error -12`; WebAppMgr's GPU thread crashes on every start | Chromium's low-4GB reservation vs a 32-bit-address Adreno | hal-userspace.md § Adreno 4xx on a 3.10 kgsl |
+| Wi-Fi scans, every connect fails after 5 s with `result:70 and Status:9` (qcacld) | MFP optional vs `WIPHY_FLAG_SUPPORTS_FW_ROAM` | kernel-porting.md § Legacy 3.x kernels |
+| `init: Service 'lmkd' … received SIGABRT` every 5 s on a 3.x kernel | libmemevents needs BPF | hal-userspace.md § A LineageOS 21 vendor without VNDK |
 
 ## Tooling appendix
 
