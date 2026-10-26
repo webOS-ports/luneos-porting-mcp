@@ -168,6 +168,7 @@ holds the detail, sources and open issues.
 | `mindphone` | GreenTouch MindPhone | MediaTek MT6739 | B, 32-bit | 4.14.186 vendor tree | Android 11, VNDK 30 | 16.0 arm | UI, Wi-Fi, BT, dual-SIM, audio and T9 work |
 | `q25` | Zinwa Q25 / Q25 Pro | MediaTek MT6789 (G99) | A (mgk; device tree, not ACK) | 5.10.198 LineageOS xelex | Android 12, VNDK 31 | 16.0 arm64 | runs on hardware; keyboard and audio measured |
 | `mp01` | Minimal Phone MP01 | MediaTek MT6789 (G99) | A (mgk) | 5.10.233 vendor source | Android 12, VNDK 31 | 16.0 arm64 | boots to UI (E Ink); battery %, fingerprint, portrait web apps open |
+| `brax3` | BraX3 | MediaTek MT6835 (Dimensity 6300) | A (mgk android13-5.15; device tree, not ACK) | 5.15.209 Brax BaseOS | Android 16 (LineageOS 23.2: BaseOS / iodéOS) | 16.0 arm64 | kernel KMI-clean and boot images built; never flashed |
 | `radon` | FuriLabs FuriPhone FLX1s | MediaTek MT6877 | B | 4.19.325 FuriLabs | Android 12L, VNDK 32 | 16.0 arm64 | UI, audio, Wi-Fi, camera work; BT and modem not recorded |
 | `titanpocket` | Unihertz Titan Pocket | MediaTek MT6771 (P70) | B | 4.14.186 ALPS tree | Android 11, VNDK 30 | 16.0 arm64 | boots to UI, keyboard works; audio fails |
 | `sm-t220` | Samsung Galaxy Tab A7 Lite Wi-Fi | MediaTek MT8768T | B | 4.19.191 Samsung | Android 12, VNDK 31 | 16.0 arm64 | boots; audio, media, display, touch, Wi-Fi, camera work |

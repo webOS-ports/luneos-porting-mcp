@@ -11,7 +11,7 @@ but for LuneOS device porting rather than legacy webOS app development.
 
 The knowledge was distilled from real ports and bring-ups: Pixels on GKI
 (bluejay, panther) and pre-GKI kernels (sargo, sunfish, bramble), MediaTek phones
-and tablets (mindphone, q25, mp01, radon, titanpocket, sm-t220), and Qualcomm
+and tablets (mindphone, q25, mp01, brax3, radon, titanpocket, sm-t220), and Qualcomm
 
 Tier B devices from 2015 to 2020 (a3-2015-halium, goyavewifi, bullhead, athena, fajita, surya, vince). The
 

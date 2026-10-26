@@ -319,7 +319,7 @@ overlapped its own initramfs — caught only by the boot-window check
 
 ---
 
-## Step 5 — kconfig will ignore you, in three specific ways
+## Step 5 — kconfig will ignore you, in four specific ways
 
 Each of these cost a full rebuild before being understood.
 
@@ -366,6 +366,18 @@ it. To add the `-g<sha>` half of a vermagic, use OE's knob, which exports
 ```bitbake
 KERNEL_LOCALVERSION = "-g28f9290ae067"
 ```
+
+**A toolchain-probed symbol drops out with no warning.** `DEBUG_INFO_BTF`
+depends on `PAHOLE_VERSION`, which kconfig computes by running `pahole`; with
+none on `PATH` olddefconfig quietly unsets `DEBUG_INFO_BTF` and
+`DEBUG_INFO_BTF_MODULES`. The second adds `btf_data_size`/`btf_data` to
+`struct module`, so `module_layout` and every CRC reaching a `struct module`
+move: on the BraX3 a config identical to stock scored 774 of 774 failing. Check
+whether the vendor's IKCONFIG has BTF on (MT6789 does not, MT6835 and Tensor
+do), put `pahole` on `PATH` (`pahole-native`, or `GKI_BUILD_TOOLS_DIR`), and
+make the recipe fail when the option is missing (device-brax3.md § Kernel).
+Diff the resulting `.config` against IKCONFIG every time, not the defconfig you
+asked for.
 
 ---
 
