@@ -72,28 +72,17 @@ Built images:
 | `init_boot-panther-luneos.img` | 6,639,616–6,647,808 | `init_boot` (8 MB) | ~1.66 MB |
 | `boot-panther-luneos-debug.img` | 23,547,904 | `fastboot boot` only | — |
 
-`vendor_boot`, `vendor_kernel_boot`, `dtbo` and `super` stay stock; the init_boot ramdisk is
-merged last, so our `init` wins and `lib/modules` from `vendor_kernel_boot` is there to load.
-**Watch the 8 MB init_boot budget**; legacy lz4 instead of gzip is the escape hatch (boot-images.md § Class 3). The debug image
-is self-contained (kernel + ramdisk + `enable_adb`), so it works whatever the bootloader does
-with `init_boot` during `fastboot boot`. The initramfs is device-agnostic (bluejay's) and
+The two-image layout, the 8 MB init_boot budget and the self-contained debug image:
+boot-images.md § Class 3 (panther is its example). The initramfs is device-agnostic (bluejay's) and
 carries the userdata-resize fix, whose bug was found on panther's kit (boot-images.md § The
 userdata-resize-on-UFS bug).
 
 ## Vendor and GSI
 
-Same bp4a vendor build as bluejay, with one regression (rule: hal-userspace.md § HIDL vs AIDL):
-
-- **Composer: HWC3 / AIDL `android.hardware.graphics.composer3` V4** (`hwc3-default.xml`,
-  `android.hardware.composer.hwc3-service.pixel`). There is no HIDL composer on gs201, so
-  panther cannot use the sargo/bluejay HIDL display path. It needs libhybris' composer3
-  support (PR #578, #609: merged, exposed through the unchanged `hwc2_compat_*` C API so the
-  QPA plugin needs no change), which no shipping port exercises yet. **The biggest single
-  risk on panther.**
-- Gralloc (AIDL allocator v2 + `mapper.pixel.so`, `gralloc.default.so` still present), GPU
-  (Mali-G710), audio HIDL 7.1, GNSS HIDL 2.1 brcm, camera provider HIDL 2.7: as bluejay.
-- Radio: AIDL `IRadio*` per slot (+ HIDL `@1.2::ISap`) — check ofono-binder-plugin's AIDL
-  support. Sensors AIDL multihal V3, Bluetooth AIDL `IBluetoothHci`: as bluejay.
+Same bp4a vendor build as bluejay (HAL surface: hal-userspace.md § HIDL vs AIDL), with one
+regression: the composer is **AIDL composer3 V4 only** (`hwc3-default.xml`), so panther cannot
+use the sargo/bluejay HIDL display path and depends on libhybris' composer3 support, which no
+shipping port exercises yet. **The biggest single risk on panther.**
 
 No VNDK → Halium 16 GSI (`halium_arm64`); gbinder ApiLevel from the vendor at boot.
 

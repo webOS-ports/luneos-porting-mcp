@@ -145,11 +145,11 @@ W libEGL  : eglInitialize(...) failed (EGL_BAD_ALLOC)
 
 `KGSL_PROP_IB_TIMEOUT` is a 4.4-era ioctl; the LuneOS and LineageOS 4.19 kernels have byte-identical kgsl and neither serves it. LineageOS 22's `libgsl.so` (1,712,464 B vs /e/OS's 1,456,624 B) contains `KGSL_PROP_IB_TIMEOUT not available at build time` and tolerates the absence: `EGL Version 1.5 / Available configurations: 68`. Rule: kmi-crc-matching.md § Step 0 (the vendor must match the kernel version).
 
-**Extracting it:** the OTA ships `vendor.new.dat.br`; Brotli-decompress, then apply `vendor.transfer.list`'s "new" commands into a flat image (block size 4096, ranges are pairs `[a,b)`). Result 671,100,928 B, md5 `da7ef852edc65bec207b6b2c71b30efb`. Flash it as-is, leave `system` alone, loop-mount the GSI from userdata.
+**Extracting it** from the block OTA (tools.md § payload_extract.py, block OTAs): 671,100,928 B, md5 `da7ef852edc65bec207b6b2c71b30efb`. Flash it as-is, leave `system` alone, loop-mount the GSI from userdata.
 
 **VINTF:** the /e/OS vendor manifest was 53 HALs, all `format="hidl"`, `target-level="5"` (FCM 5 = Android 11) against an Android 16 framework matrix; that fails strict VINTF/VTS, which Halium does not enforce. The LineageOS 22 vendor publishes on AIDL: `biometrics.fingerprint`, `nfc`, `wifi`, `wifi.supplicant`, `wifi.hostapd`, `power`, `vibrator`, `light`, `health`, `usb`, `usb.gadget`, `memtrack`, `media.c2`. Absent in that boot, asked for by HIDL name: `biometrics.fingerprint@2.1::IBiometricsFingerprint`, `sensors@2.0/@2.1::ISensors` (and the AIDL sensors name), `graphics.composer@2.2/2.3/2.4::IComposer`, `radio.config@1.2::IRadioConfig`. The rule: hal-userspace.md § Android 15 vendors are AIDL.
 
-**gbinder:** the machine builds its own rootfs with `GBINDER_API_LEVEL` 35, but every athena kit shipped the shared halium-arm64 `rootfs.ext4`, so the device ran the API 31 preset. `luneos-device-config` now resolves the level at boot; the HAL retests above have not been run since.
+**gbinder:** athena is the case where the recipe said 35 and the kits ran the API 31 preset (hal-userspace.md § The build-time setting cannot serve most devices); the HAL retests above have not been run since the boot-time resolution.
 
 ## Yocto
 
@@ -183,7 +183,7 @@ Pinned by name in the `athena` adaptation (deviceinfo-reference.md § When the c
 
 **Wi-Fi.** `wlan.ko` from in-tree qcacld-3.0, injected into `rootfs.img` (§ Kernel). `connmand: Unknown option WpaSupplicantConfigFile` is a dead key in LuneOS's own `main.conf` (deviceinfo-reference.md § Dead configuration keys fail quietly).
 
-**Bluetooth.** The defect is the rfkill soft-block (hal-userspace.md § Bluetooth):
+**Bluetooth.** The defect is the rfkill soft-block (connectivity.md § Bluetooth):
 
 ```
 bluebinder: Own hci index: 1

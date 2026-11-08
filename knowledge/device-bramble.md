@@ -147,11 +147,9 @@ charger-logbuffer nodes nothing in LuneOS reads.
 ```
 
 `install.sh` flashes `vbmeta` (verity and verification off), `boot`, `vendor_boot`
-and `userdata`, then reboots into **fastbootd** for `vendor` (a logical partition in
-`super`). Prerequisite: Google's stock factory image flashed and booted once,
-bootloader unlocked (it supplies bootloader, modem, tz and other firmware). LineageOS
-need not be installed. `boot` is recovery on this A/B device: keep the stock
-`boot.img` and `vbmeta.img` to undo the kit. General steps: installing.md.
+and `userdata`, then `vendor` from **fastbootd**, after Google's factory image (soc-qualcomm.md
+§ Install and recovery). LineageOS need not be installed. `boot` is recovery: keep the stock
+`boot.img` and `vbmeta.img` to undo the kit.
 
 ## Open issues
 

@@ -128,10 +128,9 @@ stock:
   gzips the stock kernel before packing, so that is what this lk has always been handed.
 - **lk passes the header cmdline through**: `log_buf_len=4M` and `printk.devkmsg=on` arrive in
   `/proc/cmdline` (5 Oct log). No 20-character drop as on the G99.
-- **AVB**: the stock vbmeta (SHA256_RSA2048, flags 0) chains `vbmeta_system` (location 2),
-  `vbmeta_vendor` (4) and `boot` (3) to Unihertz's key, and the stock boot.img has its own
-  signed footer. The kit flashes the stock vbmeta with flags 3; lk then logs the expected
-  `HASH_MISMATCH`, `img_auth_required = 0`, orange state, and boots ours. The unsigned footer
+- **AVB**: the MediaTek chain (soc-mediatek.md § Boot chain), signed with Unihertz's key. The
+  kit flashes the stock vbmeta with flags 3; lk logs `HASH_MISMATCH`, `img_auth_required = 0`,
+  orange state, and boots ours. The unsigned footer
   (`ANDROID_BOOTIMG_AVB_PARTITION_SIZE = "33554432"`, meta-android `lib/halium/avb.py`,
   byte-identical to `avbtool add_hash_footer`) matches stock's and UBports' shape.
 - Not carried from the UBports cmdline: `security=apparmor`, `rodata=0` (only for inserting

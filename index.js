@@ -311,7 +311,7 @@ const PROMPTS = {
             (a.details ? ` Known details: ${a.details}.` : "") +
             "\n\nUse the luneos-mcp knowledge base. Read these topics first: architecture, " +
             "kernel-config, kernel-build, kmi-crc-matching, kernel-modules, boot-images, yocto, nyx-modules, " +
-            "gsi-building, installing, and soc-mediatek or " +
+            "gsi-building, installing, hal-userspace, graphics, audio-media, connectivity, and soc-mediatek or " +
             "soc-qualcomm when the device is on one of those SoC families. " +
             "Then guide me through, in order:\n" +
             "1. Classify the device: Tier A (GKI, Android 12+/kernel 5.10+) or Tier B (legacy vendor kernel); " +

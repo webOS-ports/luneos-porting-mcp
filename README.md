@@ -64,7 +64,10 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), published releases, VNDK snapshot matrix |
 | `yocto` | meta-smartphone layers, machine confs, GKI boot-image recipes, bitbake traps, mount-android/LXC |
 | `nyx-modules` | nyx module selection and runtime-derived nyx.conf, time ownership |
-| `hal-userspace` | libhybris/libgbinder stack by subsystem: graphics, gbinder ApiLevel, vendor modules, audio, modem, BT, sensors |
+| `hal-userspace` | the libgbinder/libhybris stack, HIDL vs AIDL, gbinder ApiLevel, start-android-hals and stubs, udev from ueventd, sensors, Waydroid |
+| `graphics` | libhybris fixes, Mali, the display smoke test, DRM master, the Wayland socket split, browser scaling |
+| `audio-media` | pulseaudio-modules-droid and vendor audio HAL quirks, debugging audio, the webOS media server |
+| `connectivity` | Wi-Fi (drivers, regulatory db, TCP hangs), Bluetooth (bluebinder, rfkill, btmon), modem (ofono, fstabs), NFC |
 | `soc-mediatek` | what every MediaTek port shares: preloader/lk, BROM install, expdb and the watchdog, mgk kernels, the connectivity combo, A12 vendor keys |
 | `soc-qualcomm` | what every Qualcomm port shares: aboot/ABL, appended device trees, lk2nd, CAF/LineageOS kernels, legacy vendors (WCNSS, HAL1 camera, EFS) |
 | `debugging` | staged "device doesn't come up" playbook, debug channels, symptom → cause table |

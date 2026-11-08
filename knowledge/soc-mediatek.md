@@ -212,7 +212,7 @@ halium rootfs via `android-system RDEPENDS += mtk-connectivity`, inert on non-MT
 - `mtk-connectivity-wifi.service`: retry `echo 1 > /dev/wmtWifi` until `wlan0` exists
   (the container's wmt daemons must patch the CONSYS firmware first).
 - `mtk-connectivity-bt.service`: seeds the BT address and node ownership and starts the
-  BT HAL (e.g. `android.hardware.bluetooth@1.0-service`, driven via bluebinder; hal-userspace.md § Bluetooth).
+  BT HAL (e.g. `android.hardware.bluetooth@1.0-service`, driven via bluebinder; connectivity.md § Bluetooth).
 
 The container needs the MTK connectivity `/dev` nodes exposed: `wmt_loader` could not open
 `/dev/wmtdetect` until they were.
@@ -254,7 +254,7 @@ also waits for `CONNINFRA_IOCTL_DO_MODULE_INIT` before any sub-driver comes up.
   mask; radon does not carry it (copy it only if `hci0` fails with "Unknown HCI Command").
   mindphone's MT6739 answers every LE command but advertises none
   (`BLUEBINDER_LOCAL_COMMANDS_SET`, device-mindphone.md § Subsystem notes). The mechanism:
-  hal-userspace.md § Bluetooth.
+  connectivity.md § Bluetooth.
 
 ## Userspace and vendor keys
 
@@ -265,7 +265,7 @@ the first and the sample rate):
 |---|---|
 | `deviceinfo_force_hwc2="1"` | `ro.hardware.hwcomposer=mtk_common`; without it surface-manager fails to take DRM master for its whole 90 s start timeout (radon) |
 | `deviceinfo_hardware_egl` | the vendor sets no `ro.hardware.egl` and ships several `libGLES_*`: `meow` on mp01 and radon, `mtk` on sm-t220 |
-| `deviceinfo_hybris_prefer_vndk="1"` | vendor `libnvram.so` imports `android::base::Basename`, which the 16 GSI's libbase no longer exports; without it pulseaudio crashes (hal-userspace.md § Audio) |
+| `deviceinfo_hybris_prefer_vndk="1"` | vendor `libnvram.so` imports `android::base::Basename`, which the 16 GSI's libbase no longer exports; without it pulseaudio crashes (audio-media.md § Audio) |
 | `deviceinfo_audio_sample_rate="48000"` | the DL paths run at 48 kHz (§ Audio) |
 
 **`stp_dump`/`stp_dump3` busy-loops.** The connectivity core-dump collector, started by
@@ -282,7 +282,7 @@ has the same pair (device-q25.md § Subsystem notes).
 
 **NV partitions and the fstab.** The modem's calibration and IMEI live in the NV partitions
 (`nvcfg`, `nvdata`, `protect1`, `protect2`); picking the wrong `fstab.*` leaves them
-unmounted and the modem in "exception" (mindphone; debugging.md § Modem).
+unmounted and the modem in "exception" (mindphone; connectivity.md § Modem).
 
 ### Display
 
@@ -290,7 +290,7 @@ unmounted and the modem in "exception" (mindphone; debugging.md § Modem).
   connected; exclude `Writeback` as well as `Virtual` connectors, or the compositor picks
   `Writeback1`, hangs 90 s and restarts for ever (radon).
 - **Charger-mode boots hold DRM master** (`bootreason=usb`, Android's `charger`; mp01):
-  debugging.md § Stage 3 — Display and UI.
+  graphics.md § Charger-mode boots and DRM master.
 - `library "libpq_cust.so" not found` from the MTK HWC is benign.
 - PowerVR (MT6739): `/dev/pvr_sync` and `/dev/ion` must be 0666 or every
   `eglCreateContext` in web apps returns `EGL_BAD_ALLOC` (mindphone).
@@ -311,5 +311,5 @@ crash and then gives up, taking `audiod` with it.
 The MediaTek audio HAL needs `rlimit-rttime = -1` for PulseAudio on sm-t220 (a droid sink
 write ran past `RLIMIT_RTTIME` and was SIGKILLed from interrupt context), and the
 `audio_param` parser there corrupts its own path through an uncleared `malloc`
-(device-sm-t220.md § Subsystem notes; hal-userspace.md § Vendor libraries that assume
+(device-sm-t220.md § Subsystem notes; audio-media.md § Vendor libraries that assume
 Android's zeroed `malloc`).

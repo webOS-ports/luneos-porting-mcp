@@ -46,7 +46,7 @@ m systemimage          # → out/target/product/halium_arm64/system.img
 
 Big machine, runs rarely, once per generation. This single job replaces every per-device Android build LuneOS has ever done.
 
-Verified properties of the generic image (unsparsed): it is **system-as-root** — `/init`, `/system`, `/vendor`, `/odm` at the image root, so `ANDROID_SYSTEM_IMAGE_DESTNAME = "android-rootfs.img"` stays correct and `pre-start.sh` takes its `[ -e /android/init ]` branch. `/vendor` inside it is a **real empty directory** (0755, gid 2000), a clean mount point for the device's stock vendor.
+The generic image is **system-as-root** with a real empty `/vendor` (verified unsparsed; what that means for the recipes: yocto.md § android-system-image recipes).
 
 ## halium-16.0 setup and its three traps
 

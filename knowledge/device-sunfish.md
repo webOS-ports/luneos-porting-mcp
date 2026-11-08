@@ -9,7 +9,7 @@ LuneOS config delta moves most exported CRCs, so the port builds the vendor's
 modules itself and overlays them (kmi-crc-matching.md § Step −1 — first ask whether
 you need to match at all). Also the device behind two general rules: the authority
 for a kernel config is the vendor whose modules the device loads, not the OEM
-(kmi-crc-matching.md), and read *every* fstab the vendor ships (debugging.md §
+(kmi-crc-matching.md), and read *every* fstab the vendor ships (connectivity.md §
 Modem).
 
 ## Status (as of 25 Sep 2026)
@@ -146,18 +146,16 @@ a build-time invariant). The current kit image: kernel section 21,163,040 B,
 12,358,624 B of headroom. Read logged headroom from `log.do_deploy*` in time order —
 the files are named by build id, so a glob does not sort them by date.
 
-The **dtbo partition stays stock**. The eight `sm7150-sunfish-*` overlays select by
-`qcom,board-id`/`msm-id` inside each FDT, so a base dtb from a different build still
-gets the right overlay; the panel coming up is the evidence. If it ever fails,
+The **dtbo partition stays stock** (soc-qualcomm.md § Header v0/v1 and appended device trees):
+the eight `sm7150-sunfish-*` overlays select by board-id, and the panel coming up is the
+evidence. If it ever fails,
 build `dtbo.img` from this tree (needs AOSP `mkdtimg`, not packaged by OE).
 
 ## Vendor and GSI
 
-LineageOS 23.2 vendor (SDK 36) → Halium 16 `halium_arm64` GSI. gbinder `ApiLevel`
-is derived from the vendor at runtime (36); the shared rootfs's baked
-`ApiLevel = 32` had libgbinder speaking the API 31 servicemanager protocol, the
-suspected cause of `nfcd: registerForNotifications(android.hardware.nfc.INfc/default)
-tx error -2147483647` (hal-userspace.md § Binder and gbinder). The vendor image is
+LineageOS 23.2 vendor (SDK 36) → Halium 16 `halium_arm64` GSI; gbinder `ApiLevel` resolves
+to 36 at boot. The stale baked-in 32 is the suspected cause of the NFC failure that
+hal-userspace.md § Before blaming AIDL uses as its example. The vendor image is
 built by `extract-vendor.sh` from a LineageOS OTA zip (`payload_extract.py` on
 `payload.bin`); on a newer nightly, re-check the kernel revision in its
 `build-manifest.xml` and re-pin the recipe, or the modules will not match.
@@ -174,14 +172,11 @@ Layer `meta-smartphone/meta-google`, `MACHINE=sunfish`; rootfs `MACHINE=halium-a
 
 ## Install
 
-The kit flashes `boot`, `userdata` and the LineageOS 23.2 `vendor`. `vendor` is a
-logical partition inside `super`, so `install.sh` reboots into **fastbootd** to
-write it. Prerequisite: Google's stock factory image flashed and booted once,
-bootloader unlocked (it supplies bootloader, modem, tz and other firmware
-partitions). Ship and flash the boot image *and* the rootfs together: the boot
+The kit flashes `boot`, `userdata` and the LineageOS 23.2 `vendor` (from **fastbootd**,
+after Google's factory image: soc-qualcomm.md § Install and recovery). Ship and flash the boot image *and* the rootfs together: the boot
 image stages the modules, but `overlay_kernel_modules()` lives in the rootfs's
 `mount-android.sh` — a new boot image over an old rootfs stages modules nothing
-uses. General steps: installing.md.
+uses.
 
 ## Subsystem notes
 
@@ -189,7 +184,7 @@ uses. General steps: installing.md.
   (`fstab.persist`), so `/vendor/firmware_mnt` was never mounted, PIL failed for
   modem, cdsp, venus, npu and ipa_fws (`Initializing image failed(rc:-5)`), the zap
   shader never loaded, and surface-manager aborted in a loop on a black screen. It
-  now reads every fstab (debugging.md § Modem).
+  now reads every fstab (connectivity.md § Modem).
 - **`vendor.all.modules.ready`** is set unconditionally by the cfg after loading,
   so a total module failure is invisible downstream.
 - **`bad ioctl: -1072934383`** (60,304 in one boot) = `0xc00c5211` =

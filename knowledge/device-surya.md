@@ -57,7 +57,7 @@ you need to match at all).
 | Patch | Why |
 |---|---|
 | `0001-techpack-qcacld-drop-Werror-from-the-vendor-Kbuilds` | 27 Kbuilds under `techpack/`, `qcacld-3.0`, `qca-wifi-host-cmn`, `fw-api` set `-Werror` unconditionally; GCC 15 diagnoses pre-existing `-Wpointer-sign` in the QTI audio techpack that clang does not. `-Werror=<specific>` forms left alone |
-| `0002-init-keep-the-build-flags-out-of-linux_banner` | on a 4.14/4.19 tree `init/Makefile` passes `$(CONFIG_CC_VERSION_TEXT) $(KBUILD_CFLAGS)` as the compiler version and the former does not exist before 5.x, so the banner *is* the flag list — under OE including `-fmacro-prefix-map=<TMPDIR>/...`, which puts build paths into `vmlinux`, `uname -v` and every dmesg. `do_package_qa` catches it as `[buildpaths]`. Worth carrying to every LineageOS msm tree |
+| `0002-init-keep-the-build-flags-out-of-linux_banner` | build paths in the banner fail `do_package_qa` `[buildpaths]` (soc-qualcomm.md § Kernel) |
 
 - Config: `mer_verify_kernel_config` gives 8 errors / 54 warnings on stock /e/OS
   (IKCONFIG) and **1 / 29** on `surya_defconfig` + `luneos.cfg`; the remaining
@@ -112,30 +112,16 @@ invariant). Ours fits regardless.
 
 ## Vendor and GSI
 
-/e/OS A15 vendor → Halium 16 `halium_arm64` GSI. Measured in the kit's
-`vendor.img`:
-
-```
-ro.board.api_level=202404      <- Android 15 vendor API level, a YYYYMM date
-ro.vendor.build.version.sdk=35
-ro.vndk.version                <- absent; VNDK is deprecated from A15
-```
-
-`luneos-device-config` used to write `ro.board.api_level` straight into gbinder's
-`ApiLevel`, which selects preset 36 (`aidl6`) against a vendor that speaks preset
-35's `aidl5`. It now resolves a dated value to `ro.vendor.build.version.sdk` (35)
-— see device-fajita.md § Android 15 vendors report a *dated* API level and
-hal-userspace.md § Binder and gbinder.
+/e/OS A15 vendor → Halium 16 `halium_arm64` GSI. The kit's `vendor.img` has
+`ro.board.api_level=202404`, `ro.vendor.build.version.sdk=35` and no `ro.vndk.version`,
+so gbinder's `ApiLevel` resolves to 35 (hal-userspace.md § Before blaming AIDL; found on
+fajita and here, device-fajita.md § Android 15 vendors report a *dated* API level).
 
 **Vendor alignment.** The kernel is pinned to the revision /e/OS builds from, so
 the vendor matches on a device running that build. The kit also flashes that exact
 /e/OS `vendor.img` to guarantee it; `vendor` is a **logical partition inside
 `super`**, so it is written from `fastbootd` (`fastboot reboot fastboot`), not
-bootloader fastboot. Extracting it from a LineageOS-family block OTA:
-`brotli -d vendor.new.dat.br` (OE ships `brotli-native`), then reassemble against
-`vendor.transfer.list` — only the `new` commands consume bytes, so a sparse file
-gives the rest for free. **Verify with `e2fsck -fn`**; an off-by-one in the range
-arithmetic produces a plausible-looking image.
+bootloader fastboot. It is extracted from the block OTA (tools.md § payload_extract.py, block OTAs).
 
 ## Yocto
 

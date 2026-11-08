@@ -140,20 +140,15 @@ EDL brick).
 
 ### Retrofit dynamic partitions
 
-`mount-android.sh` (ported from Droidian, run as `ExecStartPre` of `android-system.service`)
-and `parse-android-dynparts` handle the retrofit case: no `super`, LP metadata on `system`,
-extents spanning `system` + `vendor` (upstream refused multi-device layouts).
-`tests/loopback-retrofit-test.sh` covers it with 22 assertions on loop devices with real
-device-mapper, and pins the Android 9 no-metadata behaviour (exit 0, no dm nodes). Retrofit is
-a device class (most phones upgraded to 10 rather than launched on it), not a sargo quirk.
+sargo is the reference retrofit layout: no `super`, LP metadata on `system`, extents spanning
+`system` + `vendor`. How `mount-android.sh` and `parse-android-dynparts` map it, and the
+loopback test that pins it: yocto.md § mount-android.sh and the LXC container.
 
 ### Init stuck on `wait_for_prop`
 
-`init.<board>.rc` gates `post-fs-data` on `wait_for_prop vendor.qcom.time.set true`, set by
-`time_daemon`, which Halium does not run. Setting it brought up the modem (`per_mgr`,
-`per_proxy`, `pd_mapper`, `qcrild`), fixed the vibrator restart loop, zeroed the sensors' QMI
-errors and cut EACCES from 50 to 1 (debugging.md § 2.1). sargo's vendor gates carry no
-quotes, so it never hit the quoted-property bug (debugging.md § 2.2).
+`init.<board>.rc` gates `post-fs-data` on `wait_for_prop vendor.qcom.time.set true`; the gate
+and what setting it brought up are in debugging.md § 2.1, which was found here. sargo's gates
+carry no quotes, so it never hit the quoted-property bug (debugging.md § 2.2).
 
 ### RIL slots
 
@@ -238,7 +233,7 @@ regenerates `waydroid_base.prop`.
 
 ### Browser (Atlas) scaling
 
-Measured over Chromium's remote debugging port (1080x2220, 441 PPI; rule: hal-userspace.md §
+Measured over Chromium's remote debugging port (1080x2220, 441 PPI; rule: graphics.md §
 Browser (Atlas) UI scaling): `webapp-mgr.sh` passes `--force-device-scale-factor` 2.4 (from
 `com.webos.surfacemanager.devicePixelRatio`); adding it to browser_shell crops the toolbar
 (verified at 1.5 and 2.75). The Atlas-side fixes: `document.documentElement.style.zoom`

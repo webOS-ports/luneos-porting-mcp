@@ -96,6 +96,13 @@ Works on FULL payloads (mindphone's was 717 MB, minor_version=0, 16 partitions).
 
 **Location:** unpublished.
 
+**Block OTAs** (LineageOS-family zips without `payload.bin`) ship `vendor.new.dat.br` +
+`vendor.transfer.list` instead: `brotli -d` (OE ships `brotli-native`), then apply the
+transfer list's `new` commands into a flat image (block size 4096, ranges are pairs
+`[a,b)`; only `new` consumes bytes, so a sparse file gives the rest for free). **Verify with
+`e2fsck -fn`**: an off-by-one in the range arithmetic produces a plausible-looking image
+(athena, surya).
+
 ## unpack_bootimg.py
 
 **Purpose:** unpack/inspect boot images with header v0–v2 — kernel, ramdisk,

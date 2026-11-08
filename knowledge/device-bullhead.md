@@ -75,7 +75,7 @@ TWRP route: `fastboot boot` the official TWRP 3.7.0 image (RAM only, never flash
 
 **Camera.** Daemon and provider need LineageOS 21's own system libraries and shims (soc-qualcomm.md § A LineageOS 21 vendor without VNDK); the HAL then streams. The LuneOS side got the media APEX mounts and the apexcodecs link in round 10; whether the preview shows is still to be reported.
 
-**Bluetooth.** Service added and binderized; then `wcnss_filter`, force-started by start-android-hals, ate the controller's replies on the UART (hal-userspace.md § Bluetooth). An rc override did not stop the script (round 11); `deviceinfo_android_skip_services` in round 12.
+**Bluetooth.** Service added and binderized; then `wcnss_filter`, force-started by start-android-hals, ate the controller's replies on the UART (connectivity.md § Bluetooth). An rc override did not stop the script (round 11); `deviceinfo_android_skip_services` in round 12.
 
 **Headphone jack.** pulseaudio could not read the jack's input device (`pulse` was never in `input`, a generic bug now fixed in meta-luneos). The kernel arms MBHC with built-in calibration at card init; whether it reports a plug-in is the open question (round 12 carries an evtest script).
 

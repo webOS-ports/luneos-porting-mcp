@@ -134,8 +134,7 @@ Deliberately not shipped: a stubbed-services file (LineageOS's livedisplay here 
 
 Fastboot A/B kit (installing.md). Kit: `boot-fajita-luneos.img` / `-debug.img` (20,357,120 B each), `vendor.img` (1,073,741,824 B, paired LineageOS build), `vbmeta.img` (LineageOS's own, signed SHA256_RSA2048, flags 0x3), `vbmeta-disabled.img` (generated empty unsigned fallback for a stock-OOS vbmeta), `android-rootfs.img` (1,058,705,408 B, shared Halium 16 `halium_arm64`), `rootfs.img` (3,109,787,648 B, `halium-arm64`), `userdata-luneos.img` (4,587,520,000 B ext4, both images at the root, verified with `debugfs`); scripts `install.sh`, `make-userdata.sh`, `make-vbmeta.sh`, `make-debug-boot.sh`, `payload_extract.py`.
 
-- **Flash both slots** (`boot_a`/`boot_b`, `vendor_a`/`vendor_b`): the bootloader can fall back to the inactive slot.
-- `vendor` is a real partition, so bootloader fastboot writes it; no fastbootd.
+- **Flash both slots** (`boot_a`/`boot_b`, `vendor_a`/`vendor_b`); `vendor` is a real partition, written from bootloader fastboot (soc-qualcomm.md § Install and recovery).
 - LineageOS already builds vbmeta with `--set_hashtree_disabled_flag --set_verification_disabled_flag` (`BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS`); flashing with `--disable-verity --disable-verification` is still the habit.
 - Flashing `boot` replaces recovery. Keep the LineageOS boot.img.
 

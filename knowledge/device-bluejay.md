@@ -110,22 +110,13 @@ drops boot-image arguments it does not recognise, so anything LuneOS needs belon
 
 ## Vendor and GSI
 
-Vendor HAL surface, read from the factory `vendor.img` (rule: hal-userspace.md § HIDL vs AIDL):
-
-- **Composer: HIDL `@2.4::IComposer`** — gs101's graphics HALs were never IDL-migrated;
-  the passthrough `hwcomposer.gs101.so` and `gralloc.default.so` shims still ship in
-  `/vendor/lib64/hw`. The display path is interface-identical to sargo's.
-- Gralloc: AIDL allocator v2 + `mapper.pixel.so` (stable-C mapper5); the 16 GSI's libui speaks
-  gralloc5 and libhybris delegates to it.
-- EGL: monolithic `/vendor/lib64/egl/libGLES_mali.so` (+ `vulkan.mali.so`).
-- Audio HIDL 7.1, IRadio HIDL 1.6 dual-slot, GNSS HIDL 2.1 (brcm), camera provider HIDL 2.7 +
-  media.c2 AIDL + OMX 1.0 — all served by the existing stack.
-- **Bluetooth: AIDL-only `IBluetoothHci`**; bluebinder is HIDL. **Sensors: AIDL multihal v3.**
-  Neither is boot-blocking.
+Vendor HAL surface, read from the factory `vendor.img`: hal-userspace.md § HIDL vs AIDL. The
+composer is HIDL, so the display path is sargo's; Bluetooth (AIDL-only, bluebinder is HIDL)
+and sensors (AIDL multihal) are not boot-blocking.
 
 No VNDK (A15+ vendor) → Halium 16 GSI (`halium_arm64`); gbinder ApiLevel comes from the
 vendor at boot (hal-userspace.md § Binder and gbinder). The open unknown is the Mali-G78 blob
-under the hybris linker; carry the Mali patch set from day one (hal-userspace.md § Mali under
+under the hybris linker; carry the Mali patch set from day one (graphics.md § Mali under
 libhybris). The A12+ ashmem fix applies (debugging.md § 2.4).
 
 ## Yocto
@@ -152,11 +143,9 @@ gives the initramfs shell without flashing. The older route — `fastboot format
 userdata`, boot the debug image, `adb push` the two images — still works and skips the
 resize path.
 
-**Anti-rollback:** bootloader ARB was bumped by Android 13 and again by the May 2025 update.
-A device on Android 16 cannot boot anything older than the May 2025 A15 build, and flashing
-older factory images risks a permanent brick (including via the inactive-slot fallback; keep
-both slots consistent). There is no downgrade ladder: the port targets the current kernel,
-vendor and GSI (installing.md § Anti-rollback).
+**Anti-rollback** (installing.md § Anti-rollback): bumped by Android 13 and again by the May
+2025 update, so a device on Android 16 cannot boot anything older than the May 2025 A15 build.
+There is no downgrade ladder: the port targets the current kernel, vendor and GSI.
 
 Revert: stock `boot.img` and `vbmeta.img` (no flags) from the bp4a factory zip, then
 `fastboot -w`.

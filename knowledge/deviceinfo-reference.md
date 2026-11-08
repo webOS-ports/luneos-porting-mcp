@@ -178,6 +178,14 @@ empty by `luneos-device-config` first.
 | `deviceinfo_audio_sample_rate` | adds `rate=<n>` to `module-droid-card` in `webos-system.pa` |
 | `deviceinfo_bluebinder_ext_features_page_2_mask` | `BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`: bits bluebinder clears from Read Local Extended Features page 2 (byte 0 = top byte) |
 | `deviceinfo_bluebinder_local_commands_set` | `BLUEBINDER_LOCAL_COMMANDS_SET`, `<octet>:<hex>,...` added to Read Local Supported Commands |
+| `deviceinfo_android_skip_services` | container services `start-android-hals.sh` must not start (hal-userspace.md § Derive, don't ship) |
+| `deviceinfo_hardware_egl` | which `libGLES_*` to use when the vendor sets no `ro.hardware.egl` (soc-mediatek.md § Userspace and vendor keys) |
+| `deviceinfo_hwc_no_hw_fb` | `1` → libhybris' hwcomposer window leaves out `GRALLOC_USAGE_HW_FB` (goyavewifi) |
+| `deviceinfo_fb_kick` | `1` → `luneos-fb-kick` pans the framebuffer once the compositor is up (goyavewifi) |
+| `deviceinfo_touch_rotate` | evdevtouch rotation (`0` = none, or 90/180/270); overrides the default taken from `deviceinfo_compositor_geometry`, which double-rotates taps where the compositor already carries touch (tangorpro) |
+| `deviceinfo_alsa_mixer_init` | `Control=v[,v];…` set at boot, for HALs that touch no ALSA control (Q25) |
+| `deviceinfo_key_actions`, `deviceinfo_keyboard_layout` | key remaps such as `Key_HomePage=call.hangup`, and the hardware keyboard layout (Q25) |
+| `deviceinfo_backlight_outdoor_scale` | scale of the brightness setting outdoors (MP01: 25% on a reflective panel) |
 
 Devices whose machine builds its own rootfs (the 32-bit ports, e.g. mindphone) can use
 a machine package instead; devices on the shared `halium-arm64` rootfs (MP01,

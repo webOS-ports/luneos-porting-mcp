@@ -103,10 +103,7 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   (5.10.198) against the MP01's stock config: 0 of 345 would fail, with zero
   mismatches on any `vmlinux`-exported symbol (the two stock configs differ by 85
   options out of 2,665, all board-level drivers). It needed `SUBLEVEL = 233` and a
-  `tree-fixup.cfg`: list-valued options (`CONFIG_TOUCHSCREEN_MTK_TOUCH`,
-  `CONFIG_CUSTOM_KERNEL_IMGSENSOR`) name source subdirectories, and `olddefconfig`
-  can drop unknown symbols but not directories that do not exist (`No rule to make
-  target .../focaltech_touch/Makefile`).
+  `tree-fixup.cfg` for the list-valued options (soc-mediatek.md § Kernel).
 - **Embedding all 180 vendor modules in our initramfs.** 5.5 MB compressed took the
   ramdisk from 6.6 to 14.8 MB and the boot image from 28 to 31.6 MB, after which
   our init stopped running entirely — no kmsg, no panic, nothing in expdb, on six
@@ -124,11 +121,8 @@ Header **v4**, 64 MiB `boot`, kernel + non-zero ramdisk (stock: kernel 19,652,97
 B, ramdisk 1,380,093 B), no `init_boot`. `os_version` `0x1800063C` = 12.0.0 /
 **2099-12** — Minimal ship a deliberately far-future patch level; reproduce it,
 never write a lower value. Both stock ramdisks (boot and vendor_boot) are **LZ4
-legacy** (`02 21 4c 18`), so `GKI_RAMDISK_COMPRESSION = "lz4-legacy"`: with a gzip
-ramdisk behind the lz4 vendor ramdisk ours was never unpacked, the vendor's `/init`
-ran and the device landed in **Android Recovery** ("Try again / Factory data
-reset") — debugging.md § 1.10 Ramdisk compression must match across the
-concatenation. `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
+legacy** (`02 21 4c 18`), so `GKI_RAMDISK_COMPRESSION = "lz4-legacy"`; a gzip ramdisk
+landed in Android Recovery (debugging.md § 1.10, found here). `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
 
 ## Vendor and GSI
 
@@ -241,7 +235,7 @@ daylight needs less light, not more. lk lights the frontlight fully for its logo
 | Compositor spins on DRM master | charger-mode boot (`bootreason=usb`); Android's `charger` holds master; `QT_QPA_FORCE_HWC2` lost to an `export` prefix (systemd ignores `export` lines in `EnvironmentFile=`) | `/system/bin/charger` in `DISPLAY_CONFLICT_MATCH` (the meta-luneos copy of `start-android-hals.sh` is the one that ships), generator writes plain `KEY=VALUE` |
 | Compositor never starts | patched display driver needed by the vendor hwcomposer | own `mediatek-drm.ko` (Kernel) |
 | No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm` (kernel-modules.md § The vendor_dlkm set) |
-| Sound card never registers | `mt6789-mt6366` defers (`snd_soc_register_card fail -517`) until `mtk-btcvsd` (component `mtk-btcvsd-snd`) loads; found via `/sys/kernel/debug/devices_deferred`, `asoc/components` and the machine node's phandles in a pulled `/proc/device-tree` | load `mtk-btcvsd` (hal-userspace.md § Audio) |
+| Sound card never registers | `mt6789-mt6366` defers (`snd_soc_register_card fail -517`) until `mtk-btcvsd` (component `mtk-btcvsd-snd`) loads; found via `/sys/kernel/debug/devices_deferred`, `asoc/components` and the machine node's phandles in a pulled `/proc/device-tree` | load `mtk-btcvsd` (audio-media.md § Audio) |
 | pulseaudio crash | vendor `libnvram.so` needs VNDK 31 `libbase` (`android::base::Basename`) | `deviceinfo_hybris_prefer_vndk="1"`, proven first with `systemctl set-environment HYBRIS_PREFER_VNDK=1` |
 | Audio slightly off | HAL DL paths at 48 kHz | `deviceinfo_audio_sample_rate="48000"` |
 | No WiFi/BT modules | `mtk-connectivity` conditions only checked `vendor` | `9d68df46` |

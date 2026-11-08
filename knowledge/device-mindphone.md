@@ -167,7 +167,7 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 
 - **UI**: the boot-splash hang's root cause was the quoted
   `wait_for_prop hwservicemanager.ready "true"` gate (debugging.md § 2.2). Also needed:
-  libhybris hook patches 0003/0004 (hal-userspace.md § libhybris fixes), LXC `CLONE_PIDFD` on
+  libhybris hook patches 0003/0004 (graphics.md § libhybris fixes), LXC `CLONE_PIDFD` on
   4.14/arm32, binderfs symlinks, a DRM probe guard, the fb0 `modes` panel fallback, and a
   backlight kick.
 - **Wi-Fi**: force-loaded stock WMT modules, firmware path, `echo 1 > /dev/wmtWifi` retry —
@@ -175,9 +175,9 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 - **Modem**: `mount-android.sh` picked `fstab.enableswap` over `fstab.mt6739`, leaving the NV
   partitions unmounted (`md1.status` "exception"). After the fix: `md1.status=ready`,
   `vendor.ril-daemon-mtk` running, IRadio@1.0 em1/em2 registered, ofono `/ril_0` + `/ril_1`
-  Powered (debugging.md § Modem).
+  Powered (connectivity.md § Modem).
 - **Bluetooth**: `/dev/stpbt` ownership and the MAC from
-  `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr` (hal-userspace.md § Bluetooth). The combo chip
+  `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr` (connectivity.md § Bluetooth). The combo chip
   answers every LE command but advertises none (octets 25–28 of Read_Local_Supported_Commands
   are zero), so BlueZ set LE event mask 0x10 and LE scan/connect found nothing;
   `bluebinder/mindphone` sets four event-gating bits back (`BLUEBINDER_LOCAL_COMMANDS_SET`),
@@ -193,9 +193,8 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 - **Keypad**: 12-key T9 pad on `mtk-kpd`; T9 multi-tap is webos-keyboard patch 0004. udev tags
   `mtk-kpd` `ID_INPUT_KEY` only, and the compositor finds keyboards by `ID_INPUT_KEYBOARD`
   (nyx-modules.md § Copy-paste is fiction until verified on hardware).
-- **`stp_dump3`**: the vendor's `persist.vendor.connsys.coredump.mode=2` starts the combo-chip
-  dump collector, which busy-loops on `pselect6()` for `/dev/stpwmt` (54,249 s of CPU in
-  54,653 s uptime); stubbed.
+- **`stp_dump3`** (`persist.vendor.connsys.coredump.mode=2`): 54,249 s of CPU in 54,653 s
+  uptime; stubbed (soc-mediatek.md § Userspace and vendor keys).
 
 ## Open issues
 

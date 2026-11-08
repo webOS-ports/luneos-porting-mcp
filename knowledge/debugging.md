@@ -334,7 +334,7 @@ the journal and say why in one logcat line (goyavewifi: gralloc and the composer
 | Binder calls fail on host | Host needs `/dev/{binder,hwbinder,vndbinder}` symlinks into binderfs |
 | `.capex` APEXes silently skipped on a 16 GSI | `mount-apexes.py` cannot mount compressed APEXes — `PRODUCT_COMPRESSED_APEX := false` |
 | `/init` aborts instantly on a 4.9 kernel | `MADV_WIPEONFORK` needs Linux ≥ 4.14 — made non-fatal in hybris-patches |
-| getprop/setprop TLS abort on the Android 16 GSI | Needs the Android 16 libhybris adaptation (hal-userspace.md § libhybris fixes) |
+| getprop/setprop TLS abort on the Android 16 GSI | Needs the Android 16 libhybris adaptation (graphics.md § libhybris fixes) |
 | Container "service not found" for zygote/netd/update_verifier | By design — the Halium GSI strips them |
 | `init: Processed ctl.start for 'X' from pid: 0` for a "disabled" service | `start-android-hals.sh` starts everything init skipped; exclude with `deviceinfo_android_skip_services` |
 | "add_service Permission denied" / "Unknown class service_manager" | SELinux config files must be real files, not symlinks; "Unknown class" in permissive wants stub services. dmesg shows `SELinux: Disabled at boot` (hybris ≤16) vs `SELinux: Initializing` (≥17) (SFOS hadk-hot) |
@@ -363,15 +363,7 @@ Two black-screen shapes:
 - **Stuck on the bootloader splash** with a healthy system underneath → the compositor never sent display commands: ashmem/composer (2.4), init gates (2.1), or DRM master (below).
 - **Screen dark but everything runs** → check the backlight first: on mindphone nothing drove `/sys/class/leds/lcd-backlight` and the panel booted at 0 (`echo 200 >` from a compositor drop-in as a bring-up hack; the real fix belongs in the display service). Many Qualcomm panels take a max of **2047**, not 255 (Droidian).
 
-### The display smoke-test ladder (SFOS HADK/hadk-hot)
-
-Isolate layers bottom-up with the libhybris test binaries, compositor stopped first (<https://github.com/mer-hybris/hadk-faq>):
-
-1. `EGL_PLATFORM=hwcomposer test_hwcomposer` (as root). A spinning rectangle = EGL + gralloc + composer blobs work under the hybris linker. Segfault → `strace` or `gdb test_hwcomposer` → `bt full`. Runs-but-black → gralloc/copybit.
-2. `EGL_PLATFORM=hwcomposer qmlscene -platform hwcomposer main.qml` adds the Qt QPA hwcomposer plugin. Tuning: `QPA_HWC_IDLE_TIME=5`, `QPA_HWC_BUFFER_COUNT=3`; black backgrounds inside working apps → `QT_OPENGL_NO_BGRA=1`.
-3. Only then the full compositor.
-
-**surfaceflinger as a bisect oracle:** run the GSI's own `/system/bin/surfaceflinger` (A11+: also `ANDROID_ROOT="/system" /system/bin/bootanimation`). If it renders, kernel + blobs + gralloc/composer are good and the fault is in hybris/QPA; if not, fix the Android side first.
+The libhybris smoke-test ladder, charger-mode DRM master and measuring a cropped window: graphics.md.
 
 ### Other display/UI failure modes
 
@@ -380,17 +372,13 @@ Isolate layers bottom-up with the libhybris test binaries, compositor stopped fi
 | Compositor blocks forever before starting | `product.env` DRM probe loops on DRM-less devices — guard the probe |
 | Wrong/unknown panel geometry | Read `/sys/class/graphics/fb0/modes`, **not `mode`**, which empties once the compositor owns the panel; never trust copy-pasted display constants (mindphone's conf claimed 1080x2340 for a 480x800 panel) |
 | Every `eglCreateContext` → `EGL_BAD_ALLOC`, webapps never render | GPU node permissions: `/dev/pvr_sync` and `/dev/ion` needed 0666 (the vendor ueventd.rc values) for the WAM user — a udev rule; hal-userspace.md § udev rules from the container's own ueventd files derives these |
-| QML apps die with "Failed to create wl_display" | XDG_RUNTIME_DIR split — hal-userspace.md § Wayland socket |
+| QML apps die with "Failed to create wl_display" | XDG_RUNTIME_DIR split — graphics.md § Wayland socket |
 | Compositor races the vendor HAL | Wait for `IComposer` to register on hwbinder; Droidian's `ExecStartPre=sleep 5` drop-in is the weaker version |
 | Compositor spins on "failed to get drm master" | Device booted in charger mode (below), or the HWC was opened twice (`deviceinfo_force_hwc2`) |
 | Hardware keys ignored by Qt | udev tags the keypad `ID_INPUT_KEY` only; Qt evdevkeyboard needs `ID_INPUT_KEYBOARD` — promote with a udev rule (mindphone `mtk-kpd`) |
 | Compositor picks `Writeback1`, hangs ~90 s and restarts forever (MediaTek) | MediaTek DRM reports its writeback connectors as permanently connected; exclude `Writeback` connectors in `product.env` as well as `Virtual` (device-radon.md) |
 | Healthy LuneOS behind a foreign boot logo | A vendor/distro initramfs started plymouthd, which survives `switch_root` holding the framebuffer; boot with `plymouth.enable=0` (device-radon.md) |
 | `library "libpq_cust.so" not found` from MTK HWC | Benign — the vendor ships `libpq_cust_base.so` and the HAL falls back |
-
-**Charger-mode boots and DRM master.** A MediaTek device that is never truly off boots with `androidboot.bootreason=usb` whenever a cable is attached; `init.halium.rc` then starts `/system/bin/charger`, which takes DRM master and never gives it back (`lsof | grep card0`). `start-android-hals.sh` stops it via `DISPLAY_CONFLICT_MATCH` — but there are two copies of that script (`meta-android` and `meta-luneos`; the `meta-luneos` one ships). Diff the deployed file against both before assuming a fix is in.
-
-**Wrong-sized or cropped window: measure client and compositor separately.** Client (web apps): WebAppMgr runs Chromium with `--remote-debugging-port=9998`; `adb forward tcp:9998 tcp:9998`, list pages at `http://127.0.0.1:9998/json` and evaluate `screen`, `innerWidth/Height`, `outerWidth/Height`, `devicePixelRatio`, `visualViewport.scale` and `document.hidden` via `Runtime.evaluate` (measure the page with `hidden:false`). Compositor: a temporary `qWarning` in `WebOSSurfaceItem` on `QWaylandSurface::bufferSizeChanged/destinationSizeChanged/sourceGeometryChanged/bufferScaleChanged` and the item's size shows what the client committed against the item; build it from a worktree at the deployed `SRCREV` via a temporary `externalsrc`, push only `libWebOSCoreCompositor.so` from `packages-split/`, and remove the `externalsrc` before building an image. If the compositor side is consistent, the crop is inside Chromium (found on mp01; see device-mp01.md). Screenshots: `luna-send -n 1 luna://com.webos.surfacemanager/captureCompositorOutput '{"output":"/tmp/x.png","format":"PNG"}'` or `/media/internal/screencaptures/`, both in panel orientation.
 
 ## Stage 4 — Subsystems
 
@@ -412,95 +400,14 @@ while read m; do b=$(basename $m .ko | tr - _); echo "$L" | grep -qx "$b" || ech
 
 A whole subsystem missing (camera, audio) points at module loading, not the HAL — kernel-modules.md § The vendor_dlkm set.
 
-### Wifi
+### Wi-Fi, Bluetooth, modem and audio
 
-- A `wifi-module-load.service` modprobing a module that doesn't exist on this device (copy-paste from another port) restart-loops every 2 s — check whether the driver is built in (`CONFIG_MTK_COMBO=y`).
-- MediaTek WMT combo: force-loaded stock vendor modules, firmware path, `/dev/wmtWifi` power-on — soc-mediatek.md § Connectivity combo. Force-loading is only safe with stock struct layouts (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe).
-- Module-load errors (Halium, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = signature enforcement against a module not signed with this kernel's key — for prebuilt vendor modules disable `CONFIG_MODULE_SIG_FORCE` (Tier B; stock GKI leaves it unset); a port that builds all its own modules can keep it with a signing key pinned in the layer, so kernel and modules agree across rebuilds (sargo, fajita, vince). `"Invalid module format"` = version/config mismatch. Vendor modules that never load on a rebuilt GKI kernel although the CRC check passes: `CONFIG_MODULE_SIG_PROTECT` (kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT). Broadcom `bcmdhd` is best `=m` (picks up the MAC as a module). Legacy Qualcomm (pre-2016): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath` (and see soc-qualcomm.md § WCNSS).
-
-#### Regulatory domain: `country 00` and no 5 GHz
-
-Install **`wireless-regdb-static`** and the **`cfg80211-regdb-reload`** service (meta-luneos/recipes-connectivity, gated on the `wifi` MACHINE_FEATURE in `packagegroup-luneos-extended`). oe-core only wires `wireless-regdb` into `packagegroup-base-wifi` (`00c5a665b4`), which LuneOS images (built from `packagegroup-luneos-*`) never install, and connman does not reference it, so without these every phone sits in the world domain. That goes unnoticed because **country 00 is a fully usable 2.4 GHz radio**: channels 1–11 work and every 5 GHz band is passive-scan-only, so 5 GHz APs are simply never found.
-
-```
-country 00:
-  (2402 - 2472 @ 40), (6, 20), (N/A)          <- no PASSIVE-SCAN, normal
-  (5170 - 5250 @ 80), ... PASSIVE-SCAN
-  (5250 - 5330 @ 80), ... DFS, PASSIVE-SCAN
-  (5490 - 5730 @ 160), ... DFS, PASSIVE-SCAN
-  (5735 - 5835 @ 80), ... PASSIVE-SCAN
-```
-
-**Shipping the file is only half the fix.** cfg80211 is built in, so it requests `regulatory.db` during its own initcalls, before any rootfs exists:
-
-```
-platform regulatory.0: Direct firmware load for regulatory.db failed, error -2
-platform regulatory.0: Falling back to syfs fallback for: regulatory.db
-ueventd: firmware: could not find firmware for regulatory.db
-cfg80211: failed to load regulatory.db
-```
-
-On Halium the sysfs fallback is answered by the **container's ueventd**, which never searches the LuneOS root. The failure is then **latched** (`regdb_fw_cb()` sets `regdb = ERR_PTR(-ENODATA)`), so the db sits on disk unread and `iw reg set XX` returns 0 while changing nothing. Only `NL80211_CMD_RELOAD_REGDB` (`iw reg reload`) clears it:
-
-```sh
-iw reg get | head -1                     # "country 00" => broken
-ls -l /lib/firmware/regulatory.db        # missing => package not installed
-journalctl -k -b | grep -iE "regulatory|regdb"
-iw reg reload && iw reg set NL && iw reg get | head -1
-```
-
-Old kernels: upstream signs the db with the **wens** key since 2023, and `CONFIG_CFG80211_USE_KERNEL_REGDB_KEYS=y` trusts only `net/wireless/certs/*.hex` — check `wens.hex` is there (FuriLabs' 4.19 has both wens and sforshee).
-
-#### Never gate a unit on `/sys/module/<driver>`
-
-A built-in driver has **no `/sys/module` entry**, so `ConditionPathExistsGlob=/sys/module/wlan*` silently excludes machines where it is compiled in (`ConditionResult=no`, no error). The same assumption in *driver detection* is worse because the unit appears to work: `wlan-suspend-mode`'s `driver_layout()` looked for `/sys/module/wlan_drv_gen4m*`, chose the Qualcomm private-ioctl struct with gen4m built in, and `SETSUSPENDMODE` failed with `EINVAL` (found on radon; see device-radon.md). Gate on something that exists either way — the character devices (`/dev/wmtWifi`, `/dev/conninfra_dev`, `/dev/stpbt`) or the interface itself — and bound any wait, exiting with a status in `RestartPreventExitStatus` so a machine without WLAN does not spin.
-
-#### "Wi-Fi associates, ping works, but TCP hangs"
-
-Establish **where** the loss is before touching the port. Consumer routers accelerate TCP/UDP in hardware and leave ICMP on the slow path, so ping is no evidence for TCP; a router bridging badly between its 2.4 and 5 GHz radios kills only flows that cross bands (found on radon; see device-radon.md). Run this matrix:
-
-| test | what it isolates |
-|---|---|
-| `ping -c5 -M do -s 1472 <peer>` | L2/L3 path and MTU, both directions |
-| device `wget` a few MB from the internet | device↔AP leg only — fast means radio and driver are fine |
-| device connects **out** to a listener on the peer | device-initiated TCP |
-| peer connects **in** to a listener on the device | peer-initiated TCP |
-| same tests with peer on the **same band** | isolates cross-band bridging |
-
-Read `ss -ti` on the *sending* side: `bytes_acked:1` with climbing `bytes_retrans` means the receiver never got the data. Use a plain socket listener, not sshd.
-
-### Modem
-
-- **Pick the right fstab.** `mount-android.sh` once took `fstab.enableswap` because it glob-sorts before `fstab.mt6739`, so the MTK NV partitions (`nvcfg`/`nvdata`/`protect1`/`protect2` — calibration + IMEI) never mounted: `md1.status = "exception"`, RIL daemon stopped. Fix: prefer `fstab.$(getprop ro.hardware)`, skip `*.enableswap`. Generic to any multi-fstab device (found on mindphone, where dual-SIM then came up; see device-mindphone.md). Read *every* fstab the vendor ships — some split them by purpose.
-- MTK exposes NV partitions under `/dev/disk/by-partlabel` only (no by-name) — `find_partition_path` must cover that.
-- Qualcomm variant (SFOS hadk-faq): the RIL stack needs Android's exact `/dev/block/bootdevice/by-name/` structure. Symptom: SIM never detected, sometimes a bootloop. `ls -lR /dev/block` on Android and replicate it with udev rules.
-- Protocol and slot configuration: hal-userspace.md § Modem.
-
-### Bluetooth
-
-Node ownership, MAC address, restart order and controller quirks: hal-userspace.md § Bluetooth. The diagnostic that finds controller quirks lives here:
-
-**`hci0` exists but stays DOWN, "No default controller available":** check `rfkill list` first (webOS BT off = soft-blocked), then `hciconfig hci0 up`. `Invalid request code (56)` is `EBADRQC`, which `bt_to_errno()` maps from HCI status **0x01 "Unknown HCI Command"**: the controller refused something it had *advertised*. Find which with `btmon`:
-
-```sh
-(btmon -i hci0 > /tmp/bt.log 2>&1 &); sleep 1; hciconfig hci0 up; sleep 2; pkill btmon
-grep -B2 -A6 "Unknown HCI Command" /tmp/bt.log
-```
-
-Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the bit bluebinder passes through (`BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`, `BLUEBINDER_LOCAL_FEATURES_MASK`) or add missing ones (`BLUEBINDER_LOCAL_COMMANDS_SET`). Test by writing the value to `/var/lib/environment/bluebinder/<x>.conf` and restarting the stack in order. A `dut_mode ... already present` debugfs warning means a second `hci0` was registered over a stale vhci left by a killed bluebinder — restart the stack in order before debugging further. A kernel reset 57 s into every boot with `BUG_ON(!sk)` in `bt_sock_reclassify_lock` is a vendor tree that stubbed `hci_sock_create()` (kernel-build.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung)).
-
-### Audio
-
-- Wrong rather than absent (pitched, tempo-shifted, dead volume keys, silent calls): pulseaudio-modules-droid quirk arguments — hal-userspace.md § Audio.
-- **A deferred ASoC card:** `cat /sys/kernel/debug/devices_deferred` names the card, `/sys/kernel/debug/asoc/components` lists what registered. Pull `/proc/device-tree` with `adb pull`, read the machine node's phandle properties with `od -An -tx1` on the host, and find the node whose `phandle` matches — that names the missing component, and its compatible names the module.
-- **PulseAudio dies ~1 s after "Daemon startup complete", status 9/KILL**, no log, no core: trace the kernel's signal generation (tooling appendix). `code=128` (SI_KERNEL) from the sink thread itself was `RLIMIT_RTTIME` expiring on a `SCHED_RR` thread (found on sm-t220).
-- **Testing audio with nobody listening:** read the headset jack switch state (`EVIOCGSW` from `python3`; `evtest` is not on the image) and refuse speaker tests unless it reads empty; compare full `amixer contents` dumps during real HAL playback and a manual setup *on the host* (BusyBox `diff` printed nothing for files that differed); `dmesg` lines such as `mtk_pcm_I2S0dl1_prepare` show which PCM the HAL really opened. A microphone loopback gave digital zero — do not rely on it. When a person listens, label each timed variant with a wall-clock time.
-- Web-app audio silent with nothing reaching PulseAudio: umediaserver — hal-userspace.md § webOS media server.
+Bring-up and debugging detail per radio is in connectivity.md (Wi-Fi incl. the regulatory db and the TCP-hang matrix, Bluetooth incl. `btmon`, modem fstabs) and audio-media.md § Debugging audio.
 
 ### Misc
 
 - **Network-time toggle fails:** LunaSysService's `enableNetworkTimeSync()` runs `timedatectl set-ntp`, and there is no `timedatectl` on a device — meta-luneos removes `timedated` and `timesyncd` on purpose, since LunaSysService's own sntp path owns time (nyx-modules.md). Do not add them back.
-- **Waydroid stops the host's nfcd:** upstream `container_manager.py` runs `systemctl stop nfcd` on container start and only restarts it on stop, so a failed start leaves NFC dead until reboot (meta-luneos waydroid patch 0010 removes both calls). A fresh userdata has no `/var/lib/waydroid/waydroid.cfg`, so the session units skip until `waydroid init` has downloaded its ~1 GB of images. When it genuinely fails, `/var/lib/waydroid/waydroid.log` has the `lxc-start` output; `lxc_spawn: ... Failed to clone a new set of namespaces` means the kernel lacks `CONFIG_IPC_NS`/`CONFIG_USER_NS` and Waydroid's generated config, unlike the Android container's, has no `lxc.namespace.keep = ipc user`. `waydroid-luneos-prepare` adds it for whichever is missing from `/proc/self/ns`, after `waydroid upgrade -o` regenerates the config (found on mp01).
+- **Waydroid** stops the host's nfcd, and needs the IPC/USER namespaces kept: hal-userspace.md § Waydroid.
 - **`appinstalld2`: `Failed to execute child process "ar"`** — the standard image has no `ar`. Installer failures are explained in the journal: `LunaAppManager`, `appinstalld` and `ApplicationInstallerUtility` log the exact `opkg` command line.
 
 ## Stage 5 — Idle health: the port "works" but burns CPU, flash or battery
@@ -560,9 +467,9 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Screen dark, system healthy | Backlight at 0 | `/sys/class/leds/lcd-backlight` |
 | Compositor never starts on DRM-less device | DRM probe loop | product.env guard |
 | Compositor spins on "failed to get drm master" | Android `charger` holds it (charger-mode boot), or HWC opened twice | Stage 3; `lsof \| grep card0` |
-| Apps: "Failed to create wl_display" | XDG_RUNTIME_DIR split | hal-userspace.md § Wayland socket |
+| Apps: "Failed to create wl_display" | XDG_RUNTIME_DIR split | graphics.md § Wayland socket |
 | EGL_BAD_ALLOC everywhere | GPU node perms (ion/pvr_sync) | vendor ueventd.rc → udev rule |
-| Compositor SIGSEGV ~1 s in, `si_addr` is ASCII text (Mali) | Clobbered thread pointer: TLS hook missing / Mali quirks compiled out | hal-userspace.md § Mali |
+| Compositor SIGSEGV ~1 s in, `si_addr` is ASCII text (Mali) | Clobbered thread pointer: TLS hook missing / Mali quirks compiled out | graphics.md § Mali |
 | test_hwcomposer segfaults / runs but black | Blob/linker fault, or gralloc/copybit | smoke-test ladder (Stage 3) |
 | Hardware keys ignored by Qt | Input node lacks `ID_INPUT_KEYBOARD` | udev rule (Stage 3) |
 | Web app drawn too small / cropped | Client vs compositor size disagreement | Stage 3 window measurement |
@@ -578,16 +485,16 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Vendor modules never load on a rebuilt GKI kernel though the CRC check passes | `CONFIG_MODULE_SIG_PROTECT` must be off | kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT |
 | MTK modem "exception", RIL dead | Wrong fstab → NV partitions unmounted | Stage 4 modem |
 | SIM never detected (Qualcomm) | `/dev/block/bootdevice/by-name` structure missing | Stage 4 modem |
-| BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | hal-userspace.md § Bluetooth |
+| BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | connectivity.md § Bluetooth |
 | `hci0` DOWN, "Invalid request code (56)" | Controller rejects a command it advertised | `btmon` (Stage 4) |
-| BT will not power on, `Blocked through rfkill (0x12)` | rfkill soft-block restored at boot; bluebinder's "Own hci index" is an rfkill index, not a mismatch | hal-userspace.md § Bluetooth |
+| BT will not power on, `Blocked through rfkill (0x12)` | rfkill soft-block restored at boot; bluebinder's "Own hci index" is an rfkill index, not a mismatch | connectivity.md § Bluetooth |
 | Reset 57 s in, `BUG_ON(!sk)` in `bt_sock_reclassify_lock` | Vendor stubbed `hci_sock_create()` | kernel-build.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung) |
-| Audio pitched / tempo-shifted | pa-droid sample-rate quirk | hal-userspace.md § Audio |
-| pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | Vendor HAL needs its VNDK | `HYBRIS_PREFER_VNDK` (hal-userspace.md § Audio) |
+| Audio pitched / tempo-shifted | pa-droid sample-rate quirk | audio-media.md § Audio |
+| pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | Vendor HAL needs its VNDK | `HYBRIS_PREFER_VNDK` (audio-media.md § Audio) |
 | PulseAudio killed ~1 s after startup, status 9 | `RLIMIT_RTTIME` on SCHED_RR sink threads | `signal_generate` trace |
-| Speakers silent, headphones fine, HAL "undefined in AudioParamOptions" | Vendor lib assumes zeroed `malloc` | hal-userspace.md § Vendor libraries that assume Android's zeroed malloc |
+| Speakers silent, headphones fine, HAL "undefined in AudioParamOptions" | Vendor lib assumes zeroed `malloc` | audio-media.md § Vendor libraries that assume Android's zeroed malloc |
 | Sound card never registers (`-517`) | A deferred ASoC component's module not loaded | Stage 4 audio |
-| Web-app audio silent, nothing reaches PulseAudio | umediaserver: `waitid(P_PIDFD)`, pipeline binary, resource table | hal-userspace.md § webOS media server |
+| Web-app audio silent, nothing reaches PulseAudio | umediaserver: `waitid(P_PIDFD)`, pipeline binary, resource table | audio-media.md § webOS media server |
 | `nfcd` stopped a few minutes after boot | Waydroid's container start stops it | Stage 4 misc |
 | Waydroid: "Failed to clone a new set of namespaces" | Kernel lacks IPC_NS/USER_NS; config has no namespace keep | Stage 4 misc |
 | Network-time toggle errors | No `timedatectl` by design | Stage 4 misc |
@@ -605,8 +512,8 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Allocator and composer HAL services (`vendor.gralloc-2-0`, `vendor.hwcomposer-2-1`) exit status 1 at every start, nothing in dmesg or the journal; logcat: `vndksupport: Could not load /vendor/lib/hw/gralloc.<soc>.so … library "libft2.so" not found: needed by /vendor/lib/libpdfium.so` (or `libhwui.so`) | The LLNDK list names libft2.so, the vendor namespace does not hand it over | gsi-building.md § Before deriving, item 5 |
 | `service 'X' overrides another service across the treble boundary` | /odm or /vendor override of a system service | yocto.md § Shipping fixes through /odm |
 | `No user specified for service 'X', so it would have been root` | Old vendor rc; Android 16 init drops the service | add `user` in an override |
-| Bluetooth: `BluetoothHci::close()` → `__throw_bad_function_call` abort loop, bluebinder times out | initialize never finished; on Qualcomm UART parts a force-started `wcnss_filter` | hal-userspace.md § Bluetooth |
-| `droid-extevdev.c: Unable to open device /dev/input/eventN … Permission denied`; headphones ignored | `pulse` not in group `input` | hal-userspace.md § Audio |
+| Bluetooth: `BluetoothHci::close()` → `__throw_bad_function_call` abort loop, bluebinder times out | initialize never finished; on Qualcomm UART parts a force-started `wcnss_filter` | connectivity.md § Bluetooth |
+| `droid-extevdev.c: Unable to open device /dev/input/eventN … Permission denied`; headphones ignored | `pulse` not in group `input` | audio-media.md § Audio |
 | `kgsl_get_unmapped_area … failed error -12`; WebAppMgr's GPU thread crashes on every start | Chromium's low-4GB reservation vs a 32-bit-address Adreno | soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl |
 | Wi-Fi scans, every connect fails after 5 s with `result:70 and Status:9` (qcacld) | MFP optional vs `WIPHY_FLAG_SUPPORTS_FW_ROAM` | kernel-build.md § Legacy 3.x kernels |
 | `init: Service 'lmkd' … received SIGABRT` every 5 s on a 3.x kernel | libmemevents needs BPF | soc-qualcomm.md § A LineageOS 21 vendor without VNDK |

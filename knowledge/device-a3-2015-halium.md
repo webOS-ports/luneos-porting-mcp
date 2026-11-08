@@ -65,7 +65,7 @@ Layer `meta-smartphone/meta-samsung`, `MACHINE=a3-2015-halium`; status file `met
 
 ## Install
 
-lk2nd route (soc-qualcomm.md § lk2nd). `fastboot flash boot` inside lk2nd writes behind it; `fastboot boot` RAM-boots and passes the previous bootloader's arguments on, including `androidboot.mode=charger` when the SBL started in charger mode.
+lk2nd route (soc-qualcomm.md § lk2nd). `fastboot boot` inside lk2nd passes the SBL's arguments on, `androidboot.mode=charger` included (§ Subsystem notes).
 
 - **Nothing may `dd` a boot image to the start of the partition.** `android-kernel-bootimg`'s postinst did once, from a pending first-boot configure run by an unrelated `opkg install`; it now writes 512 KiB in when it finds lk2nd. Dry-run installs with `opkg install --noaction` and check `/var/lib/opkg/status` for unpacked packages.
 - Keep a copy of lk2nd's 512 KiB. Recovery when `boot` is lost: Download mode and `heimdall flash --BOOT <lk2nd (512 KiB) + boot.img>`.
@@ -76,7 +76,7 @@ lk2nd route (soc-qualcomm.md § lk2nd). `fastboot flash boot` inside lk2nd write
 
 **Charger mode.** The SBL starts in charger mode (`androidboot.mode=charger androidboot.baseband=lpm`) from any PMIC hard reset with a cable: off-mode charging, long Power, lk2nd's `fastboot reboot`, and a plain `reboot` (msm-poweroff hard-resets without a reboot argument). Crash resets and reboots with an argument (warm reset, restart reason 0x12345678; `systemctl reboot --reboot-argument=normal`, systemd 257 ignores the old positional form) come up normal. With the cut cmdline LuneOS never saw the mode and booted in full on `baseband=lpm`. The initramfs must hold and charge in charger mode (Herrie82/meta-smartphone#6); its power-key reboot must pass an argument on this phone.
 
-**Display: three gaps, each hiding the next** (soc-qualcomm.md § Display: three gaps, each hiding the next): `hwcomposer.msm8916.so` links framework libhwui, which needs `libft2.so` (`HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`); those framework copies then miss libbinder/libmedia symbols (`android::MetaDataBase::writeToParcel`; sm-t520's `HALIUM_LEGACY_SHIM_TARGETS`); `gralloc.msm8916.so` cannot load in sphal (`libqdutils.so` needs `libui.so`), so media.swcodec aborts ("gralloc-mapper is missing") — fixed in the GSI's linkerconfig, now for VNDK 28 and 30. `deviceinfo_force_hwc2` is set by analogy with the SM-T520.
+**Display** hit all three legacy gaps (soc-qualcomm.md § Display: three gaps, each hiding the next) with `hwcomposer.msm8916.so` and `gralloc.msm8916.so`: `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`, sm-t520's `HALIUM_LEGACY_SHIM_TARGETS`, and the GSI's sphal linkerconfig, now for VNDK 28 and 30. `deviceinfo_force_hwc2` is set by analogy with the SM-T520.
 
 **Wi-Fi** (soc-qualcomm.md § WCNSS (pronto)). `a3-prima-wlan.service` (meta-samsung systemd-machine-units) waits for the WCNSS control channel and writes `sta` to prima's `fwpath`; the vendor's `hciattach` is in `deviceinfo_android_skip_services`; wcnss_service reads the real MAC from `/efs/wifi/.mac.info`.
 
@@ -84,7 +84,7 @@ lk2nd route (soc-qualcomm.md § lk2nd). `fastboot flash boot` inside lk2nd write
 
 **Flashlight and battery.** Torch via `rear_flash`, and sec-battery's `charge_now` (which carries its charging mode, 1) is ignored by nyx; deviceinfo states 1900 mAh for full and design capacity (nyx-modules.md § Torch backends and battery readings that are not what they say). The battery really did run down during the boot loops on 500 mA USB.
 
-**Camera, three layers** (soc-qualcomm.md § Camera HAL1): the provider service (`android.hardware.camera.provider@2.4-service`, built in the same Halium 11 tree, declared hwbinder via `HALIUM_LEGACY_BINDERIZED_HALS`) because LineageOS loads the provider in-process; the text-relocation shim (hal-userspace.md § Text relocations) for `libmmcamera_faceproc.so` (`zz-a3-camera-textrel.rc` preloads `libpermissioncache_shim.so` into the daemon and provider; without it "mct_stream_start_link ... Null" and a white preview; only three vendor libraries, all camera, have text relocations); five HIDL threads in minimediaservice (else `takePicture` deadlocks).
+**Camera, three layers** (soc-qualcomm.md § Camera HAL1): the provider service (`android.hardware.camera.provider@2.4-service`, built in the same Halium 11 tree, declared hwbinder via `HALIUM_LEGACY_BINDERIZED_HALS`) because LineageOS loads the provider in-process; the text-relocation shim for `libmmcamera_faceproc.so` (hal-userspace.md § Text relocations, where the A3 is the example; `zz-a3-camera-textrel.rc` preloads it into the daemon and provider); five HIDL threads in minimediaservice (else `takePicture` deadlocks).
 
 ## Open issues
 
