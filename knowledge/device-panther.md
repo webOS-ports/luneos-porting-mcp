@@ -26,7 +26,7 @@ Read from factory image `panther-bp4a.251205.006` (Android 16 QPR2, sha256 `4455
 
 ## Kernel
 
-Panther's stock kernel is byte-identical to bluejay's (kernel-porting.md § One kernel per
+Panther's stock kernel is byte-identical to bluejay's (kernel-build.md § One kernel per
 KMI), so the LuneOS Tier A kernel is bluejay's: ACK `android14-6.1-2026-06_r7` (6.1.172) +
 `luneos_defconfig`, built by `linux-halium-gki_6.1.bb` with Google's clang 17 r487747c.
 `panther.conf` sets `GKI_BOOTIMG = "1"` and `PREFERRED_VERSION_linux-halium-gki = "6.1%"`.
@@ -44,8 +44,8 @@ That includes `vh_mm.ko`/`vh_sched.ko` (the bumped ACK tag covers panther too). 
 list (`FANOTIFY`, `NET_L3_MASTER_DEV` off) transfers unchanged. `modules.load` is
 non-topological here as well: 332 hard-dependency pairs backwards across 107 of 204 modules,
 plus 15 softdep edges (`clk_exynos_gs.ko` at line 16, its exporter `cmupmucal.ko` at line 45),
-so the initramfs's dependency-resolving loader is required (boot-images.md § Init patch
-history).
+so the initramfs's dependency-resolving loader is required (kernel-modules.md §
+`modules.load` is a list, not a dependency order).
 
 ## Boot image
 

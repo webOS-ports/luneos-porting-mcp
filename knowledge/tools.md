@@ -43,7 +43,7 @@ bump (201/203 before — the two `vh_*` fails were pin skew), panther 204/204.
 the bisect instrument for finding which config options poison the KMI. On
 bluejay (android14-6.1) it took the fragment from 3145 drifted symbols to **0**;
 the poisoners there are FANOTIFY and NET_L3_MASTER_DEV. The list is per KMI and
-tree; method in kmi-crc-matching.md § Poison options.
+tree; method in kernel-config.md § Poison options.
 
 **Location:** `tools/symvers-drift.py` in [luneos-bootimg-bluejay](https://github.com/Herrie82/luneos-bootimg-bluejay).
 
@@ -165,7 +165,7 @@ is the only record.
 **Purpose:** check a kernel config against the Mer/Halium/systemd requirement
 list. Run it on the *stock* config (extracted via IKCONFIG) to size the LuneOS
 delta, and on the *shipped* config to confirm every remaining error is
-deliberate. Reference results: kernel-porting.md § The config delta.
+deliberate. Reference results: kernel-config.md § The config delta.
 
 **Known quirks (don't chase these):**
 - predates the 5.13 `NF_LOG_SYSLOG` rename → `NF_LOG_IPV4/6` stay "errors" even
@@ -359,7 +359,7 @@ bitbake is the canonical one — it carries the module-loader/cmdline-params and
 userdata-resize fixes via `initramfs-scripts-halium`, and has been *newer* than
 hand-maintained overlay ramdisks in practice (it picked up the find-the-Android-
 image fix the hand kits lacked). The GKI kernel recipe and `GKI_KERNEL_IMAGE`:
-kernel-porting.md § Step 4.
+kernel-build.md § Step 4.
 
 ## build-bootimg.sh (luneos-bootimg-bluejay repo)
 

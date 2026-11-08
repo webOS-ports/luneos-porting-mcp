@@ -70,7 +70,7 @@ Hardware results are from kit rev 9.
   (select `CONFIG_LTO_NONE=y` to turn it off), but not here.
 - **Poison options:** `FANOTIFY` and `CGROUP_DEVICE` move the CRC of 8158 of 12823
   exported symbols between them; both stay on (`CGROUP_DEVICE` is used by 7 units
-  in the shipped rootfs). Measurement and analysis: kmi-crc-matching.md § What the
+  in the shipped rootfs). Measurement and analysis: kernel-config.md § What the
   two sunfish poisoners change.
 - **Module strategy: build all 41 and overlay them.** Ours match by construction.
   `rdbg.ko` had been off for a GCC-only `-Werror=designated-init` the Clang build
@@ -95,7 +95,7 @@ Hardware results are from kit rev 9.
 
   Cost: initramfs 6.6 → 13.4 MB. Packaging traps (`KERNEL_SPLIT_MODULES = "0"` is
   mandatory under LTO; `MODULE_TARBALL_DEPLOY` makes a dependency loop):
-  kmi-crc-matching.md § Packaging traps.
+  kernel-modules.md § Packaging traps.
 - **Other config:** `BT_BREDR` and `BT_LE` must be spelled out — `sunfish_defconfig`
   turns both off and RFCOMM/BNEP/HIDP depend on `BT_BREDR`. `CONFIG_COMPAT_VDSO`
   off (no arm32 cross toolchain in the sysroot), `CONFIG_CC_WERROR` off.
@@ -104,7 +104,7 @@ Hardware results are from kit rev 9.
   level of a `/plugin/`), and the base dtb must carry `__symbols__` for the stock
   dtbo overlays.
 - **Cmdline:** the bootloader drops arguments it does not recognise, so anything
-  LuneOS needs goes in `CONFIG_CMDLINE` (kernel-porting.md § The kernel command
+  LuneOS needs goes in `CONFIG_CMDLINE` (kernel-config.md § The kernel command
   line); `LUNEOS_ENABLE_ADB=1` builds the debug shell's flag in.
 
 ### Rejected paths

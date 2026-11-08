@@ -67,12 +67,9 @@ you need to match at all).
   USB gadget and the initramfs adb shell are the early-boot channels. That is safe
   here because no prebuilt network module loads (kmi-crc-matching.md § NETCONSOLE
   and `NET_POLL_CONTROLLER`).
-- Standalone kernel build traps (bitbake handles both): OE's `gcc-cross` picks the
-  host `as` from `PATH` and dies with `as: unrecognized option '-EL'` — pass `-B`
-  at a directory of unprefixed symlinks via `KCFLAGS`/`KAFLAGS`, kept **out of
-  `PATH`** or the host tools (`fixdep`) link against the aarch64 `ld`. Host GCC
-  defaults to `-std=gnu23`, so `scripts/unifdef.c` fails on `static bool
-  constexpr;` — `BUILD_CFLAGS:append = " -std=gnu17"`.
+- Standalone kernel build traps, both found here (bitbake handles both): `gcc-cross`
+  and the host `as`, and `unifdef.c` under C23 (kernel-build.md § Old BSP vs modern
+  toolchain).
 
 ## Boot image
 

@@ -1,6 +1,6 @@
-# Matching a vendor's kernel: vermagic, CRCs, struct layouts and your own modules
+# Matching a Vendor's Kernel: Vermagic, CRCs and Struct Layouts
 
-Everything about whether a vendor `.ko` loads into your kernel — Tier A or Tier B — and what to do instead when it cannot.
+Whether a vendor `.ko` loads into your kernel, Tier A or Tier B: vermagic, CRCs, struct layouts and force-loading.
 
 The rule this all serves: **on any device that keeps its vendor's kernel
 modules — Tier A GKI or Tier B — the vendor's kernel is the specification and
@@ -12,7 +12,8 @@ modules, 0 failing) and sunfish, where the same problem took eight builds; each
 wrong turn is written down as a "don't".
 
 Order of business: Step −1 (can you build the modules instead?), then Steps 0–6
-for matching, then poison options, force-loading, struct layouts and shipping.
+for matching, then force-loading and struct layouts. The poison options are in
+kernel-config.md; building, loading and shipping modules in kernel-modules.md.
 
 ---
 
@@ -409,146 +410,10 @@ baseline number without checking the recipe actually honours the switch.
 
 ---
 
-## Poison options: per KMI, and drift is a max
+## Poison options
 
-An option is **KMI-poison** when it changes a struct that exported symbols carry,
-moving their genksyms CRCs so the stock modules refuse to load. LuneOS needs a
-small delta an Android defconfig omits (kernel-porting.md § The config delta); most
-of it is CRC-neutral.
-
-**The poison list is a property of the KMI *and* kernel tree.** Re-derive it per
-KMI with `kmi-crc-check.py`; never transplant it between KMIs in either direction.
-Measured so far:
-
-| Kernel | Poison | Source |
-|---|---|---|
-| ACK `android14-6.1` (bluejay, panther) | `FANOTIFY`, `NET_L3_MASTER_DEV` | cumulative bisect: 3145 → 0 drift, 203/203 → 2/203 failing (the 2 were ACK-pin skew; kernel-porting.md § Vendor-hook modules) |
-| sunfish 4.14 (LineageOS tree) | `FANOTIFY`, `CGROUP_DEVICE` | per-option measurement below |
-| MediaTek mgk `android12-5.10` (Q25) | `USER_NS` kept off (not measured on its own) | device-q25.md |
-
-Within a KMI it transfers: panther confirmed bluejay's fragment unchanged
-(204/204 modules, 0 mismatches). Whether `CGROUP_DEVICE` shows up depends on
-whether the vendor config already enables it — check rather than assume.
-
-### What the two sunfish poisoners change
-
-Between them they move the CRC of **8158 of 12823 exported symbols** on sunfish
-(measured: diff the two `Module.symvers`), because they reach structs that almost
-every prototype reaches:
-
-| Option | Changes | Reached by |
-|---|---|---|
-| `FANOTIFY` | `atomic_t fanotify_listeners` in `struct user_struct` (`include/linux/sched/user.h`) | `struct cred.user`, and `cred` is reachable from `file`, `sock`, `task_struct`, and from `device` via `class` → `kobj_ns_type_operations` → `sock` |
-| `CGROUP_DEVICE` | `SUBSYS(devices)` bumps `CGROUP_SUBSYS_COUNT`, which dimensions `subsys[]`, `e_cset_node[]`, `e_csets[]` in `struct css_set` / `struct cgroup` | `task_struct.cgroups` |
-
-**The poison sets overlap, so the drift is a max and not a sum.** This is the
-single most important thing to know before trying to fix drift by removing
-options: in the table below `FANOTIFY` alone moves exactly as many sampled CRCs
-as the whole delta, and `CGROUP_DEVICE` alone most of the same ones. A change
-that removes one poisoner while another stays shows up as zero improvement,
-which reads exactly like "the option was innocent" and is not. A cumulative
-bisect hides the same thing; attribute one option at a time.
-
-Everything else in the fragment is CRC-free. Measured per option on sunfish, over
-164 CRCs sampled from `fs/inode.o`, `drivers/base/{core,platform}.o`,
-`kernel/sched/core.o`, `kernel/module.o`:
-
-| Config under test | CRCs moved vs LineageOS-verbatim |
-|---|---|
-| the whole LuneOS delta | 143 / 164 |
-| `FANOTIFY` alone | 143 / 164 |
-| `CGROUP_DEVICE` alone | 118 / 164 |
-| `PID_NS` + `USER_NS` | 0 |
-| `VT` + `VT_CONSOLE` + `HW_CONSOLE` + `DUMMY_CONSOLE*` + `CONSOLE_TRANSLATIONS` | 0 |
-| `DEVTMPFS` (+`_MOUNT`) | 0 |
-| `FHANDLE` / `AUTOFS4_FS` / `MODULE_FORCE_LOAD` / `MSM_RDBG` | 0 each |
-| the 9 `BT_*` options | 0 |
-| **the whole delta minus `FANOTIFY` and `CGROUP_DEVICE`** | **0** |
-
-Note what is *not* in that list: the namespace options. `struct nsproxy` is
-unconditional and `struct user_namespace`'s members are gated only by
-`PERSISTENT_KEYRINGS`/`SYSCTL`, so `PID_NS` and `USER_NS` are KMI-free on this
-tree — the opposite of what the shape of the problem suggests, and worth checking
-rather than assuming for any option you are about to fight. It is per tree: on
-the Q25's MediaTek 5.10 tree `USER_NS` stays off (device-q25.md).
-
-### How to attribute drift in minutes instead of hours
-
-Do not rebuild the kernel once per option. CRCs come out of genksyms on
-*preprocessed source*, so they are visible in a handful of objects:
-
-```sh
-make -C $src O=$objdir ARCH=arm64 CC=clang LD=ld.lld LLVM_IAS=1      CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig prepare
-make ... fs/inode.o drivers/base/core.o kernel/sched/core.o kernel/module.o
-llvm-nm $objdir/fs/inode.o | awk '$2 ~ /^[Aa]$/ && $3 ~ /^__crc_/'
-```
-
-About three minutes per config instead of an hour, and a private `O=` objdir
-never touches the builder's tree. One catch: **turn LTO off for the measurement**
-(`CONFIG_LTO_NONE=y`, and `CFI_CLANG`/`SHADOW_CALL_STACK` off with it). With LTO
-on, each `.o` is LLVM bitcode, Kbuild's `cmd_modversions_c` sees no `__ksymtab`
-in `objdump -h` and skips the CRC step, so `__crc_*` stays an unresolved weak
-symbol and every config looks identical. Turning LTO off is safe here precisely
-because CRCs do not depend on codegen.
-
-### Does anything actually need `FANOTIFY` or `CGROUP_DEVICE`?
-
-Asked on sunfish, because it is the obvious next question once you know they are
-the only two poisoners there.
-
-**`FANOTIFY`: nothing appears to need it. Removable, pending one control test.**
-
-- bluejay boots the *same* halium-arm64 rootfs on a kernel with
-  `# CONFIG_FANOTIFY is not set` — meta-android's shared GKI fragment lists it as
-  KMI-poison and leaves it out (panther and tangorpro carry the same fragment but
-  have not been booted). Same systemd build, no fallout seen. This is the strongest
-  evidence available and it costs nothing to look up.
-- Scanning every regular file in the shipped rootfs for `fanotify` finds only
-  syscall *name tables*: `strace`, the valgrind tools, gdb's `syscalls/*.xml`,
-  `libseccomp`, `enosys`, perfetto's trace processor, and glibc's own wrapper.
-  The one real library reference is `libsystemd-shared-257.so`, which does not need
-  the kernel side present. No LuneOS component calls it.
-
-- **Provenance, which is the part worth knowing:** it comes from the Mer/SFOS kernel
-  config checker, which lists `CONFIG_FANOTIFY  y,!  # optional, required for
-  systemd readahead.` — and whose own header defines `!` as *"Failure will be warned,
-  not errored"*. So it was never a requirement even there, and its stated reason,
-  `systemd-readahead`, was **removed from systemd in v217 (2014)**. The LuneOS rootfs
-  ships systemd 257, with no readahead unit or binary. If a Tier B fragment carries
-  an option justified only by a Mer-checker line, check the notation and the date
-  before paying a KMI price for it.
-
-It was in sunfish's fragment under a "systemd's mount/automount machinery" comment
-— an assumption inherited from that checker, never a measurement, and the most
-expensive one in the file.
-
-**Open:** bluejay shows systemd *starts* without fanotify, not that a
-full LuneOS stack is unaffected; the control test on sargo
-(`LUNEOS_TEST_NO_FANOTIFY=1` in `linux-google-sargo`, or counting live fanotify
-fds on a booted device) has no recorded result, and sunfish keeps
-`CONFIG_FANOTIFY=y` until it does.
-
-**`CGROUP_DEVICE`: kept, because it does something.** 7 units in the shipped rootfs
-carry `DeviceAllow=`/`DevicePolicy=` (`systemd-logind`, both `systemd-journald`
-units, `systemd-hostnamed`, `bluebinder`, both `openvpn@` templates). Without the
-controller systemd logs a warning and skips the restriction rather than failing the
-unit, so it is confinement, not a boot dependency — and the Android container does
-not need it either (`/var/lib/lxc/android/config` has zero `lxc.cgroup` directives).
-It is worth knowing it *can* go if a port ever needs the CRCs; the GKI devices run
-without it.
-
-### The genksyms trick: last resort for one member
-
-If an option genuinely cannot go, the `#ifndef __GENKSYMS__` trick (declare the
-member at the end of the struct, hidden from genksyms) applies to `FANOTIFY` — it is one member
-(`atomic_t fanotify_listeners`) and moving it to the end of `struct user_struct`
-keeps every pre-existing offset. It does **not** apply to `CGROUP_DEVICE`: that
-changes an array *dimension* in the middle of `css_set`/`cgroup`, so hiding it from
-genksyms would publish a CRC for an offset layout the kernel does not have — a
-silent wrong answer instead of a loud refusal. It works for **one** struct at a time; it does not scale to `user_struct` plus a
-config-sized array dimension in `css_set`, and a patch series hiding several
-would be a permanent maintenance burden on the most churn-prone headers in the
-tree.
+Which config options move CRCs (KMI-poison), per KMI and tree, how to attribute
+drift in minutes, and the genksyms last resort: kernel-config.md § Poison options.
 
 ---
 
@@ -578,34 +443,9 @@ keep after all: not a KMI in the GKI sense, but the stock kernel's layout as see
 by every prebuilt `.ko` on the vendor partition. Check it (§ Struct layouts)
 before the first forced load. `Unknown symbol` is never force-loadable (Step 2).
 
-**Do not stage a vendor set in `/lib/modules/$(uname -r)`.** udev's coldplug
-autoloads by modalias out of that directory, so a depmod'd copy of a whole vendor
-set there makes the *next* boot insmod every matching vendor module before
-anything is ready. On the MP01 that pulled in `mtk_lpm` within a second of udevd
-starting, froze the SoC, and left the hardware watchdog bootlooping the device on
-every boot after the first. Symlink the vendor `.ko` into a private tree under
-`/run` instead, out of udev's sight and off persistent storage, and point
-`depmod -b` and `modprobe -d` at it (`mtk-load-modules.sh` does this). Modules
-built with your own kernel are different: they belong in `/usr/lib/modules/<kver>`,
-where coldplug autoloading is what you want.
-
-Easy to get wrong once the loading itself works:
-
-- **The vendor's cfg does more than load modules.** Qualcomm's
-  `init.insmod.<hw>.cfg` interleaves `enable|<sysfs path>` lines that start the
-  DSPs, and the node one of them writes is created by a module earlier on the same
-  list. Walk the file, do not grep the module names out of it (on sunfish a
-  missing `adsp_loader_dlkm.ko` meant no ADSP, fastrpc "Transport endpoint is not
-  connected", and no sensors).
-- **A module that is shipped but not listed gets no chance to be forced.** Android
-  loads some itself with `finit_module`, a path with no force option
-  (`incrementalfs.ko` on sunfish: `Exec format error`, and vold could not prepare
-  user 0). Name those separately.
-- **Reason from the vendor partition, not from the defconfig**: what matters is
-  which `.ko` files the phone carries, not which symbols are `=m` in the tree's
-  defconfig (guessing from the latter predicted working audio on a sunfish with no
-  ALSA card). `debugfs -R "ls -l /lib/modules" vendor.img` answers it without root
-  or a loop mount.
+Where a forced set may and may not be staged on the device, and what the vendor's
+own load list does besides loading: kernel-modules.md § Loading a prebuilt vendor
+set from the host.
 
 ---
 
@@ -677,7 +517,7 @@ module, including `printk` (ours 0x27e1a049, stock 0x985558a1) and
 kernel was built from Unihertz's real source with Android clang, ours from
 TheKit's reverse-engineered tree with GCC, so the CRCs carry noise from
 declaration differences that matter to genksyms but not to the ABI. CRC
-attribution (§ Poison options) works when you build the vendor's own
+attribution (kernel-config.md § Poison options) works when you build the vendor's own
 source; against a reconstruction, compare layouts instead.
 
 Found by the config diff and the layout probe on the Titan Pocket, and what was done:
@@ -718,182 +558,8 @@ debugging.md.
 
 ## Building and shipping your own modules
 
-**Which route when.** The generic `halium-arm64` rootfs is built once for every
-machine, so no machine's module package lands in it, and the tissot/mido pattern
-(`MACHINE_EXTRA_RDEPENDS = " … kernel-module-wlan … "`) cannot be copied: those
-machines build their own complete image (sargo carries an unresolved
-`# kernel-module-wlan` comment in its machine conf for this reason). Two routes
-work, both for modules built with your own kernel:
-
-- **The initramfs route** (sunfish, bramble): ship the modules in the machine
-  initramfs, next to the kernel they were built against — the only arrangement
-  in which the two cannot drift apart — and put them where the vendor's loader
-  looks. Use it when the vendor's own init or the initramfs loads the modules.
-- **The rootfs.img injection route** (athena): write the module tree into the
-  built `rootfs.img` with debugfs and let `systemd-modules-load` load it. Use it
-  when nothing vendor-side loads the module (athena: `CONFIG_QCA_CLD_WLAN=m` is the
-  only module, and the vendor's `wlan.ko` will not load).
-
-A prebuilt vendor set is neither: it stays on the vendor partition (§ Force-loading).
-
-### The initramfs route
-
-Ship them in the initramfs, unsplit:
-
-```bitbake
-KERNEL_SPLIT_MODULES = "0"
-ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL = "kernel-modules"
-```
-
-Where they have to *land* differs, and getting it wrong fails silently — the build
-is green and the device behaves exactly as if nothing changed.
-
-**Shape A - modules live on /vendor (sunfish, most Tier B Qualcomm).** The
-vendor's `init.insmod.sh` modprobes from `/vendor/lib/modules` inside the
-container. Stage the modules into the rootfs from the initramfs (it is freed at
-`switch_root`): `init.sh`'s `mount_kernel_modules()` hook, called after
-`mountroot` and before `switch_root`, idempotent with a marker file. Then bind
-them over the vendor's directory in `mount-android.sh`, so the container's own
-`init.insmod.sh` does the loading:
-
-```sh
-cp -a "$ANDROID_ROOT/vendor/lib/modules/." "$stage/"   # vendor's index files
-cp -f <our .ko>                            "$stage/"   # our binaries on top
-mount --bind "$stage" "$ANDROID_ROOT/vendor/lib/modules"
-```
-
-**Shape B - modules live in the vendor_boot ramdisk (bramble, Tensor GKI).** The
-bootloader merges vendor_boot's ramdisk and then ours, and `init.sh`'s
-`load_kernel_modules()` modprobes whatever is at `/lib/modules`.
-
-1. **cpio layering will not do the substitution for you.** A later archive
-   replaces an earlier entry only at the *same path*. The vendor keeps a real
-   `/lib/modules` directory; our rootfs is usrmerge so our modules are packaged
-   at `/usr/lib/modules`; and our `/lib -> usr/lib` symlink cannot be created
-   over the directory the vendor already made. Result: two separate directories
-   and no override, so the vendor's binaries get loaded against your kernel.
-2. So copy explicitly, before anything is modprobed - `init.sh`'s
-   `stage_our_kernel_modules()` does this, logs the count, and no-ops when both
-   paths already resolve to the same place (Shape A).
-
-**DO keep the vendor's `modules.load`, `modules.dep`, `modules.softdep` and
-`modules.alias` in both shapes.** They address modules by name, so they stay
-correct for your binaries, and `modules.load` preserves a load order the vendor
-tuned. Anything you do not build keeps the vendor's copy and fails as it would
-have anyway.
-
-**DO match the layout and the names exactly.** LineageOS keeps bramble's 221
-modules flat at `/lib/modules/*.ko` while `modules_install` writes
-`/lib/modules/<version>/kernel/...`; flatten in `do_install` or the override never
-happens. A module whose name comes out different is skipped just as silently:
-MediaTek's Mali tree names `mali_mgm_$(MTK_PLATFORM_VERSION).ko` from a variable
-it does not export, so kbuild produced `mali_mgm_.ko` until the recipe passed
-`MTK_PLATFORM_VERSION=<soc>` (device-q25.md).
-
-### Packaging traps
-
-**`KERNEL_SPLIT_MODULES = "0"` is not optional on an LTO build.** With OE's
-default per-module packaging, each module's `depends=` field becomes package
-RDEPENDS — and under `CONFIG_LTO_CLANG` that field names the LTO intermediates:
-
-```
-q6_dlkm.ko:  depends=apr_dlkm.lto,snd_event_dlkm.lto
-```
-
-No package provides `kernel-module-apr-dlkm.lto`, so `do_rootfs` fails with
-"none of the providers can be installed". This is **not** a defect in your
-build: LineageOS's own shipped `mpq-dmx-hw-plugin.ko` carries the identical
-`depends=mpq-adapter.lto`, and it is harmless on-device because `modprobe`
-resolves against `modules.dep`, not that field. Unsplit, there are no
-inter-module RDEPENDS to be unsatisfiable.
-
-**Depend on the kernel's package, never on its deploy.** `MODULE_TARBALL_DEPLOY`
-cannot be used: the tarball is created inside `kernel_do_deploy`, and where the
-kernel's own `do_deploy` assembles the boot image (`kernel_android`) it is the task
-that *consumes* the initramfs — a dependency loop, `1705 unbuildable tasks`.
-Depending on a kernel's `do_deploy` is only safe when a *different* recipe
-assembles the boot image. On a GKI machine `virtual/kernel` is `linux-dummy`, so
-`ANDROID_INITRAMFS_KERNEL_MODULES` must name the recipe that really deploys the
-tarball: use `GKI_KERNEL_PROVIDER`.
-
-### A standalone kernel recipe: the packaging shape that works
-
-A recipe that builds with the vendor's own Clang cannot `inherit kernel`, so it
-gets none of `kernel.bbclass`'s packaging arrangements. Five failures came out of
-adding a working `do_install` to one (bramble) - all of them downstream of
-`do_install` having been `noexec` for the recipe's whole life, and none of them
-in the kernel itself:
-
-```bitbake
-# 1. usrmerge: modules must be under /usr, and kbuild always writes lib/modules
-install -d ${D}${nonarch_base_libdir}
-${KERNEL_MAKE} INSTALL_MOD_PATH=${WORKDIR}/modinst INSTALL_MOD_STRIP=1 modules_install
-mv ${WORKDIR}/modinst/lib/modules ${D}${nonarch_base_libdir}/modules
-
-# 2. ownership: pseudo records only what it is asked to. Files kbuild copies in
-#    keep the builder's uid, and do_package then refuses them with
-#    "getpwuid(): uid not found: 1000". An explicit chown IS intercepted.
-do_install[fakeroot] = "1"
-chown -R root:root ${D}${nonarch_base_libdir}/modules
-
-# 3. ...but do NOT make do_deploy fakeroot: bitbake creates sstate-build-deploy
-#    outside pseudo, and the sstate hashing then trips over its ownership.
-#    Set ownership in the archive instead.
-tar --owner=0 --group=0 --numeric-owner -czf ${DEPLOYDIR}/modules-${MACHINE}.tgz ...
-
-# 4. no debug splitting: there is no ${HOST_PREFIX}objcopy under
-#    INHIBIT_DEFAULT_DEPS, and INSTALL_MOD_STRIP already stripped them
-INHIBIT_PACKAGE_STRIP = "1"
-INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
-FILES:${PN} += "${nonarch_base_libdir}/modules"
-
-# 5. packaging must still RUN. PACKAGES = "" breaks buildhistory's postfunc, and
-#    do_package*[noexec] breaks image builds: oe.package_manager walks
-#    do_rootfs's dependencies for do_package_write_ipk edges and demands an
-#    sstate manifest for each.
-```
-
-### The rootfs.img injection route: debugfs, no root, no loop mount
-
-The trick `android-system-image-tissot.bb` and `-mido-halium.bb` use to patch
-images at build time works for a whole module tree:
-
-- Write to **`/usr/lib/modules/<kver>`**, not `/lib/modules`. The rootfs is
-  usrmerged - `/lib` is a *symlink* - and debugfs does not resolve paths through
-  symlinks.
-- debugfs has no `mkdir -p` and no recursive put: walk the tree and emit one
-  `mkdir` per directory, parents first.
-- `write` refuses to overwrite, so emit `rm` before each `write` to stay
-  idempotent.
-- debugfs stamps the invoking uid/gid; follow each write with
-  `sif <path> uid 0`, `gid 0`, `mode 0100644`.
-- Run `depmod -b <staging>` on the host so the image gets a real `modules.dep`
-  and `modprobe` works on device.
-- Drop a `/etc/modules-load.d/<device>.conf` in as well - the generic rootfs
-  already has `systemd-modules-load.service`, so no unit is needed.
-- Expected noise to filter: `File not found` from the pre-emptive `rm` on a
-  first run, `already exists` from `mkdir` on a re-run, and (below 5.2)
-  `depmod: could not open modules.builtin.modinfo`, which landed in 5.2.
-
-### The deployed modules tarball is not stripped
-
-Do not feed `modules-<machine>.tgz` from `tmp/deploy` into the injector. `kernel.bbclass`
-builds it with
-
-```
-tar $TAR_ARGS -cv -C ${D}${root_prefix} lib | gzip -9n > $deployDir/modules-….tgz
-```
-
-from **`${D}`**, the pre-strip install tree. OE's stripping happens later in
-`do_package` against `${PKGD}`, so the split package `kernel-module-<name>-<kver>`
-has the stripped copy while the deploy tarball keeps full debug info. On athena
-that is **330,879,592 B vs 9,115,216 B** for the same `wlan.ko`, against ~700 MB
-free in the rootfs.
-
-This is upstream behaviour on every machine, not a recipe bug. Repack from
-`packages-split/kernel-module-*` instead, and guard the injector with a
-`readelf -S … | grep .debug_info` check - a host `strip` cannot help you
-(`Unable to recognise the architecture of the input file`).
+Which route when (initramfs or rootfs injection), where the modules must land, and
+the packaging traps: kernel-modules.md § Building and shipping your own modules.
 
 ---
 

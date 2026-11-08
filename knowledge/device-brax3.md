@@ -87,7 +87,7 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
   helper, uevent helper, bluez/vhci, Waydroid binders, netfilter/PPP/L2TP), all
   stock-off except `VETH`, `PPP`, `L2TP`, `BT_RFCOMM`, `BT_HIDP`, which stock
   already has. `CONFIG_CMDLINE` = stock + `cgroup.memory=nokmem console=tty0` +
-  the cgroup-v1 pair; no `selinux=0` (kernel-porting.md § selinux=0). Every
+  the cgroup-v1 pair; no `selinux=0` (kernel-config.md § selinux=0). Every
   fragment line verified present in the resulting `.config`.
 - **Iode vs BaseOS — two machines, one kernel tree:** the two module sets share
   3,832 imported symbols with **0 CRC differences** and the same

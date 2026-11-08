@@ -24,7 +24,7 @@ assumed.**
 - A11/A12: generic ramdisk in `boot`.
 - **A13+ launch devices: `boot` = GKI kernel only; the generic ramdisk moved to
   `init_boot`.** LuneOS replaces both (the stock GKI config is not sufficient, see
-  kernel-porting.md) and leaves `vendor_boot` stock.
+  kernel-config.md § The config delta) and leaves `vendor_boot` stock.
 - **v1 has no dtb section.** v1 adds only the `recovery_dtbo` fields to v0, so a v1
   image carries its device tree appended to the kernel (`Image.gz-dtb`).
   `kernel_android.bbclass` once split the appended FDT off a v1 kernel and then wrote it
@@ -85,7 +85,7 @@ device (a stock ROM, or another distro's port) proves its offsets on that
 bootloader. Moving `ramdisk_offset` up to buy room replaces a verified address with
 an unverified one — a bad trade while a boot failure is already being debugged.
 Shrink the image instead: trim the appended device trees first (usually the biggest
-and most pointless chunk — see kernel-porting.md), then `CONFIG_IKHEADERS`,
+and most pointless chunk — see soc-qualcomm.md § The appended-DTB glob trap), then `CONFIG_IKHEADERS`,
 `CONFIG_KALLSYMS_ALL`, vendor debug loggers. `CONFIG_DEBUG_INFO` is a red herring:
 it lives in `vmlinux`, not in `Image`. On surya those two levers alone took the
 LuneOS kernel inside a window its own vendor kernel overruns (see device-surya.md).
@@ -228,9 +228,9 @@ modules at all (`mount_kernel_modules` is a no-op) — fine on sargo where stora
 is built-in, **fatal on GKI devices** (UFS driver is a module). First attempt
 insmod'd `/lib/modules/modules.load` in list order → kernel panic
 (`exynos4_timer_resources: unable to determine tick clock rate`): `clk_exynos_gs`
-at line 15 needs symbols from `cmupmucal` at line 45. **`modules.load` is NOT
-dependency-ordered** — stock init resolves deps via modules.dep
-(libmodprobe, `load_modules_parallel=true`). v2 made repeated passes over the
+at line 15 needs symbols from `cmupmucal` at line 45: **`modules.load` is NOT
+dependency-ordered** (kernel-modules.md § `modules.load` is a list, not a dependency
+order). v2 made repeated passes over the
 remaining list until a pass makes no progress (bluejay: 88/203, 37/115, 26/78),
 logging per-pass progress to kmsg and WARNING any module that never loaded
 (never silence insmod errors with 2>/dev/null — that hid the diagnosis). Also:
@@ -281,7 +281,7 @@ fallback, warn to kmsg if neither yields a size.
 Same image + cmdline `enable_adb` → init panics into the initramfs debug shell. Where
 the bootloader keeps the header cmdline, the debug image carries `enable_adb` there
 (`ANDROID_BOOTIMG_DEBUG_CMDLINE`, `gki_bootimg.bbclass`); where it drops or mangles it
-(kernel-porting.md § The kernel command line), the debug image is a kernel rebuilt with
+(kernel-config.md § The kernel command line), the debug image is a kernel rebuilt with
 `enable_adb` in `CONFIG_CMDLINE` (`LUNEOS_ENABLE_ADB=1`: sargo, sunfish, radon).
 **Unresolved:** bluejay's file says the Pixel bootloader drops unrecognised header
 arguments, yet the bluejay/panther debug images rely on header `enable_adb`; whether that

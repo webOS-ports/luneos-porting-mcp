@@ -2,7 +2,7 @@
 
 Samsung Galaxy A3 (2015) SM-A300FU (`a3-2015-halium`), 32-bit MSM8916, Tier B on the halium_arm 16.0 GSI via lk2nd: UI, modem, Wi-Fi, BT, audio, camera work.
 
-A 2015 phone running the LineageOS 18.1 vendor (VNDK 30) of vlw's a3lte trees under the generic `halium_arm` 16.0 GSI, booted through lk2nd; kept next to the mainline machine `a3-2015`. Almost every fault was a generic gap this combination exposed: a 3.10 kernel too old for the GSI's assumptions (kernel-porting.md § Legacy 3.x kernels), a Samsung bootloader that boots into charger mode after every hard reset, a HAL1 camera, and the first VNDK 30 vendor in the legacy set (soc-qualcomm.md § Legacy Qualcomm vendors on the 16.0 GSI).
+A 2015 phone running the LineageOS 18.1 vendor (VNDK 30) of vlw's a3lte trees under the generic `halium_arm` 16.0 GSI, booted through lk2nd; kept next to the mainline machine `a3-2015`. Almost every fault was a generic gap this combination exposed: a 3.10 kernel too old for the GSI's assumptions (kernel-build.md § Legacy 3.x kernels), a Samsung bootloader that boots into charger mode after every hard reset, a HAL1 camera, and the first VNDK 30 vendor in the legacy set (soc-qualcomm.md § Legacy Qualcomm vendors on the 16.0 GSI).
 
 ## Status (as of 8 Oct 2026)
 
@@ -43,8 +43,8 @@ Patches:
 - `ARM: uaccess: keep put_user()'s value in r2`: GCC 15 put a constant in r3 and the `__asmeq` check stopped the build.
 - Backport of upstream 790756c7e022 (Solaris-style `.section` flags current binutils rejects).
 - `power: rt5033: stop flooding the kernel log on every property read`: journald fed on the gauge's per-read register dumps and never finished starting.
-- `ARM: raise COMMAND_LINE_SIZE to 2048`: CONFIG_CMDLINE + boot image cmdline + the 775 bytes the SBL passes through lk2nd overflowed 1024; everything after `lcd_id` was lost (`androidboot.baseband`, `androidboot.mode`, `androidboot.serialno`, `mdss_mdp.panel`). Rule and tell: kernel-porting.md § Legacy 3.x kernels.
-- `net: ipc_router: let group net_raw bind without paranoid networking`: `luneos.cfg` has `ANDROID_PARANOID_NETWORK` off (copied from sm-t520); the vendor `rmt_storage` drops to `setgid(AID_NET_RAW)` (3004) + `setuid(9999)` keeping only CAP_BLOCK_SUSPEND and relies on paranoid networking to pass the IPC router's bind check ("msm_ipc_router_bind: rmt_storage Do not have permissions"). Fixed by accepting group net_raw in `net/ipc_router/ipc_router_security.c` `check_permissions()` (kernel-porting.md § Config facts from the other distros).
+- `ARM: raise COMMAND_LINE_SIZE to 2048`: CONFIG_CMDLINE + boot image cmdline + the 775 bytes the SBL passes through lk2nd overflowed 1024; everything after `lcd_id` was lost (`androidboot.baseband`, `androidboot.mode`, `androidboot.serialno`, `mdss_mdp.panel`). Rule and tell: kernel-build.md § Legacy 3.x kernels.
+- `net: ipc_router: let group net_raw bind without paranoid networking`: `luneos.cfg` has `ANDROID_PARANOID_NETWORK` off (copied from sm-t520); the vendor `rmt_storage` drops to `setgid(AID_NET_RAW)` (3004) + `setuid(9999)` keeping only CAP_BLOCK_SUSPEND and relies on paranoid networking to pass the IPC router's bind check ("msm_ipc_router_bind: rmt_storage Do not have permissions"). Fixed by accepting group net_raw in `net/ipc_router/ipc_router_security.c` `check_permissions()` (kernel-config.md § Config facts from the other distros).
 - The tenderloin "mm: add MemAvailable to /proc/meminfo" commit, cherry-picked: without it memorymanager refused every launch ("Failed to reclaim required memory").
 - `BT_HCIVHCI` and `RFKILL` in `luneos.cfg`.
 - Debug aids still on the branch (lk2nd ramoops region and console copy, initcall trace, boot-progress bands painted into the splash framebuffer); bring-up only, to drop before release.

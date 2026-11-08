@@ -87,12 +87,12 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   boot and shutdown — net_prio's `cgrp_css_online()` takes rtnl under cgroup_mutex,
   connmand holds rtnl in `ccmni_close()` waiting on an "events" work item, and every
   events kworker waits on cgroup_mutex in `cgroup_bpf_release()`; PID 1 then blocks
-  in `proc_cgroup_show` (kernel-porting.md § The kernel command line).
+  in `proc_cgroup_show` (kernel-config.md § The kernel command line).
 - **Own module in the initramfs:** the patched `mediatek-drm.ko` (stripped; 37 MB
   unstripped against the vendor's 5.8 MB) is installed at the vendor's own path,
   `lib/modules/`, so the later cpio entry replaces the vendor's copy in the concatenated
   ramdisk (a module packaged under `/usr/lib/modules` needs `stage_our_kernel_modules()`
-  instead: kmi-crc-matching.md § Building and shipping your own modules); `load_kernel_modules()` then
+  instead: kernel-modules.md § Building and shipping your own modules); `load_kernel_modules()` then
   loads it in the vendor's order. `/override/modules` cannot be used: it runs before
   the vendor set and `mediatek-drm` imports 487 symbols from vendor modules.
 
@@ -240,7 +240,7 @@ daylight needs less light, not more. lk lights the frontlight fully for its logo
 | `Charging:false` on the cable | mt6375 reports `online=2` | nyx-modules `919ab0c` |
 | Compositor spins on DRM master | charger-mode boot (`bootreason=usb`); Android's `charger` holds master; `QT_QPA_FORCE_HWC2` lost to an `export` prefix (systemd ignores `export` lines in `EnvironmentFile=`) | `/system/bin/charger` in `DISPLAY_CONFLICT_MATCH` (the meta-luneos copy of `start-android-hals.sh` is the one that ships), generator writes plain `KEY=VALUE` |
 | Compositor never starts | patched display driver needed by the vendor hwcomposer | own `mediatek-drm.ko` (Kernel) |
-| No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm` (hal-userspace.md § Vendor kernel modules) |
+| No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm` (kernel-modules.md § The vendor_dlkm set) |
 | Sound card never registers | `mt6789-mt6366` defers (`snd_soc_register_card fail -517`) until `mtk-btcvsd` (component `mtk-btcvsd-snd`) loads; found via `/sys/kernel/debug/devices_deferred`, `asoc/components` and the machine node's phandles in a pulled `/proc/device-tree` | load `mtk-btcvsd` (hal-userspace.md § Audio) |
 | pulseaudio crash | vendor `libnvram.so` needs VNDK 31 `libbase` (`android::base::Basename`) | `deviceinfo_hybris_prefer_vndk="1"`, proven first with `systemctl set-environment HYBRIS_PREFER_VNDK=1` |
 | Audio slightly off | HAL DL paths at 48 kHz | `deviceinfo_audio_sample_rate="48000"` |

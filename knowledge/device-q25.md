@@ -6,7 +6,7 @@ The first MediaTek Tier A target and the first LuneOS port onto a square screen
 (3.5" 720x720, physical QWERTY and trackpad). It produced the method's sharpest
 correction: **"GKI device" does not imply "an ACK kernel will do"** — MT6789 ships
 MediaTek's *mgk* GKI derivative, an ACK build failed 344 of 344 stock vendor modules,
-and the device's own tree failed 0 (kernel-porting.md § Step 1: Check that the stock
+and the device's own tree failed 0 (kernel-build.md § Step 1: Check that the stock
 kernel really is GKI). Also the device behind "vermagic must match exactly when
 busybox insmod loads the storage modules" (kmi-crc-matching.md § Step 0 — ask the
 modules, they know) and "MACHINE_FEATURES-gated packages never reach the generic
@@ -111,7 +111,7 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   rebuild.
 - **Command line:** `CONFIG_CMDLINE` carries what LuneOS needs (`console=tty0`, the
   cgroup-v1 pair; it also still carries `selinux=0`, see Open issues), because MediaTek's G99 lk drops the first 20
-  characters of the boot-image cmdline (kernel-porting.md § The kernel command
+  characters of the boot-image cmdline (kernel-config.md § The kernel command
   line). `ANDROID_BOOTIMG_CMDLINE` is `????????????????????log_buf_len=4M
   printk.devkmsg=on cgroup_disable=net_prio`; `net_prio` is disabled to pre-empt the
   deadlock measured on the MP01 (device-mp01.md § Kernel).
@@ -122,7 +122,7 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   loads in the vendor's `modules.load` order (it is line 129 of 160). Look for
   `initrd: installed 1 of our own kernel modules over the vendor's` in kmsg. The
   module cannot be swapped on a running device: `rmmod bbqX0kbd` takes the kernel
-  down. Rules: kmi-crc-matching.md § The initramfs route.
+  down. Rules: kernel-modules.md § The initramfs route.
 - **Not shipping the vendor's modules wholesale:** the CRCs already match 344/344,
   so nothing is gained, and on the MP01 (same SoC) embedding the 180 vendor_boot
   modules left lk no longer starting our init (device-mp01.md § Rejected paths).
@@ -133,10 +133,10 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   wins, and our module carries the stock binary's 43 text symbols. Mali's sibling
   Makefiles name `mali_mgm_$(MTK_PLATFORM_VERSION)` / `mali_prot_alloc_...` from an
   unexported variable, which produced `mali_mgm_.ko`; the recipe passes
-  `MTK_PLATFORM_VERSION=mt6789` (kmi-crc-matching.md § The initramfs route).
+  `MTK_PLATFORM_VERSION=mt6789` (kernel-modules.md § The initramfs route).
 - **5.10 kbuild traps** (`CROSS_COMPILE` for clang's target, `LLVM_IAS=1`,
   `PYTHON=python3`, `CROSS_COMPILE_COMPAT`) were found here and are general:
-  kernel-porting.md § 5.10 kbuild gotchas.
+  kernel-build.md § 5.10 kbuild gotchas.
 
 ### Rejected path: ACK android12-5.10
 
@@ -368,7 +368,7 @@ telephony dies once and stays dead, but it would need moving to meta-android.
   `grep -h '^N: Name' /proc/bus/input/devices`.
 - Re-tune "Lineout Volume" on a Q25 whose speaker works.
 - Record the wifi, BT, modem, camera and charging results.
-- `luneos.cfg`'s `CONFIG_CMDLINE` still carries `selinux=0`, against kernel-porting.md
+- `luneos.cfg`'s `CONFIG_CMDLINE` still carries `selinux=0`, against kernel-config.md
   § selinux=0: do not pass it on a Halium port; drop it and rely on
   `androidboot.selinux=permissive`.
 - Battery: if the phone powers off within a minute on a charger, check

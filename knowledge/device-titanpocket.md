@@ -64,7 +64,7 @@ LuneOS commits on the branch:
 | 0007 `cmdq_pkt_get_curr_buf_va` returns `NULL`, not `-ENOMEM` | real bug: a `void *` function returning `-ENOMEM` |
 | later | CP2166 backlight inversion; Sunwave fingerprint driver v2.2.38 (from Teracube; `CONFIG_SUNWAVE_FP=y`) with sensor detection enabled for TrustKernel phones as stock has it; ov16880 (from TheKit's Titan branch) and ov8865 (from Teracube) with the ov16880 EEPROM entry and the rear camera's AVDD on its GPIO-switched regulator as stock; the Pocket's own AW9523 key matrix (read from the stock kernel) and Fn as Ctrl |
 
-Config: `luneos.cfg` (the standard delta, kernel-porting.md § The config delta) plus
+Config: `luneos.cfg` (the standard delta, kernel-config.md § The config delta) plus
 `CONFIG_FRAME_WARN=4096` (GCC gives `mtk_battery_core.c` a 2144-byte frame) and
 `CONFIG_DEBUG_INFO` off. `titanpocket_defconfig` names `ov16880_mipi_raw` and `ov8865_mipi_raw`,
 which the base tree did not contain (it ships only `gc02m0`, `gc2375h`, `gc5035`); patch 0010

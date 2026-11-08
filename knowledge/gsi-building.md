@@ -125,6 +125,9 @@ below); `20261007-1` and its successors carry v27 to v34 (the mindphone recipe).
 `/system/system_ext/apex/com.android.vndk.v<N>`; check a candidate GSI with
 `debugfs -R "ls /system_ext/apex" system.img`.
 
+For the oldest generation: the Halium 9 GSI requires an **Android 9 vendor** as its
+base; Android 8.0/8.1 vendors are only "experimental" (UBports porting-notes).
+
 ## Building a 32-bit `halium_arm` GSI
 
 Needed for devices with 32-bit stock userland (mindphone: MT6739, 64-bit SoC running a 32-bit 4.14 kernel + 32-bit userland, `bootopt=64S3,32S1,32S1`).

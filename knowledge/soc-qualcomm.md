@@ -6,7 +6,8 @@ Ports: a3-2015-halium (MSM8916, 3.10, 32-bit, lk2nd), bullhead-halium (MSM8992, 
 vince-halium (MSM8953, 4.9), sargo (SDM670, 4.9), fajita (SDM845, 4.9), athena (SDM660,
 4.19), sunfish (SM7150-AB, 4.14), surya (SM7150-AC, 4.14), bramble (SM7250, 4.19). The
 generic method stays in the component topics (boot-images.md, installing.md,
-kernel-porting.md, kmi-crc-matching.md, hal-userspace.md, gsi-building.md); this file holds
+kernel-config.md, kernel-build.md, kernel-modules.md, kmi-crc-matching.md, hal-userspace.md,
+gsi-building.md); this file holds
 what is Qualcomm-only.
 
 ## Boot chain: aboot, ABL, lk2nd
@@ -22,7 +23,7 @@ what is Qualcomm-only.
 - **What ABL does with the header cmdline**: Pixel ABL (SDM670, SM7150) drops unrecognised
   arguments, so an `enable_adb` in the header never arrives and the debug image is a kernel
   rebuild with `LUNEOS_ENABLE_ADB=1` in `CONFIG_CMDLINE` (sargo, sunfish; fajita builds its
-  debug image the same way). The per-bootloader table is in kernel-porting.md § The kernel
+  debug image the same way). The per-bootloader table is in kernel-config.md § The kernel
   command line; the open question about bluejay is in boot-images.md § Debug images.
 - **AVB on an unlocked ABL reports without enforcing** (sargo flashes no vbmeta:
   `androidboot.vbmeta.device_state=unlocked`, `verifiedbootstate=orange`). LineageOS
@@ -129,7 +130,7 @@ lk2nd): device-a3-2015-halium.md.
   surya, bullhead), or the port builds its own `wlan.ko` (athena). Where the vendor has a
   set, `init.insmod.<hw>.cfg` loads it in the vendor's order, and its `enable|<sysfs path>`
   lines are what start the DSPs (sunfish; device-sunfish.md § Kernel).
-- **`ANDROID_PARANOID_NETWORK` and `ipc_router`**: kernel-porting.md § Config facts from the
+- **`ANDROID_PARANOID_NETWORK` and `ipc_router`**: kernel-config.md § Config facts from the
   other distros (unresolved there).
 
 ### The appended-DTB glob trap (CAF arm64 trees)
@@ -289,7 +290,7 @@ GSI. The derive-time checks are in gsi-building.md § Before deriving; the per-s
   (meta-luneos) writes it when there is no `/dev/wlan` and the `cnss` platform driver is bound. Scans
   then work but every connect to a PMF-capable AP fails after 5 s (`connection failed with <bssid>
   result:70 and Status:9` = `eCSR_ROAM_RESULT_SCAN_FOR_SSID_FAILURE`, `CTRL-EVENT-ASSOC-REJECT`):
-  kernel-porting.md § Legacy 3.x kernels has the cause and the one-line fix.
+  kernel-build.md § Legacy 3.x kernels has the cause and the one-line fix.
 
 ### Adreno 4xx on a 3.10 kgsl: Chromium's low-4GB reservation
 

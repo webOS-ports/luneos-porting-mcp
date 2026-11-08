@@ -2,7 +2,7 @@
 
 BlackBerry KEY2 (`athena`, BBF100-8), Qualcomm SDM660, Tier B on a 4.19 kernel and a LineageOS 22 (A15) vendor; boots to the lock screen.
 
-The first SDM660 / BlackBerry target. A 4.19 kernel forked to `shr-distribution/linux` branch `key2/4.19` builds under Yocto with GCC 15; an Android 15 vendor serves the Halium 16 GSI with no VNDK work, provided the vendor was built for the same kernel generation (kmi-crc-matching.md § Step 0). Worth reading for the boot-image window (boot-images.md § The kernel/ramdisk window — a build-time invariant), a `selinux=0` mount failure (kernel-porting.md § selinux=0: do not pass it on a Halium port) and a splash that never clears, even on a working boot.
+The first SDM660 / BlackBerry target. A 4.19 kernel forked to `shr-distribution/linux` branch `key2/4.19` builds under Yocto with GCC 15; an Android 15 vendor serves the Halium 16 GSI with no VNDK work, provided the vendor was built for the same kernel generation (kmi-crc-matching.md § Step 0). Worth reading for the boot-image window (boot-images.md § The kernel/ramdisk window — a build-time invariant), a `selinux=0` mount failure (kernel-config.md § selinux=0: do not pass it on a Halium port) and a splash that never clears, even on a working boot.
 
 ## Status (as of 27 Sep 2026)
 
@@ -43,7 +43,7 @@ Hardware-verified on a BBF100-8 unless marked otherwise.
 
 ## Kernel
 
-Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2-athena`: 4.19.325 with an in-kernel Athena device tree (`sdm660-bbry-athena.dtsi`, camera dtsi, the BBRY input drivers), the tree the LineageOS 23.2 device tree selects (`TARGET_KERNEL_VERSION := 4.19`). Forked as `shr-distribution/linux` `key2/4.19`; recipe `linux-blackberry-athena_git.bb`, SRCREV `bc5d2089f85ea822e1311dfb581a80c514197074` (carries the `waitid(P_PIDFD)` backport, kernel-porting.md § `pidfd_open()` without `waitid(P_PIDFD)`). Released ROMs run both generations: /e/OS is a **4.4** build (`4.4.302-Key2`, clang 19), LineageOS 22 ships **4.19.325**. `android_kernel_blackberry_sdm660` (4.4) is the fallback.
+Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2-athena`: 4.19.325 with an in-kernel Athena device tree (`sdm660-bbry-athena.dtsi`, camera dtsi, the BBRY input drivers), the tree the LineageOS 23.2 device tree selects (`TARGET_KERNEL_VERSION := 4.19`). Forked as `shr-distribution/linux` `key2/4.19`; recipe `linux-blackberry-athena_git.bb`, SRCREV `bc5d2089f85ea822e1311dfb581a80c514197074` (carries the `waitid(P_PIDFD)` backport, kernel-build.md § `pidfd_open()` without `waitid(P_PIDFD)`). Released ROMs run both generations: /e/OS is a **4.4** build (`4.4.302-Key2`, clang 19), LineageOS 22 ships **4.19.325**. `android_kernel_blackberry_sdm660` (4.4) is the fallback.
 
 **Toolchain.** The tree had only ever been built with clang; GCC 15 + GNU Make 4.4 needed the fixes in soc-qualcomm.md § Building a 4.19 CAF tree with a modern GCC and Make. Seven findings were real bugs in code LineageOS ships, fixed at source:
 
@@ -62,13 +62,13 @@ Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2
 - `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="vendor/qcom/sdm660-internal-codec-mtp-athena"` with `CONFIG_IMG_GZ_DTB=y`. tim-ecoder's boot Makefile ignored that knob and appended every dtb (soc-qualcomm.md § The appended-DTB glob trap); the built image now carries one.
 - `# CONFIG_IKHEADERS is not set`, `# CONFIG_KALLSYMS_ALL is not set`, `# CONFIG_FB_MSM_MDSS_XLOG_DEBUG is not set`, no ISO9660/UDF: size levers for the window (§ Boot image). `IKCONFIG` stays, so mer-kernel-check can run on `/proc/config.gz`.
 - `# CONFIG_ARM64_USE_LSE_ATOMICS is not set`, to match the reference ROMs; it fixed nothing (soc-qualcomm.md § LSE atomics on ARMv8.0 SoCs). The same tree logs `can't patch jump_label` (`kernel/jump_label.c:385 __jump_label_update`) on every boot, working or not.
-- `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE` does not exist on this tree: it carries a backported 5.x LSM framework (kernel-porting.md § Fragment traps).
+- `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE` does not exist on this tree: it carries a backported 5.x LSM framework (kernel-config.md § Fragment traps).
 - `NETCONSOLE`/`NETCONSOLE_DYNAMIC` are on; safe here only because no prebuilt vendor network module loads (`wlan.ko` is ours). `FRAMEBUFFER_CONSOLE` is on and does nothing (§ Subsystem notes). `CONFIG_USB_CONFIGFS_ACM` is not in the defconfig, so the ACM console never appears; the gadget is RNDIS-only.
 - **No pstore at all**: `CONFIG_PSTORE=n` in all four kernels inspected and no ramoops DT node. With no UART and no fbcon, a failure before the initramfs is mute. A ramoops node + `PSTORE_RAM` is the fix, but needs a carefully chosen reserved-memory region.
 
 **Watchdog:** the Qualcomm watchdog driver is built in, and `CONFIG_QCA_CLD_WLAN=m` is the only module, so no boot step depends on a module load.
 
-**Modules.** LineageOS 22 v1.21a ships `/vendor/lib/modules/wlan.ko`, but even with vermagic patched from `...-perf-g888495ee4a66` to ours it fails `disagrees about version of symbol module_layout`, and `CONFIG_MODULE_FORCE_LOAD` is not set. `wlan.ko` is built from the in-tree qcacld-3.0 and injected into `rootfs.img` (kmi-crc-matching.md § The rootfs.img injection route).
+**Modules.** LineageOS 22 v1.21a ships `/vendor/lib/modules/wlan.ko`, but even with vermagic patched from `...-perf-g888495ee4a66` to ours it fails `disagrees about version of symbol module_layout`, and `CONFIG_MODULE_FORCE_LOAD` is not set. `wlan.ko` is built from the in-tree qcacld-3.0 and injected into `rootfs.img` (kernel-modules.md § The rootfs.img injection route).
 
 **Kernel cmdline fixes that got it booting**, in order:
 
@@ -112,7 +112,7 @@ deviceinfo_bootimg_header_version="0"         deviceinfo_bootimg_qcdt="false"
 deviceinfo_kernel_cmdline="… selinux=0 console=tty0 …"
 ```
 
-`second` is `0x00f00000` there and `0x00000000` in the real athena image; `second_size` is 0 either way. Do not copy their `selinux=0` (kernel-porting.md § selinux=0).
+`second` is `0x00f00000` there and `0x00000000` in the real athena image; `second_size` is 0 either way. Do not copy their `selinux=0` (kernel-config.md § selinux=0).
 
 **The window.** `0x01000000 - 0x8000 = 16,744,448 B`. The first image was **24.9 MB** — a genuine violation, fixed — and the first flash hung at the splash. That the overrun caused the hang was never verified: the splash never clears on this device, and the 24.9 MB image was never retested once that was known. 8.07 MB of it was 27 appended device trees, 26 for other sdm630/sda630 boards. Levers, in order:
 
@@ -165,7 +165,7 @@ Non-A/B fastboot device. The kit's `install.sh` flashes `vendor` (the extracted 
 
 ## Subsystem notes
 
-**Display / splash.** `FRAMEBUFFER_CONSOLE=y` + `console=tty0` do not put the log on the panel: `fb0` registers (`mdss_fb_register: FrameBuffer[0] 1080x1620 registered successfully!` at 1.12 s), the console stays `colour dummy device 80x25`, and `Console: switching to colour frame buffer device` appears nowhere in 1406 lines. Ruled out in the `key2/4.19` source: `FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER` is not set; `mdss_fb_register()` uses `register_framebuffer()`; `fb_console_init()` registers the notifier at `subsys_initcall`; `DETECT_PRIMARY=y` leaves `primary_device == -1` on arm64 and should still reach takeover. Next cheap probe: `dmesg | grep -i fbcon`. The /e/OS and UBports builds carry `console=tty0` and are silent too. **The BlackBerry logo stays up in every case**, including a working boot with a live debug shell: it is not a symptom (kernel-porting.md § Framebuffer console as a Tier B debug channel).
+**Display / splash.** `FRAMEBUFFER_CONSOLE=y` + `console=tty0` do not put the log on the panel: `fb0` registers (`mdss_fb_register: FrameBuffer[0] 1080x1620 registered successfully!` at 1.12 s), the console stays `colour dummy device 80x25`, and `Console: switching to colour frame buffer device` appears nowhere in 1406 lines. Ruled out in the `key2/4.19` source: `FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER` is not set; `mdss_fb_register()` uses `register_framebuffer()`; `fb_console_init()` registers the notifier at `subsys_initcall`; `DETECT_PRIMARY=y` leaves `primary_device == -1` on arm64 and should still reach takeover. Next cheap probe: `dmesg | grep -i fbcon`. The /e/OS and UBports builds carry `console=tty0` and are silent too. **The BlackBerry logo stays up in every case**, including a working boot with a live debug shell: it is not a symptom (kernel-config.md § Framebuffer console as a Tier B debug channel).
 
 **Input.** Seven nodes; the touchscreen is not the obvious one:
 
@@ -230,7 +230,7 @@ Reaching the chip-ID switch means the part answered NCI RESET over i2c. Recognis
 - `fastboot boot` does not reproduce a load-address bug (boot-images.md § Debug images).
 - Bisect with a known-good kernel + our initramfs (`enable_adb`) before adding logging: on this device `enable_adb` panics to the debug gadget before userdata is looked up, so a missing `rootfs.img` does not affect the test. Diff the cmdlines (debugging.md § Method).
 - A journal from a bring-up session must be sliced per boot: whole-file counts showed 954 `surface-manager` and 281 `keymaster-3-0` crashes, all in boots 1 and 4 and already fixed by the vendor swap, while the live `nfcd` registration failure fired once in all thirteen boots (debugging.md § Method).
-- Never start a fragment comment line with `# CONFIG_` (kernel-porting.md § Fragment traps); it cost an hour here.
+- Never start a fragment comment line with `# CONFIG_` (kernel-config.md § Fragment traps); it cost an hour here.
 
 ## Sources
 

@@ -2,7 +2,7 @@
 
 Stage-by-stage playbook for a LuneOS GSI/GKI port that does not come up, distilled from failures hit and diagnosed on real hardware.
 
-Devices behind it: Pixel 3a (sargo), Pixel 6a (bluejay), Pixel 7 (panther), the MediaTek ports (mindphone, MP01, radon, Titan Pocket, SM-T220), BlackBerry KEY2 (athena) and Galaxy A3 (2015). Every failure mode in the core text was hit on hardware and diagnosed; the fixes named are the ones that shipped. Material from the UBports, Droidian and SFOS porting guides is attributed inline — that is other distros' documented experience, not LuneOS-verified, and SFOS-derived command spellings were extracted from summarized pages, so check the cited source if one fails. Work through the stages in order: each stage's failures are only visible once the previous one is cleared, and several of these bugs hide behind one another. HAL and subsystem detail lives in hal-userspace.md; kernel config and module-loading rules in kernel-porting.md and kmi-crc-matching.md; boot-image construction and the initramfs init patches in boot-images.md.
+Devices behind it: Pixel 3a (sargo), Pixel 6a (bluejay), Pixel 7 (panther), the MediaTek ports (mindphone, MP01, radon, Titan Pocket, SM-T220), BlackBerry KEY2 (athena) and Galaxy A3 (2015). Every failure mode in the core text was hit on hardware and diagnosed; the fixes named are the ones that shipped. Material from the UBports, Droidian and SFOS porting guides is attributed inline — that is other distros' documented experience, not LuneOS-verified, and SFOS-derived command spellings were extracted from summarized pages, so check the cited source if one fails. Work through the stages in order: each stage's failures are only visible once the previous one is cleared, and several of these bugs hide behind one another. HAL and subsystem detail lives in hal-userspace.md; kernel config, build and module-loading rules in kernel-config.md, kernel-build.md, kernel-modules.md and kmi-crc-matching.md; boot-image construction and the initramfs init patches in boot-images.md.
 
 **The install/boot model these stages assume:** `fastboot flash vbmeta --disable-verity --disable-verification` where the stock vbmeta chains `boot`, our `boot.img` (and `init_boot.img` on A13-launch devices), stock `vendor_boot`/`vendor`/`super` untouched, `rootfs.img` + `android-rootfs.img` (the Halium GSI system image) as files inside an unencrypted ext4 `userdata`. The LuneOS initramfs loop-mounts `rootfs.img` as `/`, and the Android container mounts the GSI at `/android` with the device's real `/vendor` bound in.
 
@@ -30,7 +30,7 @@ Anything in the first list that touches **early boot** — console drivers, netc
 | vendor kernel + your ramdisk → hangs | "the ramdisk is at fault" — **wrong on its own** |
 | your kernel + vendor ramdisk → hangs | both hang ⇒ the common factor is *your* kernel |
 
-The cheapest kernel-vs-userspace separator is to take the stock (or LineageOS recovery) boot image and replace only the kernel. That is **not** a single-variable test: the donor brings its own command line, load addresses and page size. **Diff the two `Kernel command line:` lines before concluding anything.** A swap once "proved the kernel fine" only because the donor's cmdline lacked the `selinux=0` that was the whole bug (found on athena; see device-athena.md, and kernel-porting.md § selinux=0: do not pass it on a Halium port). Caveats:
+The cheapest kernel-vs-userspace separator is to take the stock (or LineageOS recovery) boot image and replace only the kernel. That is **not** a single-variable test: the donor brings its own command line, load addresses and page size. **Diff the two `Kernel command line:` lines before concluding anything.** A swap once "proved the kernel fine" only because the donor's cmdline lacked the `selinux=0` that was the whole bug (found on athena; see device-athena.md, and kernel-config.md § selinux=0: do not pass it on a Halium port). Caveats:
 
 - A passing swap shows only that the kernel is not *unconditionally* broken under the donor's cmdline; only a failing swap is conclusive on its own.
 - Strip cmdline tokens fatal to your kernel version (`swiotlb=1` is harmless on a 4.4 stock kernel and hangs a 4.19 before any console exists).
@@ -198,7 +198,7 @@ The init fixes below are described in full in boot-images.md § Init patch histo
 
 ### 1.1 Module load order — `modules.load` is not dependency-ordered
 
-On GKI devices the vendor's early modules (from `vendor_boot` or `vendor_kernel_boot`) land in `lib/modules` of the merged initramfs, and our init must load them (fatal where even UFS is a module). `modules.load` is a list, not an order: stock init resolves `modules.dep` per entry. One-pass insmod in list order left `clk_exynos_gs` (line 15) without its exporter `cmupmucal` (line 45) → no clocks → power domains deferred → `deferred probe timeout` wall → MCT timer panic at 11.5 s (bluejay). Check any device's set host-side with `module-order.py` (tools.md). Never silence insmod errors with `2>/dev/null` — that hid the `Unknown symbol cal_clk_* (err -2)` diagnosis.
+On GKI devices the vendor's early modules (from `vendor_boot` or `vendor_kernel_boot`) land in `lib/modules` of the merged initramfs, and our init must load them (fatal where even UFS is a module). Symptom of loading them in list order: no clocks, power domains deferred into the `deferred probe timeout` wall, MCT timer panic at 11.5 s (bluejay). Cause and rule: kernel-modules.md § `modules.load` is a list, not a dependency order; check any device's set host-side with `module-order.py` (tools.md).
 
 ### 1.2 Module cmdline parameters are not passed to loadable modules
 
@@ -269,7 +269,8 @@ with a recipe installing the extracted `.ko` plus `modules.load`/`.dep`/`.softde
 (+5.5 MB) made MediaTek lk stop starting our init at all, silently (found on mp01; see
 device-mp01.md). If the concatenation does happen, the same files land in the same
 place. Use `install`, not `cp -a`, in `do_install`, or `do_package` dies with
-`KeyError: 'getpwuid(): uid not found: 1000'`.
+`KeyError: 'getpwuid(): uid not found: 1000'` (kernel-modules.md § A standalone kernel
+recipe: the packaging shape that works).
 
 ### 1.9 Debug mode must come *after* module loading
 
@@ -409,7 +410,7 @@ M=/android/vendor_dlkm/lib/modules; L=$(lsmod | cut -d" " -f1 | tr - _)
 while read m; do b=$(basename $m .ko | tr - _); echo "$L" | grep -qx "$b" || echo "$m"; done < $M/modules.load
 ```
 
-A whole subsystem missing (camera, audio) points at module loading, not the HAL — hal-userspace.md § Vendor kernel modules.
+A whole subsystem missing (camera, audio) points at module loading, not the HAL — kernel-modules.md § The vendor_dlkm set.
 
 ### Wifi
 
@@ -486,7 +487,7 @@ Node ownership, MAC address, restart order and controller quirks: hal-userspace.
 grep -B2 -A6 "Unknown HCI Command" /tmp/bt.log
 ```
 
-Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the bit bluebinder passes through (`BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`, `BLUEBINDER_LOCAL_FEATURES_MASK`) or add missing ones (`BLUEBINDER_LOCAL_COMMANDS_SET`). Test by writing the value to `/var/lib/environment/bluebinder/<x>.conf` and restarting the stack in order. A `dut_mode ... already present` debugfs warning means a second `hci0` was registered over a stale vhci left by a killed bluebinder — restart the stack in order before debugging further. A kernel reset 57 s into every boot with `BUG_ON(!sk)` in `bt_sock_reclassify_lock` is a vendor tree that stubbed `hci_sock_create()` (kernel-porting.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung)).
+Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the bit bluebinder passes through (`BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`, `BLUEBINDER_LOCAL_FEATURES_MASK`) or add missing ones (`BLUEBINDER_LOCAL_COMMANDS_SET`). Test by writing the value to `/var/lib/environment/bluebinder/<x>.conf` and restarting the stack in order. A `dut_mode ... already present` debugfs warning means a second `hci0` was registered over a stale vhci left by a killed bluebinder — restart the stack in order before debugging further. A kernel reset 57 s into every boot with `BUG_ON(!sk)` in `bt_sock_reclassify_lock` is a vendor tree that stubbed `hci_sock_create()` (kernel-build.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung)).
 
 ### Audio
 
@@ -567,7 +568,7 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Web app drawn too small / cropped | Client vs compositor size disagreement | Stage 3 window measurement |
 | Nothing from ofono/sensorfw/nfcd despite config | HAL never registered, or wrong gbinder `ApiLevel` | `binder-list`; hal-userspace.md § Before blaming AIDL |
 | AIDL HAL "missing" on an A15+ vendor | `ApiLevel` from a dated `ro.board.api_level`, or a HIDL-only daemon | hal-userspace.md |
-| Audio, camera or other subsystems dead; modules not loaded (GKI) | Container's `/vendor_dlkm` is an empty bind | module list check (Stage 4); hal-userspace.md § Vendor kernel modules |
+| Audio, camera or other subsystems dead; modules not loaded (GKI) | Container's `/vendor_dlkm` is an empty bind | module list check (Stage 4); kernel-modules.md § The vendor_dlkm set |
 | Wifi service restart-looping | modprobing a nonexistent module | is the driver built in? |
 | No wifi on MTK; `wmt_loader` errors | WMT modules not loaded, nodes not exposed, power-on not retried | soc-mediatek.md § Connectivity combo |
 | A unit never runs on one machine, nothing in the journal | Gated on `/sys/module/...` with a built-in driver | Stage 4 wifi |
@@ -580,7 +581,7 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | hal-userspace.md § Bluetooth |
 | `hci0` DOWN, "Invalid request code (56)" | Controller rejects a command it advertised | `btmon` (Stage 4) |
 | BT will not power on, `Blocked through rfkill (0x12)` | rfkill soft-block restored at boot; bluebinder's "Own hci index" is an rfkill index, not a mismatch | hal-userspace.md § Bluetooth |
-| Reset 57 s in, `BUG_ON(!sk)` in `bt_sock_reclassify_lock` | Vendor stubbed `hci_sock_create()` | kernel-porting.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung) |
+| Reset 57 s in, `BUG_ON(!sk)` in `bt_sock_reclassify_lock` | Vendor stubbed `hci_sock_create()` | kernel-build.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung) |
 | Audio pitched / tempo-shifted | pa-droid sample-rate quirk | hal-userspace.md § Audio |
 | pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | Vendor HAL needs its VNDK | `HYBRIS_PREFER_VNDK` (hal-userspace.md § Audio) |
 | PulseAudio killed ~1 s after startup, status 9 | `RLIMIT_RTTIME` on SCHED_RR sink threads | `signal_generate` trace |
@@ -607,7 +608,7 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Bluetooth: `BluetoothHci::close()` → `__throw_bad_function_call` abort loop, bluebinder times out | initialize never finished; on Qualcomm UART parts a force-started `wcnss_filter` | hal-userspace.md § Bluetooth |
 | `droid-extevdev.c: Unable to open device /dev/input/eventN … Permission denied`; headphones ignored | `pulse` not in group `input` | hal-userspace.md § Audio |
 | `kgsl_get_unmapped_area … failed error -12`; WebAppMgr's GPU thread crashes on every start | Chromium's low-4GB reservation vs a 32-bit-address Adreno | soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl |
-| Wi-Fi scans, every connect fails after 5 s with `result:70 and Status:9` (qcacld) | MFP optional vs `WIPHY_FLAG_SUPPORTS_FW_ROAM` | kernel-porting.md § Legacy 3.x kernels |
+| Wi-Fi scans, every connect fails after 5 s with `result:70 and Status:9` (qcacld) | MFP optional vs `WIPHY_FLAG_SUPPORTS_FW_ROAM` | kernel-build.md § Legacy 3.x kernels |
 | `init: Service 'lmkd' … received SIGABRT` every 5 s on a 3.x kernel | libmemevents needs BPF | soc-qualcomm.md § A LineageOS 21 vendor without VNDK |
 
 ## Tooling appendix

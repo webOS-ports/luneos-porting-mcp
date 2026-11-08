@@ -55,8 +55,10 @@ Topics (auto-discovered from `knowledge/*.md`):
 | Topic | Covers |
 |---|---|
 | `architecture` | the GSI+GKI model, Tier A/B and Tier 0/1/2, GSI↔vendor matching, device index, glossary |
-| `kernel-porting` | the kernel method: config delta, fragment traps, Tier A ACK builds, Tier B vendor trees, the command line |
-| `kmi-crc-matching` | whether a vendor `.ko` loads into your kernel: vermagic, CRCs, poison options per KMI, struct layouts, force-loading, shipping your own modules |
+| `kernel-config` | the config delta, fragment traps, poison options per KMI, debug options, the kernel command line, cross-distro config lists |
+| `kernel-build` | building the kernel: Tier A ACK per KMI, Tier B vendor trees and toolchains, legacy 3.x gaps, rebuilding one module |
+| `kmi-crc-matching` | whether a vendor `.ko` loads into your kernel: vermagic, CRCs, struct layouts, force-loading |
+| `kernel-modules` | loading modules (the vendor_dlkm set, load order, prebuilt sets) and building and shipping your own |
 | `boot-images` | header layouts, the kernel/ramdisk window, per-layout repack recipes, initramfs init patches, AVB, debug images |
 | `installing` | flash kits, vbmeta flags, flash steps per layout, other install routes (Odin; MediaTek and lk2nd point to the SoC topics), anti-rollback |
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), published releases, VNDK snapshot matrix |

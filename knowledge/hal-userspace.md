@@ -271,40 +271,11 @@ the call went to — a routing fix is far smaller than a new backend.
 (`EX_TRANSACTION_FAILED` is `-129`), which suggests a local library status
 rather than a remote reply - i.e. the call failed before reaching a remote.
 
-## Vendor kernel modules: let the vendor's init load them
+## Vendor kernel modules
 
-On GKI devices the vendor ships its own loader. MediaTek: `init.mtkgki.rc` starts
-`insmod_sh` at `early-init`, and `init.insmod.<hw>.cfg` says `modprobe|*`, i.e.
-`modprobe -a -d /vendor/lib/modules $(cat /vendor/lib/modules/modules.load)` —
-the full, ordered vendor list, exactly as on stock Android. Halium/UBports
-(`mount-android-partitions` + `mount --rbind /android` into the container rootfs)
-and Droidian (`vendor_dlkm` at the host's `/vendor_dlkm` + an
-`lxc.mount.entry = /vendor_dlkm vendor_dlkm bind`) both just make that path work
-and keep **no module list of their own**. Their initramfs loads only the
-first-stage list from `vendor_boot` (`/lib/modules/modules.load`, with
-`/override/modules.load` as a per-device override).
-
-The trap on LuneOS: `/vendor/lib/modules` is a symlink to
-`/vendor_dlkm/lib/modules`. If the host-side `/vendor_dlkm` is an *empty*
-directory (the partition was only mounted under `/android/vendor_dlkm`), the lxc
-bind puts that empty directory over the real mount inside the container, and
-`insmod_sh` silently loads nothing while still setting
-`vendor.all.modules.ready=1`. A hand-written allowlist in `mount-android.sh` then
-looked necessary, and every subsystem missing from it was dead: on the MP01 that
-was audio (`mtk-btcvsd`), and the entire camera stack (`imgsensor_isp6s`,
-`camera_isp`, `camera_mem`, the lens and flash drivers, `mtk-vcu`/`mtk_jpeg`/
-vcodec).
-
-Fixed in `mount-android.sh`: try `dynpart-<p>_a`/`_b` as well (the device-mapper
-name comes from the super metadata, not the booted slot — the MP01 boots b and
-gets `_a`), bind `/android/vendor_dlkm` and `/android/odm` onto the host paths if
-needed, and default `VENDOR_DLKM_MODULES=none`. With the vendor loader working,
-332 modules load and audio, camera, WiFi and cellular all came up in one boot.
-Check inside the container: `ls /vendor/lib/modules/modules.load`.
-
-Known hazards of the full list, still worth watching on a new device: the
-connsys family (soc-mediatek.md § Connectivity combo) and `ccci_md_all`, which once wedged PID 1 on the MP01
-(it did not with the vendor's own order).
+Let the vendor's own init load them; how its loader finds `vendor_dlkm` in the
+container, and the trap that makes it load nothing: kernel-modules.md § The
+vendor_dlkm set.
 
 ## Audio
 
@@ -517,7 +488,7 @@ layers separately: `gst-launch-1.0 filesrc ! wavparse ! ... ! pulsesink
 device=pcm_output` proves GStreamer and PulseAudio; then look at `umediaserver`.
 
 1. **`waitid(...pidfd...) failed: Invalid argument`, pooled processes "exited with
-   status -1".** The kernel lacks `waitid(P_PIDFD)` (kernel-porting.md § `pidfd_open()` without `waitid(P_PIDFD)`).
+   status -1".** The kernel lacks `waitid(P_PIDFD)` (kernel-build.md § `pidfd_open()` without `waitid(P_PIDFD)`).
 2. **`execve("/usr/sbin/reference-media-pipeline") = -1 ENOENT`** under
    `strace -f -p $(pidof umediaserver)`. The static
    `/etc/umediaserver/umediaserver_resource_config.txt` names that binary; the tree

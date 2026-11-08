@@ -41,9 +41,9 @@ Tier B, built whole from the MT6739 ALPS tree: `linux-greentouch-mindphone`,
 github.com/shr-distribution/linux branch `dnim/4.14.186` (SRCREV `06873421d`), defconfig
 `arch/arm/configs/k39tv1_bsp_1g_defconfig` + `luneos.cfg` (ported from the arm64
 `k39tv1_64_bsp_defconfig_luneos`, `CONFIG_DUMMY` kept `=y`). Platform identification and
-defconfig method: kernel-porting.md § Tier B.
+defconfig method: kernel-build.md § Tier B.
 
-- **gcc 14 / binutils 2.4x patch series** (the classes: kernel-porting.md § Old BSP vs modern
+- **gcc 14 / binutils 2.4x patch series** (the classes: kernel-build.md § Old BSP vs modern
   toolchain), as layer patches next to the recipe:
   1. `0001` obsolete `#alloc` section-flag syntax in 28 arm32 asm files (backport of upstream
      790756c7e022);
@@ -61,7 +61,7 @@ defconfig method: kernel-porting.md § Tier B.
   `QProcess::startDetached()` gets EINVAL, so luna-surfacemanager could neither
   `initctl emit lsm-ready` (no `READY=1`, a restart every 90 s, no first-use, no launcher
   icons, no maliit) nor `chgrp` its `wayland-0` socket to `compositor` (web apps got EACCES).
-  Rule: kernel-porting.md § pidfd_open() without waitid(P_PIDFD).
+  Rule: kernel-build.md § pidfd_open() without waitid(P_PIDFD).
 - **Vendor modules**: the stock WMT/wlan/BT/GPS modules CRC-mismatch the reconfigured kernel,
   so `luneos.cfg` sets `CONFIG_MODULE_FORCE_LOAD=y` and they are force-loaded
   (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe). This fragment

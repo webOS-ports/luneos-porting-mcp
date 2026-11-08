@@ -29,7 +29,7 @@ Hardware-verified by a tester on an SM-T113 unless marked otherwise.
 
 ## Kernel
 
-Community Spreadtrum tree (samsung-sc8830, branch hybris-14.1, 3.10.103) with a LuneOS delta, branch `goyavewifi/3.10/hybris-14.1` in shr-distribution/linux. What this tree lacked, in the order the logs showed it (each one a tester round; the generic list is kernel-porting.md § Legacy 3.x kernels):
+Community Spreadtrum tree (samsung-sc8830, branch hybris-14.1, 3.10.103) with a LuneOS delta, branch `goyavewifi/3.10/hybris-14.1` in shr-distribution/linux. What this tree lacked, in the order the logs showed it (each one a tester round; the generic list is kernel-build.md § Legacy 3.x kernels):
 
 | Missing | Symptom | Fix |
 |---|---|---|

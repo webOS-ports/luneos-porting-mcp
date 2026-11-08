@@ -9,7 +9,7 @@ module that will not load means no storage and no boot. The 4.19 redbull tree is
 not GKI, but the port has to keep a KMI anyway. It is the device that reached 0 of
 218 stock modules failing in three measured steps (kmi-crc-matching.md § Step 1 —
 get the vendor's real config, not its defconfig, and § Step 6 — always have a
-baseline switch), and then moved to shipping its own modules (kmi-crc-matching.md §
+baseline switch), and then moved to shipping its own modules (kernel-modules.md §
 The initramfs route).
 
 ## Status (as of 30 Sep 2026)
@@ -61,7 +61,7 @@ and the stock factory images.
   (`linux-dummy`). Set `GKI_CLANG_DIR:bramble`.
 - **Config delta:** deliberately smaller than sunfish's — it leaves out `FANOTIFY`
   and `NET_L3_MASTER_DEV` (bluejay's KMI-poison list, left out as caution only: a poison list does not transfer
-  between KMIs, kmi-crc-matching.md § Poison options). Measured: the
+  between KMIs, kernel-config.md § Poison options). Measured: the
   whole delta
   scores 0 of 218 stock modules failing, the same as the stock-config baseline, so
   nothing in it poisons this KMI. `CONFIG_MODULE_FORCE_LOAD=y` is a bisecting
@@ -77,7 +77,7 @@ and the stock factory images.
   usr/lib` symlink cannot be created over the vendor's directory. LineageOS keeps
   the 221 modules flat at `/lib/modules/*.ko`, while `modules_install` writes
   `/lib/modules/<version>/kernel/...`, so `do_install` flattens them. No bind-mount
-  is needed, unlike sunfish. Rules: kmi-crc-matching.md § The initramfs route.
+  is needed, unlike sunfish. Rules: kernel-modules.md § The initramfs route.
 
 ### Rejected paths
 

@@ -2,7 +2,7 @@
 
 LG Nexus 5X (`bullhead-halium`), MSM8992, 3.10 arm64 kernel, Tier B on the 16.0 GSI over a LineageOS 21 vendor: UI, Wi-Fi, sensors, NFC work; BT in progress.
 
-The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl).
+The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-build.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl).
 
 ## Status (as of 11 Oct 2026)
 
@@ -40,11 +40,11 @@ Reported by the remote tester on an LGH790 (bootloader BHZ11h) unless marked oth
 LineageOS 21's `kernel_lge_bullhead` (nexus5x-dev), 3.10; LuneOS branch `bullhead/3.10/lineage-21.0` in shr-distribution/linux, recipe `linux-lg-bullhead-halium` (meta-lg) with `halium_bullhead_defconfig`. The recipe lists every patch; the generic ones:
 
 - `nr_cpus=4` on the command line; arm64 smp honours it as the possible-CPU limit, lpm-levels skips the A57 cluster, and the root cpuset's `cpus_requested` is clamped to the possible CPUs (else LXC could not create its cgroups).
-- `execveat()` and `renameat2` for the arm64 glibc built for 4.9 (kernel-porting.md § Legacy 3.x kernels).
+- `execveat()` and `renameat2` for the arm64 glibc built for 4.9 (kernel-build.md § Legacy 3.x kernels).
 - No register dump for unimplemented syscalls (they filled the journal).
 - `SECURITY_ANDROID_GID_CAPABILITIES` (Halium's commits from its halium-7.1 branch), `CHECKPOINT_RESTORE`, `FANOTIFY`, `BT_HCIVHCI`, the systemd cgroup controllers; MemAvailable; ipc_router bind for group net_raw (as on the Galaxy A3).
 - `android_usb`: "ffs" taken as the first f_ffs alias (the gadget setup oopsed on the alias-less template).
-- qcacld-2.0: no `WIPHY_FLAG_SUPPORTS_FW_ROAM` (the PMF fix, kernel-porting.md § Legacy 3.x kernels).
+- qcacld-2.0: no `WIPHY_FLAG_SUPPORTS_FW_ROAM` (the PMF fix, kernel-build.md § Legacy 3.x kernels).
 - kgsl: on an SVM `-ENOMEM`, print the process's mappings below 3 GB once (the diagnostic that found the Chromium reservation; kept).
 
 ## Boot image

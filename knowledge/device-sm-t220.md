@@ -44,8 +44,8 @@ Read from the factory firmware (T220XXSAEYE4) and the running tablet.
 
 Patches:
 
-- **0002 restores `net/bluetooth/hci_sock.c`.** Samsung reduces `hci_sock_create()` to `return 0`; bluebinder's HCI socket then hits `BUG_ON(!sk)` in `bt_sock_reclassify_lock` and MediaTek's `ipanic_die()` resets the device — a "Failed to boot" panic then a reset every 77 s (57 s of it in the kernel), seen as preloader `0e8d:2000` re-enumerating. `net/bluetooth/` differed from v4.19.191 in that file only (kernel-porting.md § Vendor trees that stub out `net/bluetooth/hci_sock.c`). Evidence: `/sys/fs/pstore/console-ramoops-0`, read in TWRP right after a loop reset.
-- **0003 backports `waitid(P_PIDFD)`.** Applied to 4.19.191 with only line offsets; the 4.14 `CLONE_PIDFD` `*parent_tidptr` follow-up is not needed here because this `copy_process()` has no such check (kernel-porting.md § `pidfd_open()` without `waitid(P_PIDFD)`).
+- **0002 restores `net/bluetooth/hci_sock.c`.** Samsung reduces `hci_sock_create()` to `return 0`; bluebinder's HCI socket then hits `BUG_ON(!sk)` in `bt_sock_reclassify_lock` and MediaTek's `ipanic_die()` resets the device — a "Failed to boot" panic then a reset every 77 s (57 s of it in the kernel), seen as preloader `0e8d:2000` re-enumerating. `net/bluetooth/` differed from v4.19.191 in that file only (kernel-build.md § Vendor trees that stub out `net/bluetooth/hci_sock.c`). Evidence: `/sys/fs/pstore/console-ramoops-0`, read in TWRP right after a loop reset.
+- **0003 backports `waitid(P_PIDFD)`.** Applied to 4.19.191 with only line offsets; the 4.14 `CLONE_PIDFD` `*parent_tidptr` follow-up is not needed here because this `copy_process()` has no such check (kernel-build.md § `pidfd_open()` without `waitid(P_PIDFD)`).
 
 **Known difference from stock dtb: battery charging data.** The source tree is older than the firmware: `battery_cv` and the `jeita_temp_*_cv` values are 0x432380 (4.40 V) against stock 0x42d560 (4.38 V), `ss,cv-ranges` differ, and stock has a `gxy_battery_ttf` node. Decided by the maintainer: left as is, 4.40 V judged safe. Not a bug to rediscover.
 

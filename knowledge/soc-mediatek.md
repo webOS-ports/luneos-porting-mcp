@@ -5,7 +5,8 @@ What holds across the MediaTek ports (preloader and lk, mgk kernels, the connect
 Ports: mindphone (MT6739, 4.14, 32-bit), titanpocket (MT6771, 4.14), sm-t220 (MT8768T,
 4.19), radon (MT6877, 4.19), q25 and mp01 (MT6789 / Helio G99, mgk android12-5.10), brax3
 (MT6835 / Dimensity 6300, mgk android13-5.15). Generic method stays in the component topics
-(boot-images.md, installing.md, kernel-porting.md, kmi-crc-matching.md, hal-userspace.md);
+(boot-images.md, installing.md, kernel-config.md, kernel-build.md, kernel-modules.md,
+kmi-crc-matching.md, hal-userspace.md);
 this file holds what is MediaTek-only.
 
 ## Boot chain: preloader and lk
@@ -30,7 +31,7 @@ this file holds what is MediaTek-only.
 - **What lk does with the header cmdline is per SoC**: the MT6789 lk drops the first 20
   characters (q25, mp01 pad the front with 20 `?`); MT6877 and MT6771 pass it through
   (radon, titanpocket); MT6835 is unmeasured (brax3 pads defensively). The table is in
-  kernel-porting.md § The kernel command line. lk prints the cmdline it hands the kernel,
+  kernel-config.md § The kernel command line. lk prints the cmdline it hands the kernel,
   so expdb confirms what arrived.
 - **`os_version`**: mp01 (2099-12) and radon reproduce the stock value and never write a
   lower one; titanpocket ships a lower value than its stock image and lk boots it. The
@@ -144,13 +145,13 @@ This is MediaTek-specific in practice: on the Qualcomm and Tensor ports the watc
 - **mgk is not ACK.** A GKI boot image and `android12-5.10` in the version string do not
   make an ACK build usable: on MT6789 an ACK kernel failed 344 of 344 stock modules,
   `module_layout` included, and q25/mp01/brax3 build the device's own mgk tree
-  (kernel-porting.md § Step 1: Check that the stock kernel really is GKI).
+  (kernel-build.md § Step 1: Check that the stock kernel really is GKI).
 - **Toolchain: Google clang r416183b** (12.0.5), the stock kernel's own, on q25, mp01,
   radon and sm-t220 (sunfish and bramble use it too), through `GKI_CLANG_DIR:<machine>`.
 - **The KMI-poison list moves between MediaTek KMIs**: `CONFIG_USER_NS` on mgk
   android12-5.10 / MT6789 (q25, mp01); `CONFIG_SYSVIPC` on mgk android13-5.15 / MT6835,
   where `USER_NS` is clean and `NET_L3_MASTER_DEV` is `=y` in stock and must stay on
-  (brax3). Bisect every new KMI (kmi-crc-matching.md § Poison options: per KMI, and drift
+  (brax3). Bisect every new KMI (kernel-config.md § Poison options: per KMI, and drift
   is a max).
 - **Vermagic** comes from a `vermagic.cfg` (`CONFIG_LOCALVERSION`, `LOCALVERSION_AUTO`
   off) plus an empty `.scmversion` (q25, mp01, brax3); the sublevel comes from the
@@ -182,7 +183,7 @@ This is MediaTek-specific in practice: on the Qualcomm and Tensor ports the watc
   panicked on a mismatch (kmi-crc-matching.md § Force-loading prebuilt modules, and when it
   is safe). `CONFIG_MTK_COMBO=y` builds the combo driver in instead (radon).
 - **A 64-bit SoC can run a 32-bit kernel and userland** (`bootopt=64S3,32S1,32S1`,
-  mindphone; kernel-porting.md § Identify the platform precisely first).
+  mindphone; kernel-build.md § Identify the platform precisely first).
 
 ## Connectivity combo (WMT/connac)
 

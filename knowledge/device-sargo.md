@@ -42,12 +42,12 @@ modules, so no KMI is at stake; module signing uses a fixed key committed to the
 rebuilds.
 
 - The kernel host tools need the host C standard pinned: `unifdef.c` uses `constexpr` as an
-  identifier (kernel-porting.md § Old BSP vs modern toolchain).
+  identifier (kernel-build.md § Old BSP vs modern toolchain).
 - The stock defconfig has no `CONFIG_OVERLAY_FS`; `halium-kernel.inc` turns it on, so the
   Tier 2 overlay path is used rather than the bind-mount fallback (confirmed on the phone).
 - `MADV_WIPEONFORK` (needs ≥ 4.14) is made non-fatal in the GSI's init (blocker table below).
 - sargo is the test bed for "does anything need fanotify": `LUNEOS_TEST_NO_FANOTIFY = "1"`
-  builds the kernel without it (kmi-crc-matching.md § Does anything actually need
+  builds the kernel without it (kernel-config.md § Does anything actually need
   FANOTIFY or CGROUP_DEVICE?).
 
 ## Boot image
@@ -59,7 +59,7 @@ LuneOS initramfs + SDM670 dtb, deployed as `Image.gz-dtb-sargo.fastboot`.
 **The bootloader drops command-line arguments it does not recognise** (measured with a
 `zz.marker=1` canary), so an `enable_adb` in the boot header never reaches `/proc/cmdline`.
 The debug image is a kernel rebuild with `LUNEOS_ENABLE_ADB=1`, which puts `enable_adb` into
-`CONFIG_CMDLINE` (`make-debug-boot.sh` in the kit does it); rule: kernel-porting.md § The
+`CONFIG_CMDLINE` (`make-debug-boot.sh` in the kit does it); rule: kernel-config.md § The
 kernel command line. The same applies to `no_low_battery_hold`. With the current initramfs
 default `USB_FUNCTIONS=rndis` the debug image offers telnet (192.168.2.15, port 23), not adb;
 adb needs `adb` back in `USB_FUNCTIONS` (sargo's kernel has `USB_CONFIGFS_ECM`/`_ACM` unset).

@@ -31,23 +31,23 @@ Read from factory image `bluejay-bp4a.251205.006` (Android 16 QPR2).
 
 ## Kernel
 
-Tier A, built per KMI (kernel-porting.md § Tier A). The shipped kernel is ACK tag
+Tier A, built per KMI (kernel-build.md § Tier A). The shipped kernel is ACK tag
 `android14-6.1-2026-06_r7` (6.1.172) + `luneos_defconfig`.
 
 - **Yocto**: `meta-android/recipes-kernel/linux-halium-gki/linux-halium-gki_6.1.bb`,
-  plain kbuild with Google's prebuilt clang 17 r487747c (kernel-porting.md § Step 4).
+  plain kbuild with Google's prebuilt clang 17 r487747c (kernel-build.md § Step 4).
   `bluejay.conf` sets `GKI_BOOTIMG = "1"` and `PREFERRED_VERSION_linux-halium-gki = "6.1%"`.
 - **Kleaf**: `repo init -u https://android.googlesource.com/kernel/manifest -b
   android-gs-bluejay-6.1-android16` = `kernel/common` @ android14-6.1 (path `aosp/`) +
   ~50 `private/google-modules/*` repos + Kleaf tooling, about 10 GB. Stock validation build
   `./build_bluejay.sh --config=use_source_tree_aosp` (~7 min on 64 cores; dist has boot.img,
   dtbo, vendor_dlkm.img, all modules). The kernel-only target is the one in
-  kernel-porting.md § Step 4; a kernel-only rebuild takes ~5 min, which is what the poison
+  kernel-build.md § Step 4; a kernel-only rebuild takes ~5 min, which is what the poison
   bisect ran on. The same tree carries `private/devices/google/{gs201,pantah}` and
   `build_pantah.sh`.
 
 Config delta: stock config (from IKCONFIG) gives 23 errors / 59 warnings from
-`mer_verify_kernel_config`; the fragment carries the standard delta (kernel-porting.md §
+`mer_verify_kernel_config`; the fragment carries the standard delta (kernel-config.md §
 The config delta) plus:
 
 - **Poison list `FANOTIFY`, `NET_L3_MASTER_DEV`** — with them on, 3145 exported CRCs drift
@@ -70,7 +70,7 @@ KMI results:
 
 The factory modules (ab14305268) were built against a newer android14-6.1 tag than the
 manifest pin, and the factory kernel is yet another build (ab14219743); the rule is
-kernel-porting.md § Vendor-hook modules and the ACK tag. Pin bump:
+kernel-build.md § Vendor-hook modules and the ACK tag. Pin bump:
 `git fetch --depth=1 <remote> android14-6.1-2026-06_r7 && git checkout FETCH_HEAD` in `aosp/`.
 
 Kleaf traps on the bumped pin:
@@ -81,12 +81,12 @@ Kleaf traps on the bumped pin:
 - The full dist fails on the bumped pin: the manifest-pinned google-modules do not compile
   against 6.1.172 headers (`DWC3_LLUCTL` redefined, -Werror, in soc/gs dwc3; a VLA in
   s3c2410_wdt). Use the kernel-only output, not `out/bluejay/dist/`.
-- Option B (own vendor modules, kernel-porting.md § Option B) would be built at the
+- Option B (own vendor modules, kernel-build.md § Option B) would be built at the
   manifest-matched 6.1.124 state, where the full dist succeeds.
 
 `modules.load` is not dependency-ordered: 335 hard-dependency pairs listed backwards across
 99 modules, plus ~15 `softdep pre:` edges; the initramfs loader resolves the order up front
-(boot-images.md § Init patch history).
+(kernel-modules.md § `modules.load` is a list, not a dependency order).
 
 ## Boot image
 
@@ -105,7 +105,7 @@ and module options such as `ufs_pixel_fips140.fips_first_lba=…` and
 Shipped: `boot-bluejay-luneos.img` (~23.5 MB, header v4) = our 6.1.172 kernel + the LuneOS
 initramfs as the boot ramdisk, packed with **no kernel command line**. The Pixel bootloader
 drops boot-image arguments it does not recognise, so anything LuneOS needs belongs in
-`CONFIG_CMDLINE` (kernel-porting.md § The kernel command line). The initramfs mirrors
+`CONFIG_CMDLINE` (kernel-config.md § The kernel command line). The initramfs mirrors
 `/dev/trusty-log0` into kmsg so a Trusty panic reason survives into pstore.
 
 ## Vendor and GSI

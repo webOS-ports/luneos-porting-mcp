@@ -250,7 +250,7 @@ describes behaviour you have never actually verified.
 
 - Boot-image assembly per layout class, initramfs patches, AVB: see boot-images.md.
 - Kernel fragment content and KMI constraints (what a `deviceinfo`-driven Tier B build
-  may set that a Tier A GKI build must not): see kernel-porting.md and kmi-crc-matching.md.
+  may set that a Tier A GKI build must not): see kernel-config.md and kmi-crc-matching.md.
 - Where deviceinfo sits in the adaptation tiers (Tier 1: only what cannot be read off a
   running device): see architecture.md.
 - How the nyx keys reach the modules (`/etc/nyx.conf`): see nyx-modules.md.

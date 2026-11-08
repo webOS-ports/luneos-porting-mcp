@@ -66,6 +66,7 @@ function loadTopics() {
 // Value: the topic that now holds the content, optionally with the section.
 const TOPIC_ALIASES = {
   "device-bringup-yocto": "yocto",
+  "kernel-porting": "kernel-build",
 };
 
 // Look a topic up by name or old name. Returns { topic, movedTo } or undefined.
@@ -160,7 +161,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "luneos_get_topic",
       description:
         "Return the full markdown content of one LuneOS knowledge topic " +
-        "(e.g. 'kernel-porting', 'debugging', 'device-bluejay'). " +
+        "(e.g. 'kernel-build', 'debugging', 'device-bluejay'). " +
         "Use luneos_list_topics to see valid names.",
       inputSchema: {
         type: "object",
@@ -309,17 +310,17 @@ const PROMPTS = {
             `I want to port LuneOS to a new device${a.codename ? ` (codename: ${a.codename})` : ""}.` +
             (a.details ? ` Known details: ${a.details}.` : "") +
             "\n\nUse the luneos-mcp knowledge base. Read these topics first: architecture, " +
-            "kernel-porting, boot-images, yocto, nyx-modules, gsi-building, installing, and soc-mediatek or " +
+            "kernel-config, kernel-build, kmi-crc-matching, kernel-modules, boot-images, yocto, nyx-modules, " +
+            "gsi-building, installing, and soc-mediatek or " +
             "soc-qualcomm when the device is on one of those SoC families. " +
             "Then guide me through, in order:\n" +
             "1. Classify the device: Tier A (GKI, Android 12+/kernel 5.10+) or Tier B (legacy vendor kernel); " +
             "A12-launch vs A13-launch boot layout (init_boot or not); 32-bit vs 64-bit; anti-rollback state.\n" +
             "2. Obtain and analyze the stock images (factory zip or payload.bin), extract the kernel config " +
-            "via IKCONFIG, run mer_verify_kernel_config, and plan the config fragment. The KMI-poison " +
-            "list is per KMI and tree: re-derive it with kmi-crc-check.py, never copy another device's " +
-            "(seen so far: FANOTIFY, NET_L3_MASTER_DEV, CGROUP_DEVICE, USER_NS, SYSVIPC). CONFIG_SYSVIPC is not needed. " +
-            "If the stock IKCONFIG has DEBUG_INFO_BTF, put pahole on PATH or the config silently drops it " +
-            "and struct module changes (kmi-crc-matching § Step 5).\n" +
+            "via IKCONFIG, run mer_verify_kernel_config, and plan the config fragment (kernel-config § The config " +
+            "delta). The KMI-poison list is per KMI and tree: re-derive it with kmi-crc-check.py, never copy " +
+            "another device's (kernel-config § Poison options). If the stock IKCONFIG has DEBUG_INFO_BTF, put " +
+            "pahole on PATH or the config silently drops it and struct module changes (kmi-crc-matching § Step 5).\n" +
             "3. Build the kernel (ACK for Tier A, vendor tree for Tier B; a vendor's \"GKI\" may be a derivative " +
             "that ACK cannot match, e.g. MediaTek mgk on q25 - then build the device tree) and verify KMI with " +
             "kmi-crc-check.py before flashing anything.\n" +
