@@ -43,8 +43,8 @@ python3 kmi-crc-check.py <kernel build dir>/Module.symvers vkb-modules
 That includes `vh_mm.ko`/`vh_sched.ko` (the bumped ACK tag covers panther too). The poison
 list (`FANOTIFY`, `NET_L3_MASTER_DEV` off) transfers unchanged. `modules.load` is
 non-topological here as well: 332 hard-dependency pairs backwards across 107 of 204 modules,
-plus 15 softdep edges (`clk_exynos_gs.ko` at line 16, its exporter `cmupmucal.ko` at line 45),
-so the initramfs's dependency-resolving loader is required (kernel-modules.md §
+plus 15 softdep edges (`clk_exynos_gs.ko` at line 16, its exporter `cmupmucal.ko` at line 45)
+(kernel-modules.md §
 `modules.load` is a list, not a dependency order).
 
 ## Boot image
@@ -103,9 +103,8 @@ Pure fastboot (installing.md § Flash steps per layout class): `install.sh` flas
 ext4 with `rootfs.img` + `android-rootfs.img`) → reboot; `make-userdata.sh` rebuilds the
 userdata image. rootfs and GSI are the same files as in the bluejay kit.
 
-**Anti-rollback:** the device must be on `bp4a` or downgradable to it; never flash older
-than the installed build. A device that arrives on a newer build (cp1a/cp2a = Android 17)
-needs the factory-image analysis redone against that build (installing.md § Anti-rollback).
+**Anti-rollback:** the device must be on `bp4a` or downgradable to it; one on cp1a/cp2a
+(Android 17) needs the factory-image analysis redone (installing.md § Anti-rollback).
 
 ## Open issues
 

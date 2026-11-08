@@ -58,11 +58,10 @@ LuneOS initramfs + SDM670 dtb, deployed as `Image.gz-dtb-sargo.fastboot`.
 
 **The bootloader drops command-line arguments it does not recognise** (measured with a
 `zz.marker=1` canary), so an `enable_adb` in the boot header never reaches `/proc/cmdline`.
-The debug image is a kernel rebuild with `LUNEOS_ENABLE_ADB=1`, which puts `enable_adb` into
-`CONFIG_CMDLINE` (`make-debug-boot.sh` in the kit does it); rule: kernel-config.md § The
-kernel command line. The same applies to `no_low_battery_hold`. With the current initramfs
-default `USB_FUNCTIONS=rndis` the debug image offers telnet (192.168.2.15, port 23), not adb;
-adb needs `adb` back in `USB_FUNCTIONS` (sargo's kernel has `USB_CONFIGFS_ECM`/`_ACM` unset).
+The debug image is a kernel rebuild with `LUNEOS_ENABLE_ADB=1` (`make-debug-boot.sh` in the
+kit), as is `no_low_battery_hold` (kernel-config.md § The kernel command line). sargo's kernel
+has `USB_CONFIGFS_ECM`/`_ACM` unset, so the default gadget is RNDIS telnet (debugging.md §
+The telnet / USB-networking ladder).
 
 ## Vendor and GSI
 
@@ -121,9 +120,9 @@ port inherits:
 
 ## Install
 
-Only `boot` (the active slot) and `userdata` are touched; no vbmeta is flashed. The bootloader
-is unlocked (`androidboot.vbmeta.device_state=unlocked`, `verifiedbootstate=orange`), and in
-that state AVB reports without enforcing.
+Only `boot` (the active slot) and `userdata` are touched; no vbmeta is flashed
+(`androidboot.vbmeta.device_state=unlocked`, `verifiedbootstate=orange`; soc-qualcomm.md §
+Install and recovery).
 
 ```
 adb reboot bootloader
@@ -131,8 +130,8 @@ adb reboot bootloader
 ```
 
 Flashing the inactive slot and rebooting is a silent no-op that looks like a failed port.
-The userdata image holds `rootfs.img` + `android-rootfs.img` side by side (halium
-`file_layout`) and grows on first boot. Revert with Google's factory image. Converting sargo
+The userdata image uses the halium side-by-side layout (installing.md § Flash kits). Revert
+with Google's factory image. Converting sargo
 to a real `super` is impossible and pointless (GPT fixed by the bootloader; a bad flash is an
 EDL brick).
 
@@ -163,8 +162,8 @@ establishes it:
 
 - `/sys/class/rtc/rtc0/date` disagrees with the system clock legitimately: sntp sets the
   system clock and nothing writes the RTC (nyx-modules.md § Wakeup alarms).
-- `hwclock -w` first fails with EBUSY: sleepd holds `/dev/rtc0` exclusively for its whole life;
-  stop it first (also for `nyx-test-system`).
+- `hwclock -w` first fails with EBUSY: sleepd holds `/dev/rtc0`; stop it first
+  (nyx-modules.md § Host tests for this module).
 - Then EINVAL: `pm660.dtsi` sets `qcom,qpnp-rtc-write = <0>`, so qpnp-rtc installs
   `qpnp_rtc_ro_ops`, which has `read_time`, `set_alarm`, `read_alarm` and `alarm_irq_enable`
   but no `set_time` — alarms can be armed while the clock cannot be set. (`rtc_set_time()`
@@ -184,7 +183,8 @@ Consequences:
 
 - **RTC alarms never fire.** `qpnp_rtc_set_alarm()` compares a 2026 expiry against the RTC's
   1970 clock and arms it ~56 years out, while `set-alarm`/`next-alarm` round-trip perfectly.
-  The `CLOCK_REALTIME_ALARM` timerfd, now watched in `alarm.c`, is what makes alarms fire here.
+  The watched `CLOCK_REALTIME_ALARM` timerfd is what makes alarms fire here (nyx-modules.md §
+  Wakeup alarms).
 - The clock jumps mid-boot (journald: "Time jumped backwards, rotating"), so timestamps within
   one boot cannot be trusted and wall-clock deadlines can misfire across the jump.
 - Never judge an RTC test against the system clock alone: on a fresh boot both read 1970 and a
@@ -209,16 +209,16 @@ unexplained crashes, but no suspend at all in that boot.
   (`meta-luneos/recipes-core/luneos-kernel-log-quirks/`); the boot header also carries
   `qpnp_smb2.debug_mask=0`, which this bootloader may drop.
   `google_charger` (~1.45 lines/s) has no runtime knob; silencing it needs a kernel patch.
-- **pulseaudio at 10% of a core while silent** — Qt 6 QtMultimedia's EOS branch reports
-  `StoppedState` without calling `gst_play_stop()`, so one boot chime kept
+- **pulseaudio at 10% of a core while silent** (debugging.md § Stage 5) — Qt 6 QtMultimedia's
+  EOS branch reports `StoppedState` without calling `gst_play_stop()`, so one boot chime kept
   `sink.primary_output` running. Fixed by
   `meta-luneos/recipes-qt/qt6/qtmultimedia/0001-gstreamer-stop-the-pipeline-at-end-of-media.patch`
   (10.1% → 3.4%, `Upstream-Status: Pending`). Not audiod-pro (0 CPU over 12 h).
   `luneos-speechd`'s dummy output still holds an uncorked stream (~3%; 0.2% with both fixed).
 - Power stubs in `stubbed-services.d/sargo`: `diag_mdlog` (the `DIAG_WS` suspend aborter, 7
   aborts/min → 0; stubbed to exit, since it is `exec_start`ed as a oneshot), `ssr_diag`, the
-  health HAL `android.hardware.health@2.0-service.bonito` and `storaged` (nothing in LuneOS
-  consumes the health HAL; `healthd` armed a 60 s alarm that woke the SoC every minute).
+  health HAL `android.hardware.health@2.0-service.bonito` and `storaged` (`healthd`'s 60 s
+  wake alarm; hal-userspace.md § Derive, don't ship).
 - `/` is 79% full; the LXC android image 95% (fixed size, expected).
 
 ### Waydroid
@@ -233,12 +233,11 @@ regenerates `waydroid_base.prop`.
 
 ### Browser (Atlas) scaling
 
-Measured over Chromium's remote debugging port (1080x2220, 441 PPI; rule: graphics.md §
-Browser (Atlas) UI scaling): `webapp-mgr.sh` passes `--force-device-scale-factor` 2.4 (from
-`com.webos.surfacemanager.devicePixelRatio`); adding it to browser_shell crops the toolbar
-(verified at 1.5 and 2.75). The Atlas-side fixes: `document.documentElement.style.zoom`
-(verified 1.5–2.4, 2.4 preferred by eye), and collapsing the toolbar buttons while the address
-bar is focused (address bar 115 → 323 device px at zoom 2.4).
+Measured over Chromium's remote debugging port (1080x2220, 441 PPI; graphics.md §
+Browser (Atlas) UI scaling): `webapp-mgr.sh` passes `--force-device-scale-factor` 2.4;
+adding it to browser_shell cropped the toolbar at 1.5 and 2.75. Atlas zoom verified 1.5–2.4
+(2.4 preferred by eye); collapsing the toolbar while the address bar is focused takes the
+address bar 115 → 323 device px at zoom 2.4.
 
 ## Open issues
 

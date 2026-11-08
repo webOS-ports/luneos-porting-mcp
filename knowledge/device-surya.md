@@ -39,10 +39,9 @@ The only hardware evidence is a logcat taken on a POCO X3 running LuneOS on
 | Display | 6.67" 1080×2400; `MACHINE_DISPLAY_PPI = 395` (arithmetic); LineageOS density 440 | surya.conf, LineageOS device tree |
 
 **The fact that shapes the whole port:** wifi is in the kernel and the device has
-no stock vendor `.ko`s at all. So a rebuilt kernel is self-contained — this port
-needs neither the Tier A KMI discipline nor `CONFIG_MODULE_FORCE_LOAD`. Check this
-first on any new Tier B target (kmi-crc-matching.md § Step −1 — first ask whether
-you need to match at all).
+no stock vendor `.ko`s at all, so a rebuilt kernel is self-contained: no KMI
+matching, no `CONFIG_MODULE_FORCE_LOAD` (kmi-crc-matching.md § Step −1 — first ask
+whether you need to match at all).
 
 ## Kernel
 
@@ -87,8 +86,8 @@ cmdline: androidboot.hardware=qcom service_locator.enable=1
          androidboot.init_fatal_reboot_target=recovery
 ```
 
-`os_version` is the packed field `0x1E0001A8` — read it back out of the stock
-header rather than encoding it from the version string.
+`os_version` is the packed field `0x1E0001A8`, read from the stock header
+(boot-images.md § Class 1 — legacy header v2).
 
 One image to flash: no `vendor_boot`, no `init_boot`, no DLKM fragment. The dtb
 section is a **single bare FDT** (not an AOSP dt_table) holding the SoC base tree
@@ -120,8 +119,7 @@ fajita and here, device-fajita.md § Android 15 vendors report a *dated* API lev
 **Vendor alignment.** The kernel is pinned to the revision /e/OS builds from, so
 the vendor matches on a device running that build. The kit also flashes that exact
 /e/OS `vendor.img` to guarantee it; `vendor` is a **logical partition inside
-`super`**, so it is written from `fastbootd` (`fastboot reboot fastboot`), not
-bootloader fastboot. It is extracted from the block OTA (tools.md § payload_extract.py, block OTAs).
+`super`**, written from `fastbootd` (installing.md § The general model). It is extracted from the block OTA (tools.md § payload_extract.py, block OTAs).
 
 ## Yocto
 
@@ -140,10 +138,9 @@ Layer `meta-smartphone/meta-xiaomi`, `MACHINE=surya`; the rootfs is the shared
 
 `boot` + `vbmeta` + `userdata` + `vendor` (from fastbootd); `system`, `product`,
 `system_ext`, `dtbo`, `recovery`, modem and bootloader stay /e/OS, so the whole
-thing reverts by reflashing the /e/OS zip from recovery. `rootfs.img` and
-`android-rootfs.img` sit side by side at the top of an unencrypted ext4
-`userdata`, and the initramfs grows it to the ~50 GB partition on first boot.
-General steps: installing.md.
+thing reverts by reflashing the /e/OS zip from recovery. `userdata` is unencrypted
+ext4 in the side-by-side layout, grown to the ~50 GB partition on first boot
+(installing.md § Flash kits).
 
 ## Subsystem notes
 

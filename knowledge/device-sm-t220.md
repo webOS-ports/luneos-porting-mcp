@@ -65,19 +65,18 @@ Layer `meta-smartphone/meta-samsung`, `MACHINE=sm-t220`; status file `meta-samsu
 
 Samsung Download mode route (installing.md § Samsung Download mode (Odin, TWRP)). Device specifics:
 
-- **Unlock once:** Developer options → OEM unlocking, then Download mode (Vol Up + Vol Down while plugging in USB) and long-press Vol Up at the warning screen. Orange state; the Knox warranty bit is set. `adb reboot download` from stock goes straight to "Downloading...".
+- **Unlock once:** Download mode is Vol Up + Vol Down while plugging in USB; orange state afterwards. `adb reboot download` from stock goes straight to "Downloading...".
 - The Samsung lk's fastboot answers "not allowed in locked state" and has no flash/erase commands.
-- **vbmeta:** an unsigned header with `AVB_VBMETA_IMAGE_FLAGS_VERIFICATION_DISABLED` (flags=2 at offset 120, padded to 4096) lets the unlocked lk boot a non-Samsung image.
-- **Odin** (`odin4` for Linux, built from `main` at e916c1e or later; the release fails multi-part sequences with "expected 30 got 0") is fine for `boot` and `vbmeta`. Use `TMPDIR` on a real disk, one fresh Download session per run, and a newline before the md5 trailer of the `.tar.md5`. `SW REV CHECK FAIL: [userdata]` (fused 6 > binary 0) is cosmetic.
-- **Odin's userdata write left holes in the rootfs image** — at flash time, content-specific, not zero runs, not decompression, not the initramfs resize. Do not use it for userdata.
-- **Rootfs through TWRP** (Vol Up + Power): `adb -s <serial> push rootfs.ext4 /data/rootfs.img.new` (~79 MB/s; over Wi-Fi ssh ~0.6 MiB/s, an hour for 4.4 GB), verify the checksum, rename the current file to `rootfs.img.prev` and the new one to `rootfs.img`. Always `adb -s`: TWRP and another device are often both on the bus.
-- **Boot partition from a running LuneOS:** `dd` the `Image.gz.fastboot` to `/dev/mmcblk0p38`, read back and compare, keep a copy of the old partition. BusyBox `dd` here has no `conv=notrunc`; patch in place by concatenating `dd bs=4` pieces. `android-kernel-bootimg`'s postinst writes the boot image too, so an `opkg` install of it re-flashes the kernel.
+- **vbmeta:** flags=2 at offset 120, padded to 4096.
+- **Odin:** `odin4` from `main` at e916c1e or later (the release fails with "expected 30 got 0"). Use `TMPDIR` on a real disk, one fresh Download session per run, and a newline before the md5 trailer of the `.tar.md5`. `SW REV CHECK FAIL: [userdata]` reads fused 6 > binary 0. Its userdata holes were at flash time, content-specific, not zero runs, not decompression, not the initramfs resize.
+- **Rootfs through TWRP** (Vol Up + Power): `rootfs.ext4` pushed at ~79 MB/s; over Wi-Fi ssh ~0.6 MiB/s, an hour for 4.4 GB. TWRP and another device are often both on the bus.
+- **Boot partition from a running LuneOS:** `Image.gz.fastboot` to `/dev/mmcblk0p38`. BusyBox `dd` here has no `conv=notrunc`; patch in place by concatenating `dd bs=4` pieces. `android-kernel-bootimg`'s postinst writes the boot image too, so an `opkg` install of it re-flashes the kernel.
 - **Rollback:** `ro.boot.rp=6` on the tablet (…XXS6… firmware). Flashing the YE4 factory bootloader raises the rollback value irreversibly; the LuneOS package touches only boot, vbmeta and userdata. Restore with matching firmware to keep the option of going back to S6.
 - After the first boot on a new rootfs ssh refuses the old host key: new image, new keys.
 
 ## Subsystem notes
 
-**PulseAudio killed with no trace: `RLIMIT_RTTIME`.** PulseAudio loaded `module-droid-card` and died ~1 s later (`code=killed, status=9/KILL`, no core, no log). It arms `RLIMIT_RTTIME` (200 ms) with real-time scheduling; the droid sink threads run `SCHED_RR` and a write into the MediaTek HAL can run longer without sleeping, so the scheduler tick SIGKILLs from interrupt context. Found with the `signal_generate` tracepoint filtered to `sig==9` (debugging.md § Tooling appendix): sender `droid-sink-deep` itself, `code=128`, hard-IRQ. Fix: `rlimit-rttime = -1` in `/etc/pulse/daemon.conf.d/`, keeping real-time scheduling.
+**PulseAudio killed with no trace: `RLIMIT_RTTIME`.** PulseAudio loaded `module-droid-card` and died ~1 s later (`code=killed, status=9/KILL`). It arms `RLIMIT_RTTIME` (200 ms); a `SCHED_RR` droid sink write into the MediaTek HAL ran longer without sleeping (audio-media.md § Debugging audio). The `signal_generate` trace showed sender `droid-sink-deep` itself, `code=128`, hard-IRQ. Fix: `rlimit-rttime = -1` in `/etc/pulse/daemon.conf.d/`, keeping real-time scheduling.
 
 **Speakers silent, headphones fine: uncleared `malloc` in a vendor library.** A direct `aplay` to `hw:0,0` with only `Audio_Amp_L/R` on was audible on headphones; every mixer setting was silent on the speakers, with the jack verified empty. The HAL never selected the Awinic path. `AudioALSAHardwareResourceManager::setNonSmartPAType()` maps `MTK_AUDIO_SPEAKER_PATH`: `int_spk_amp` → 0 (internal amp, `speaker_output` only), `int_lo_buf` → 1, `int_hp_buf` → 2 (`aw_speaker_*` / Awinic), `2_in_1_spk` → 3, `3_in_1_spk` → 4. The vendor `AudioParamOptions.xml` says `int_hp_buf`, but the HAL logged `MTK_AUDIO_NUMBER_OF_MIC undefined in AudioParamOptions` and used 0. `strace -f -e trace=openat,newfstatat` on a copy of the PulseAudio process:
 
@@ -85,7 +84,7 @@ Samsung Download mode route (installing.md § Samsung Download mode (Odin, TWRP)
 
 `libaudio_param_parser-vnd.so` `appGetXmlDirFromProperty()` does `buf = malloc(512)` then `strcat(buf, path)` (and `property_set`s the corrupted value: `persist.vendor.audio.tuning.def_path = "wڞU/vendor/..."`). General lesson, and the fixes that did not work: audio-media.md § Vendor libraries that assume Android's zeroed `malloc`. What works here: `mtk-audio-param-fixup` patches a copy of the device's own library at boot — `mov w1,#1` / `nop` / `bl calloc@plt` replacing `ldr`/`stur`/`bl malloc`, plus a `nop` over the now canary-less stack-protector check — checks every instruction word it changes, does nothing on a different build, and bind-mounts it over the original before PulseAudio starts. No vendor binary is redistributed. Not the amplifier switch: the 32-bit `awinic.audio.effect.so` the HAL fails to `dlopen` ("is 32-bit instead of 64-bit") is Awinic's speaker-protection DSP (`aw_piano_*`).
 
-**`module-droid-hidl` without its helper.** It spawns `/usr/libexec/audiosystem-passthrough/audiosystem-passthrough`, but the recipe had only a build-time `DEPENDS`, so the image lacked the binary ("helper disappeared"). Check the runtime dependency whenever a module execs a helper.
+**`module-droid-hidl` without its helper** ("helper disappeared"): audio-media.md § Audio.
 
 **Web-app audio: three layers**, all general and described in audio-media.md § webOS media server (umediaserver) on Halium. Here the `waitid(P_PIDFD)` layer is fixed by kernel patch 0003 (§ Kernel), and the resource table is raised to VDEC 16 / ADEC 8.
 

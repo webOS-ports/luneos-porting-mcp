@@ -64,7 +64,7 @@ Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2
 - `# CONFIG_ARM64_USE_LSE_ATOMICS is not set`, to match the reference ROMs; it fixed nothing (soc-qualcomm.md § LSE atomics on ARMv8.0 SoCs). The same tree logs `can't patch jump_label` (`kernel/jump_label.c:385 __jump_label_update`) on every boot, working or not.
 - `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE` does not exist on this tree: it carries a backported 5.x LSM framework (kernel-config.md § Fragment traps).
 - `NETCONSOLE`/`NETCONSOLE_DYNAMIC` are on; safe here only because no prebuilt vendor network module loads (`wlan.ko` is ours). `FRAMEBUFFER_CONSOLE` is on and does nothing (§ Subsystem notes). `CONFIG_USB_CONFIGFS_ACM` is not in the defconfig, so the ACM console never appears; the gadget is RNDIS-only.
-- **No pstore at all**: `CONFIG_PSTORE=n` in all four kernels inspected and no ramoops DT node. With no UART and no fbcon, a failure before the initramfs is mute. A ramoops node + `PSTORE_RAM` is the fix, but needs a carefully chosen reserved-memory region.
+- **No pstore at all**: `CONFIG_PSTORE=n` in all four kernels inspected and no ramoops DT node, so with no UART and no fbcon a failure before the initramfs is mute. Adding it needs a ramoops reserved-memory region chosen for this board (kernel-config.md § Debug options).
 
 **Watchdog:** the Qualcomm watchdog driver is built in, and `CONFIG_QCA_CLD_WLAN=m` is the only module, so no boot step depends on a module load.
 
@@ -72,8 +72,8 @@ Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2
 
 **Kernel cmdline fixes that got it booting**, in order:
 
-1. Remove `swiotlb=1`: fatal on 4.19 before any console exists, harmless on the stock 4.4.
-2. Remove `selinux=0`: with it, `mount(2)` returned ENOENT for every block-backed filesystem while tmpfs mounted and `fsck.ext4 -n` read the partition. Keep only `androidboot.selinux=permissive`. Evidence was a two-log comparison of identical kernel bytes:
+1. Remove `swiotlb=1`: fatal on 4.19 before any console exists, harmless on the stock 4.4 (debugging.md § Method).
+2. Remove `selinux=0`: with it, `mount(2)` returned ENOENT for every block-backed filesystem while tmpfs mounted and `fsck.ext4 -n` read the partition. Keep only `androidboot.selinux=permissive` (kernel-config.md § selinux=0). Evidence was a two-log comparison of identical kernel bytes:
 
    | | cmdline | dmesg | mount |
    |---|---|---|---|
@@ -88,8 +88,8 @@ Current `ANDROID_BOOTIMG_CMDLINE` carries `androidboot.selinux=permissive printk
 
 ### Rejected paths
 
-- **Kernel swap under a donor ramdisk "exonerated the kernel" twice.** Our 4.19 kernel under LineageOS's recovery ramdisk mounted `mmcblk0p77` (`EXT4-fs (mmcblk0p77): mounted filesystem with ordered data mode`) and reached `enforcing=1`, but only because the donor's cmdline lacked `selinux=0`. Method: debugging.md § Method.
-- **Moving the ramdisk address to fit a bigger kernel.** `0x01000000` is proven on this bootloader by two independent working images; the fix was shrinking the kernel (§ Boot image).
+- **Kernel swap under a donor ramdisk "exonerated the kernel" twice.** Our 4.19 kernel under LineageOS's recovery ramdisk mounted `mmcblk0p77` (`EXT4-fs (mmcblk0p77): mounted filesystem with ordered data mode`) and reached `enforcing=1`, but only because the donor's cmdline lacked `selinux=0` (debugging.md § Method).
+- **Moving the ramdisk address to fit a bigger kernel.** `0x01000000` is proven on this bootloader by two independent working images; the kernel was shrunk instead (§ Boot image; boot-images.md § The kernel/ramdisk window — a build-time invariant).
 
 ## Boot image
 
@@ -165,7 +165,7 @@ Non-A/B fastboot device. The kit's `install.sh` flashes `vendor` (the extracted 
 
 ## Subsystem notes
 
-**Display / splash.** `FRAMEBUFFER_CONSOLE=y` + `console=tty0` do not put the log on the panel: `fb0` registers (`mdss_fb_register: FrameBuffer[0] 1080x1620 registered successfully!` at 1.12 s), the console stays `colour dummy device 80x25`, and `Console: switching to colour frame buffer device` appears nowhere in 1406 lines. Ruled out in the `key2/4.19` source: `FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER` is not set; `mdss_fb_register()` uses `register_framebuffer()`; `fb_console_init()` registers the notifier at `subsys_initcall`; `DETECT_PRIMARY=y` leaves `primary_device == -1` on arm64 and should still reach takeover. Next cheap probe: `dmesg | grep -i fbcon`. The /e/OS and UBports builds carry `console=tty0` and are silent too. **The BlackBerry logo stays up in every case**, including a working boot with a live debug shell: it is not a symptom (kernel-config.md § Framebuffer console as a Tier B debug channel).
+**Display / splash.** `FRAMEBUFFER_CONSOLE=y` + `console=tty0` do not put the log on the panel: `fb0` registers (`mdss_fb_register: FrameBuffer[0] 1080x1620 registered successfully!` at 1.12 s), the console stays `colour dummy device 80x25`, and `Console: switching to colour frame buffer device` appears nowhere in 1406 lines. Ruled out in the `key2/4.19` source: `FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER` is not set; `mdss_fb_register()` uses `register_framebuffer()`; `fb_console_init()` registers the notifier at `subsys_initcall`; `DETECT_PRIMARY=y` leaves `primary_device == -1` on arm64 and should still reach takeover. Next cheap probe: `dmesg | grep -i fbcon`. The /e/OS and UBports builds carry `console=tty0` and are silent too. **The BlackBerry logo stays up in every case**, including a working boot with a live debug shell (kernel-config.md § Framebuffer console as a Tier B debug channel).
 
 **Input.** Seven nodes; the touchscreen is not the obvious one:
 
@@ -192,7 +192,7 @@ bluez adapter list: hci0 only, "powered":false
 audiod: a2dpAdapterName = hci1, adapterName = hci0
 ```
 
-`systemd-rfkill` restores a saved soft-block every boot. bluebinder's "Own hci index" (1, 2 or 3 across one journal) is the rfkill index of its vhci, not an hci number; with `BT_HCIVHCI` the only transport, BlueZ's `hci0` is bluebinder's. Where audiod's `a2dpAdapterName = hci1` comes from is not established.
+`systemd-rfkill` restores the saved soft-block every boot. bluebinder's "Own hci index" read 1, 2 or 3 across one journal; it is an rfkill index, and with `BT_HCIVHCI` the only transport, `hci0` is bluebinder's (connectivity.md § Bluetooth). Where audiod's `a2dpAdapterName = hci1` comes from is not established.
 
 **Audio.** The HAL's FAST primary output runs 192-frame periods in a 384-frame (8 ms) buffer and underruns when the UI is busy (boot chime, volume keys crackle). `athena.conf` sets `WEBOS_PCM_OUTPUT_MASTER` so `pcm_output` uses `sink.deep_buffer` (1920-frame periods, 80 ms): UI sounds trade latency for no underruns.
 
@@ -204,11 +204,11 @@ nq-nci 6-0028: nfcc_hw_check: - NFCC HW not Supported        <- default: arm, re
 nq-nci 6-0028: nqx_probe: probing NFCC NQxxx exited successfully
 ```
 
-Reaching the chip-ID switch means the part answered NCI RESET over i2c. Recognised IDs are `NFCC_NQ_310`, `NQ_330`, `PN66T`, `SN100_A`, `SN100_B`; athena's is not among them, which is cosmetic. The real failure path (`err_nfcc_hw_check`, `NFCC HW not available`, `-ENXIO`) does not appear. **Do not edit the device tree for this** (debugging.md § Method, "read the return path"). Base `nq@28` is `arch/arm64/boot/dts/vendor/qcom/sdm660-mtp.dtsi:62`; athena overrides only pinctrl at `sdm660-bbry-athena.dtsi:887`. Userspace: `nfcd` logs `registerForNotifications(android.hardware.nfc.INfc/default)` failing, the same call as sunfish's stale-`ApiLevel` case; `hwservicemanager` (pid 34) served `android.hardware.camera.provider@2.4::ICameraProvider/legacy/0` in that boot, so HIDL transport was healthy (hal-userspace.md § Telling a routing bug from a missing backend).
+The part answered NCI RESET over i2c; its chip ID is not among the recognised `NFCC_NQ_310`, `NQ_330`, `PN66T`, `SN100_A`, `SN100_B`, which is cosmetic, and `NFCC HW not available` / `-ENXIO` does not appear (debugging.md § Method, "read the return path"). **Do not edit the device tree for this.** Base `nq@28` is `arch/arm64/boot/dts/vendor/qcom/sdm660-mtp.dtsi:62`; athena overrides only pinctrl at `sdm660-bbry-athena.dtsi:887`. Userspace: `nfcd` logs `registerForNotifications(android.hardware.nfc.INfc/default)` failing, the same call as sunfish's stale-`ApiLevel` case; `hwservicemanager` (pid 34) served `android.hardware.camera.provider@2.4::ICameraProvider/legacy/0` in that boot, so HIDL transport was healthy (hal-userspace.md § Telling a routing bug from a missing backend).
 
 **Fingerprint.** `servicemanager: Found android.hardware.biometrics.fingerprint.IFingerprint/default`, then `biomd: Failed to initialize HIDL fingerprint backend`: the HAL is alive, `biomd` has no AIDL backend (hal-userspace.md § Android 15 vendors are AIDL).
 
-**Container.** `android-system.service` starts it; never enable `lxc@android.service` as well (yocto.md § mount-android.sh and the LXC container).
+**Container.** An enabled `lxc@android.service` tore down the container `android-system.service` had started; it stays disabled (yocto.md § mount-android.sh and the LXC container).
 
 ## Open issues
 
@@ -227,10 +227,9 @@ Reaching the chip-ID switch means the part answered NCI RESET over i2c. Recognis
 ## Device-specific traps
 
 - `sed -i` on the running device fails with "Device or resource busy" (it renames). Use `sed ... > <scratch> && cat <scratch> > <file>`, then `sync`. The rootfs is rw (`/.writable_image`), so `/etc` edits persist.
-- `fastboot boot` does not reproduce a load-address bug (boot-images.md § Debug images).
-- Bisect with a known-good kernel + our initramfs (`enable_adb`) before adding logging: on this device `enable_adb` panics to the debug gadget before userdata is looked up, so a missing `rootfs.img` does not affect the test. Diff the cmdlines (debugging.md § Method).
-- A journal from a bring-up session must be sliced per boot: whole-file counts showed 954 `surface-manager` and 281 `keymaster-3-0` crashes, all in boots 1 and 4 and already fixed by the vendor swap, while the live `nfcd` registration failure fired once in all thirteen boots (debugging.md § Method).
-- Never start a fragment comment line with `# CONFIG_` (kernel-config.md § Fragment traps); it cost an hour here.
+- `enable_adb` panics to the debug gadget before userdata is looked up, so a known-good-kernel + our-initramfs bisect works without a `rootfs.img` (debugging.md § Method).
+- The bring-up journal's 954 `surface-manager` and 281 `keymaster-3-0` crashes were all in boots 1 and 4, already fixed by the vendor swap; the live `nfcd` registration failure fired once in all thirteen boots (debugging.md § Method).
+- General traps first met here: `fastboot boot` and load addresses (boot-images.md § Debug images), a fragment comment starting `# CONFIG_` (kernel-config.md § Fragment traps; it cost an hour).
 
 ## Sources
 

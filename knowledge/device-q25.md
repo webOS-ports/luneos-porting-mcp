@@ -3,15 +3,9 @@
 Zinwa Q25 / Q25 Pro (`Q25`), BlackBerry Classic restomod on MediaTek Helio G99 (MT6789), Tier A on MediaTek's mgk kernel: KMI-clean kernel and boot image build and run on hardware.
 
 The first MediaTek Tier A target and the first LuneOS port onto a square screen
-(3.5" 720x720, physical QWERTY and trackpad). It produced the method's sharpest
-correction: **"GKI device" does not imply "an ACK kernel will do"** — MT6789 ships
-MediaTek's *mgk* GKI derivative, an ACK build failed 344 of 344 stock vendor modules,
-and the device's own tree failed 0 (kernel-build.md § Step 1: Check that the stock
-kernel really is GKI). Also the device behind "vermagic must match exactly when
-busybox insmod loads the storage modules" (kmi-crc-matching.md § Step 0 — ask the
-modules, they know) and "MACHINE_FEATURES-gated packages never reach the generic
-rootfs" (yocto.md § The generic `halium-arm64` machine). Same SoC and
-kernel generation as the MP01 (device-mp01.md).
+(3.5" 720x720, physical QWERTY and trackpad). An ACK build failed 344 of 344 stock vendor
+modules, the device's own mgk tree 0 (soc-mediatek.md § Kernel). Same SoC and kernel
+generation as the MP01 (device-mp01.md).
 
 ## Status (as of 7 Oct 2026)
 
@@ -67,9 +61,9 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   `files/luneos.cfg`; stock vendor_boot and vendor_dlkm stay, only the kernel is
   replaced. `LUNEOS_KERNEL_FRAGMENT = "0"` (passed with `bitbake -R`) builds the
   stock baseline — do that first whenever a KMI check fails.
-- **Toolchain:** clang r416183b, the stock kernel's own version string, via
-  `GKI_CLANG_DIR:q25` / `GKI_BUILD_TOOLS_DIR:q25` machine-scoped in local.conf
-  (the unscoped values are android14-6.1's r487747c). `fetch-gki-toolchain.sh`
+- **Toolchain:** clang r416183b via `GKI_CLANG_DIR:q25` / `GKI_BUILD_TOOLS_DIR:q25`
+  in local.conf (the unscoped values are android14-6.1's r487747c; soc-mediatek.md
+  § Kernel). `fetch-gki-toolchain.sh`
   fetches the prebuilts (~3 GB).
 - **The bisect** (all against the 344-module set, `kmi-crc-check.py`):
 
@@ -85,7 +79,7 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   `PID_NS`, `CHECKPOINT_RESTORE`, `DEVTMPFS(+MOUNT)`, `FHANDLE`,
   `TMPFS_XATTR`/`POSIX_ACL`, `AUTOFS_FS`, `VT`, `QUOTA_NETLINK_INTERFACE`,
   `UEVENT_HELPER`, `STATIC_USERMODEHELPER=n`, the netfilter/PPP/L2TP block, the
-  bluez/vhci set, `VETH`. LXC must not unshare the IPC or user namespaces.
+  bluez/vhci set, `VETH` (kernel-config.md § Poison options: per KMI, and drift is a max).
 - **Stock config** (IKCONFIG, 2,669 options): `mer_verify_kernel_config` gives 23
   errors / 54 warnings; 21 are covered by `luneos.cfg`, the other two are deliberate
   — `NET_L3_MASTER_DEV` off (`l3mdev_ops` in `struct net_device`, touched by every
@@ -96,19 +90,16 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   `ECM` both `y`, `CONFIG_MODULE_FORCE_LOAD` unset. Re-check the deployed
   `kernel-config` once (expect only the deliberate errors above).
 - **Vermagic:** `files/vermagic.cfg` sets `CONFIG_LOCALVERSION="-android12-9-gfcab0aff02db"`
-  with `LOCALVERSION_AUTO` off, and `do_configure:prepend` writes an empty
-  `.scmversion` (else `setlocalversion` appends `+`). Merged unconditionally,
-  including for the baseline. Without it the port would not have booted although
-  every CRC matched: the storage and USB controllers (`ufs-mediatek-mod.ko`,
-  `phy-mtk-ufs.ko`, `mtk-mmc.ko`, `musb_hdrc.ko`) are vendor_boot modules loaded by
-  the initramfs's busybox `insmod`, which has no `--force-vermagic`. The tree
-  produced `5.10.198-g2a873a3511ee` before the fix (kmi-crc-matching.md § Step 0 —
-  ask the modules, they know).
+  plus the empty `.scmversion`, merged unconditionally, including for the baseline
+  (soc-mediatek.md § Kernel). Without it the port would not have booted although every
+  CRC matched: `ufs-mediatek-mod.ko`, `phy-mtk-ufs.ko`, `mtk-mmc.ko` and `musb_hdrc.ko`
+  are vendor_boot modules loaded by busybox `insmod`. The tree produced
+  `5.10.198-g2a873a3511ee` before the fix (kmi-crc-matching.md § Step 0 — ask the
+  modules, they know).
 - **ThinLTO:** `KERNEL_LTO_THIN = "1"` in q25.conf (the device config's
   `LTO_CLANG_FULL` makes the `vmlinux.o` link ~20 min of one core). Kernel 20.4 →
   16.0 MB, KMI-neutral, re-verified 0/344. Set `"0"` if a shipped image must match
-  the vendor's codegen. Editing `luneos.cfg` at all, comments included, costs a full
-  rebuild.
+  the vendor's codegen.
 - **Command line:** `CONFIG_CMDLINE` carries what LuneOS needs (`console=tty0`, the
   cgroup-v1 pair; it also still carries `selinux=0`, see Open issues), because MediaTek's G99 lk drops the first 20
   characters of the boot-image cmdline (kernel-config.md § The kernel command
@@ -123,20 +114,15 @@ Droidian port, and the stock firmware (`OS-new-camera-0120-Q25-GMS.zip`, build
   `initrd: installed 1 of our own kernel modules over the vendor's` in kmsg. The
   module cannot be swapped on a running device: `rmmod bbqX0kbd` takes the kernel
   down. Rules: kernel-modules.md § The initramfs route.
-- **Not shipping the vendor's modules wholesale:** the CRCs already match 344/344,
-  so nothing is gained, and on the MP01 (same SoC) embedding the 180 vendor_boot
-  modules left lk no longer starting our init (device-mp01.md § Rejected paths).
+- **Not shipping the vendor's modules wholesale:** the CRCs already match 344/344, so
+  nothing is gained (the MP01's attempt: soc-mediatek.md § Boot chain: preloader and lk).
 - **Module audit:** our build produces 333 of the 344 stock modules. Missing:
   `met.ko` + 9 × `met_*_api.ko` (MediaTek tracing, absent from the tree) and
   `fpsgo.ko` (we build `mtk_fpsgo.ko` from `fpsgo_v3/`) — none matters. The
   `bbqX0kbd_main.o_shipped` next to the source is ignored: kbuild's `%.o: %.c`
-  wins, and our module carries the stock binary's 43 text symbols. Mali's sibling
-  Makefiles name `mali_mgm_$(MTK_PLATFORM_VERSION)` / `mali_prot_alloc_...` from an
-  unexported variable, which produced `mali_mgm_.ko`; the recipe passes
-  `MTK_PLATFORM_VERSION=mt6789` (kernel-modules.md § The initramfs route).
-- **5.10 kbuild traps** (`CROSS_COMPILE` for clang's target, `LLVM_IAS=1`,
-  `PYTHON=python3`, `CROSS_COMPILE_COMPAT`) were found here and are general:
-  kernel-build.md § 5.10 kbuild gotchas.
+  wins, and our module carries the stock binary's 43 text symbols. The recipe passes
+  `MTK_PLATFORM_VERSION=mt6789` (else `mali_mgm_.ko`; soc-mediatek.md § Kernel).
+- **5.10 kbuild traps** were found here: kernel-build.md § 5.10 kbuild gotchas.
 
 ### Rejected path: ACK android12-5.10
 
@@ -170,7 +156,7 @@ Header **v4**, 64 MiB `boot`; kernel + **non-zero ramdisk** (stock: kernel
 20,174,525 B, ramdisk 1,189,717 B), so the generic ramdisk rides in `boot`; no
 `init_boot` (`ANDROID_BOOTIMG_INIT_BOOT = "0"`). Stock boot cmdline is **empty**
 (`bootopt=...` is in vendor_boot's, which stays stock). `ANDROID_BOOTIMG_OS_VERSION =
-"0x18000183"` reproduces 12.0.0 / 2024-03; never lower it. Both stock ramdisks are
+"0x18000183"` reproduces 12.0.0 / 2024-03 (soc-mediatek.md § Boot chain: preloader and lk). Both stock ramdisks are
 **gzip**, which is what `initramfs-android-image` produces (unlike the MP01's lz4).
 `gki_bootimg.bbclass` takes `GKI_KERNEL_IMAGE_NAME = "Image.gz"`.
 
@@ -186,14 +172,11 @@ ThinLTO image with the patched keyboard driver.
 
 Android 12 vendor, VNDK 31 → the generic Halium 16 `halium_arm64` GSI
 (`halium-luneos-16.0-20260910-1` carries `com.android.vndk.v31`); no VNDK-snapshot
-work. MediaTek A12 vendor keys in the adaptation (soc-mediatek.md § Userspace and vendor
-keys), carried over from the MP01 and also found in radon's: `deviceinfo_force_hwc2="1"` (`ro.hardware.hwcomposer=mtk_common`),
-`deviceinfo_hybris_prefer_vndk="1"` (verified here: the Q25's own
-`/vendor/lib64/libnvram.so` imports `android::base::Basename(const std::string&)`,
-which the 16 GSI's libbase no longer exports — without it pulseaudio crashes),
-`deviceinfo_audio_sample_rate="48000"`, and
-`deviceinfo_bluebinder_ext_features_page_2_mask="0x0400000000000000"` (the chip
-claims Synchronization Train support and rejects the read, aborting hci init).
+work. The adaptation carries all four MediaTek A12 vendor keys (soc-mediatek.md
+§ Userspace and vendor keys); `deviceinfo_hybris_prefer_vndk` was verified here (the
+Q25's `/vendor/lib64/libnvram.so` imports `android::base::Basename(const std::string&)`).
+`deviceinfo_bluebinder_ext_features_page_2_mask="0x0400000000000000"` masks
+Synchronization Train (soc-mediatek.md § Connectivity combo (WMT/connac)).
 
 ## Yocto
 
@@ -249,7 +232,7 @@ Kit (`q25_20260930.zip`, 1.22 GiB):
   image is flashed and the rootfs goes in as a prefilled `userdata` image
   (`fastboot flash userdata`, the route the Droidian port proves here).
 - `install.sh` checks the lock state first and reports partition sizes (the
-  scatter's 3 GiB `userdata` is nominal; soc-mediatek.md § Boot chain: preloader and lk).
+  scatter's 3 GiB `userdata` is nominal; soc-mediatek.md § Install over BROM/preloader).
 - A/B: Android keeps slot A, LuneOS takes slot B; switch with `fastboot
   --set-active=other reboot`. Slot B first needs the stock firmware (everything but
   `logo`, `super` and `boot_b`; the Q25 wiki has the list), then:
@@ -335,16 +318,10 @@ append `;RCV Mux=Voice Playback;Handset Volume=14` locally to hear the earpiece.
 
 ### MediaTek connectivity
 
-The mindphone-era `mtk-connectivity` approach transfers (mirror the vendor `.ko`,
-load host-side, poke `/dev/wmtWifi`, fix `/dev/stpbt`; BT MAC from
-`/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr`; the `/data/nvram` symlink; the
-`fstab.<ro.hardware>` selection fix). Two things had to change for connac1x, both
-found from the Q25's vendor partition (soc-mediatek.md § Connectivity combo):
+The mindphone-era `mtk-connectivity` approach transfers; the two connac1x changes were
+found from the Q25's vendor partition (soc-mediatek.md § Connectivity combo (WMT/connac)):
 
-- `modules.load` lists only `connadp.ko` and `c2k_usb_f_via_gps.ko` of the family;
-  the real drivers are `insmod`ed by the vendor rc — `wmt_drv.ko` and `connfem.ko`
-  `on boot`, the rest behind `vendor.connsys.driver.ready=yes`, property-templated.
-  `mtk-load-modules.sh` now derives the ordered list from the rc files:
+- the rc-derived load order `mtk-load-modules.sh` produces here:
   `connfem wmt_drv bt_drv_connac1x fmradio_drv_mt6631_6635 gps_drv_stp gps_pwr
   wmt_chrdev_wifi wlan_drv_gen4m_6789`.
 - `mtk-connectivity-bt.service` required `bt_drv.ko` or `conninfra.ko`; the Q25 has
@@ -354,9 +331,8 @@ The absolute `/vendor/lib/modules` → `/vendor_dlkm/lib/modules` symlink is fin
 `mount-android.sh` mounts `vendor_dlkm` at host `/vendor_dlkm` (checked on the real
 images: `etc/build.prop` and `lib/modules/modules.load` present). Not carried over
 from mindphone: `bluebinder`'s `mt6739-le-commands.conf` (a different controller);
-`mtk-ril-watchdog` (mindphone-only in meta-greentouch) — the Q25's
-`vendor.ril-daemon-mtk` has the same `oneshot` + `disabled` pair, so it is the fix if
-telephony dies once and stays dead, but it would need moving to meta-android.
+`mtk-ril-watchdog` (soc-mediatek.md § Userspace and vendor keys) — it would need moving
+from meta-greentouch to meta-android.
 
 ## Open issues
 
@@ -368,9 +344,8 @@ telephony dies once and stays dead, but it would need moving to meta-android.
   `grep -h '^N: Name' /proc/bus/input/devices`.
 - Re-tune "Lineout Volume" on a Q25 whose speaker works.
 - Record the wifi, BT, modem, camera and charging results.
-- `luneos.cfg`'s `CONFIG_CMDLINE` still carries `selinux=0`, against kernel-config.md
-  § selinux=0: do not pass it on a Halium port; drop it and rely on
-  `androidboot.selinux=permissive`.
+- `luneos.cfg`'s `CONFIG_CMDLINE` still carries `selinux=0`; drop it (kernel-config.md
+  § selinux=0: do not pass it on a Halium port).
 - Battery: if the phone powers off within a minute on a charger, check
   `/sys/class/power_supply/battery/capacity` (the MP01's symptom).
 

@@ -43,10 +43,10 @@ Patches:
 - `ARM: uaccess: keep put_user()'s value in r2`: GCC 15 put a constant in r3 and the `__asmeq` check stopped the build.
 - Backport of upstream 790756c7e022 (Solaris-style `.section` flags current binutils rejects).
 - `power: rt5033: stop flooding the kernel log on every property read`: journald fed on the gauge's per-read register dumps and never finished starting.
-- `ARM: raise COMMAND_LINE_SIZE to 2048`: CONFIG_CMDLINE + boot image cmdline + the 775 bytes the SBL passes through lk2nd overflowed 1024; everything after `lcd_id` was lost (`androidboot.baseband`, `androidboot.mode`, `androidboot.serialno`, `mdss_mdp.panel`). Rule and tell: kernel-build.md § Legacy 3.x kernels.
-- `net: ipc_router: let group net_raw bind without paranoid networking`: `luneos.cfg` has `ANDROID_PARANOID_NETWORK` off (copied from sm-t520); the vendor `rmt_storage` drops to `setgid(AID_NET_RAW)` (3004) + `setuid(9999)` keeping only CAP_BLOCK_SUSPEND and relies on paranoid networking to pass the IPC router's bind check ("msm_ipc_router_bind: rmt_storage Do not have permissions"). Fixed by accepting group net_raw in `net/ipc_router/ipc_router_security.c` `check_permissions()` (kernel-config.md § Config facts from the other distros).
-- The tenderloin "mm: add MemAvailable to /proc/meminfo" commit, cherry-picked: without it memorymanager refused every launch ("Failed to reclaim required memory").
-- `BT_HCIVHCI` and `RFKILL` in `luneos.cfg`.
+- `ARM: raise COMMAND_LINE_SIZE to 2048`: with the 775 bytes the SBL passes through lk2nd the command line overflowed 1024 and everything after `lcd_id` was lost (kernel-build.md § Legacy 3.x kernels).
+- `net: ipc_router: let group net_raw bind without paranoid networking`: `luneos.cfg` has `ANDROID_PARANOID_NETWORK` off (copied from sm-t520), and the vendor `rmt_storage` (`setgid(AID_NET_RAW)` 3004, `setuid(9999)`, only CAP_BLOCK_SUSPEND kept) failed the bind check: "msm_ipc_router_bind: rmt_storage Do not have permissions". `check_permissions()` in `net/ipc_router/ipc_router_security.c` now accepts group net_raw (kernel-config.md § Config facts from the other distros).
+- The tenderloin "mm: add MemAvailable to /proc/meminfo" commit, cherry-picked: without it memorymanager refused every launch (kernel-build.md § Legacy 3.x kernels).
+- `BT_HCIVHCI` and `RFKILL` in `luneos.cfg` (same section).
 - Debug aids still on the branch (lk2nd ramoops region and console copy, initcall trace, boot-progress bands painted into the splash framebuffer); bring-up only, to drop before release.
 
 ## Boot image
@@ -67,8 +67,8 @@ Layer `meta-smartphone/meta-samsung`, `MACHINE=a3-2015-halium`; status file `met
 
 lk2nd route (soc-qualcomm.md § lk2nd). `fastboot boot` inside lk2nd passes the SBL's arguments on, `androidboot.mode=charger` included (§ Subsystem notes).
 
-- **Nothing may `dd` a boot image to the start of the partition.** `android-kernel-bootimg`'s postinst did once, from a pending first-boot configure run by an unrelated `opkg install`; it now writes 512 KiB in when it finds lk2nd. Dry-run installs with `opkg install --noaction` and check `/var/lib/opkg/status` for unpacked packages.
-- Keep a copy of lk2nd's 512 KiB. Recovery when `boot` is lost: Download mode and `heimdall flash --BOOT <lk2nd (512 KiB) + boot.img>`.
+- `android-kernel-bootimg`'s postinst once dd'd a boot image over lk2nd, from a pending first-boot configure run by an unrelated `opkg install` (debugging.md § Tooling appendix); it now writes 512 KiB in when it finds lk2nd.
+- Recovery when `boot` is lost: Download mode and heimdall with the saved lk2nd 512 KiB in front of `boot.img` (soc-qualcomm.md § lk2nd).
 
 ## Subsystem notes
 
@@ -78,7 +78,7 @@ lk2nd route (soc-qualcomm.md § lk2nd). `fastboot boot` inside lk2nd passes the 
 
 **Display** hit all three legacy gaps (soc-qualcomm.md § Display: three gaps, each hiding the next) with `hwcomposer.msm8916.so` and `gralloc.msm8916.so`: `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`, sm-t520's `HALIUM_LEGACY_SHIM_TARGETS`, and the GSI's sphal linkerconfig, now for VNDK 28 and 30. `deviceinfo_force_hwc2` is set by analogy with the SM-T520.
 
-**Wi-Fi** (soc-qualcomm.md § WCNSS (pronto)). `a3-prima-wlan.service` (meta-samsung systemd-machine-units) waits for the WCNSS control channel and writes `sta` to prima's `fwpath`; the vendor's `hciattach` is in `deviceinfo_android_skip_services`; wcnss_service reads the real MAC from `/efs/wifi/.mac.info`.
+**Wi-Fi** (soc-qualcomm.md § WCNSS (pronto)). `a3-prima-wlan.service` (meta-samsung systemd-machine-units) waits for the WCNSS control channel and writes `sta` to prima's `fwpath`; `vendor.wifi_hal_legacy` and the vendor's `hciattach` are in `deviceinfo_android_skip_services` (the Bluetooth HAL runs); wcnss_service reads the real MAC from `/efs/wifi/.mac.info`.
 
 **EFS and Bluetooth address** (soc-qualcomm.md § Samsung EFS and the Bluetooth address). LineageOS a3lte has no fstab line for `/efs`, so the vendor image ships `/vendor/etc/fstab.efs`; `ro.bt.bdaddr_path` comes from msm8916-common's system.prop (carried with `HALIUM_LEGACY_SYSTEM_PROP_PREFIXES`); `zz-a3-bluetooth-efs.rc` gives the BT HAL group 3008.
 
@@ -95,7 +95,7 @@ lk2nd route (soc-qualcomm.md § lk2nd). `fastboot boot` inside lk2nd passes the 
 
 ## Device-specific traps
 
-- Reboot from adb with `systemd-run --on-active=2 /bin/systemctl --force reboot --reboot-argument=normal`: a backgrounded command dies with the adb session, and a plain reboot lands in charger mode.
+- A plain reboot lands in charger mode: reboot from adb with an argument (debugging.md § Tooling appendix, "Reboot reliably from adb").
 - A RAM-booted test image (`fastboot boot` in lk2nd) whose initramfs holds with an RNDIS telnet shell (`a3_hold` on the cmdline) reads battery and power-supply state without booting LuneOS.
 - Found here and kept in debugging.md: logging a boot that dies before adb (§ Logging a boot that dies before adb), no `nsenter` into the container on a 3.x kernel and `debuggerd -b` for hung HALs (§ 2.7 Working the container by hand), busybox-vs-GNU (`dd` has no `conv=fsync` and writes nothing) and `pkill -f` matching your own command line (§ Tooling appendix).
 

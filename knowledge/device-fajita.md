@@ -38,7 +38,7 @@ Before flashing: the rootfs in the staging kit predates the `OnePlus6T` adaptati
 
 **Config delta (`luneos.cfg`)**, each entry checked against `enchilada_defconfig` (kernel-config.md § The config delta). Off in stock and turned on: `FHANDLE`, `VT` (and the console/PTY set), `DEVTMPFS`, `UTS_NS`, `PID_NS`, `USER_NS`, `NET_NS`, `CGROUP_DEVICE`, `MEMCG`, `FANOTIFY`, `BT_HCIVHCI` and the BT stack, `HIDRAW`, `SQUASHFS`, `VETH`, the netfilter extras, `NETCONSOLE` (safe: no prebuilt network module loads). Already on: **`CONFIG_OVERLAY_FS=y`**, so `luneos-device-config` applies the adaptation as one overlay mount. Changed from stock: `KALLSYMS_ALL` off (window lever), `RT_GROUP_SCHED` off (`waydroid-kernel.inc` forces it). `CONFIG_CC_WERROR` off (below).
 
-**4.9-tree tax:** `unifdef.c`'s `static bool constexpr;` → `BUILD_CFLAGS:append = " -std=gnu17"` (kernel-build.md § Old BSP vs modern toolchain); the USB gadget functions must be forced from `m` back to `y` after `oldconfig`, or the configfs gadget (adb, netconsole) does not exist.
+**4.9-tree tax:** `unifdef.c`'s `static bool constexpr;` → `BUILD_CFLAGS:append = " -std=gnu17"` (kernel-build.md § Old BSP vs modern toolchain); the USB gadget functions are forced back to `y` after `oldconfig` (kernel-config.md § Fragment traps).
 
 **-Werror against GCC 15.** `CONFIG_CC_WERROR=y` in the defconfig adds a tree-wide `-Werror`; the first two failures were style warnings, so it is turned off in `luneos.cfg` rather than patched (warnings still print):
 
@@ -49,7 +49,7 @@ Before flashing: the rootfs in the staging kit predates the `OnePlus6T` adaptati
 
 qcacld sets its own `-Werror` in `drivers/staging/qcacld-3.0/Kbuild`, untouched by `CC_WERROR=n`; GCC 13's `-Wenum-int-mismatch` fires on `wlan_hdd_send_hang_reason_event` (`int` in the header, `enum qdf_hang_reason` in the definition). One patch drops the unconditional flag and leaves `-Werror=<specific>` alone — one hunk, where surya needed 27, because this tree keeps audio in `sound/soc/msm` and nothing under `techpack/` sets `-Werror`.
 
-**Appended dtbs come from the dtbo bases.** With `CONFIG_BUILD_ARM64_DT_OVERLAY=y`, `dtb-y` for SDM845 is empty (the base list is in the `else` branch of `arch/arm64/boot/dts/qcom/Makefile`). The bases are still built: `scripts/Makefile.dtbo` does `multi_depend($(dtbo), , -base)` and every fajita overlay declares `…-overlay.dtbo-base := sdm845-v2.1.dtb`. `arch/arm64/boot/Makefile` then appends `$(shell find $(obj)/dts/ -name \*.dtb)`, because the defconfig sets `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y` without `..._NAMES`; safe only because `Image.gz-dtb` depends on `dtbs` in the parent make. The appended set is every base dtb for every enabled SoC, as LineageOS ships. Leave `KERNEL_DEVICETREE` **unset**, or the bbclass concatenates a second copy.
+**Appended dtbs come from the dtbo bases.** With `CONFIG_BUILD_ARM64_DT_OVERLAY=y`, `dtb-y` for SDM845 is empty (the base list is in the `else` branch of `arch/arm64/boot/dts/qcom/Makefile`). The bases are still built: `scripts/Makefile.dtbo` does `multi_depend($(dtbo), , -base)` and every fajita overlay declares `…-overlay.dtbo-base := sdm845-v2.1.dtb`. `arch/arm64/boot/Makefile` then appends `$(shell find $(obj)/dts/ -name \*.dtb)`, because the defconfig sets `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y` without `..._NAMES` (soc-qualcomm.md § The appended-DTB glob trap); safe only because `Image.gz-dtb` depends on `dtbs` in the parent make. The appended set is every base dtb for every enabled SoC, as LineageOS ships. Leave `KERNEL_DEVICETREE` **unset**, or the bbclass concatenates a second copy.
 
 ## Boot image
 
@@ -90,7 +90,7 @@ Found here, confirmed on surya; the mechanism and the resolution table are in ha
 | fajita, LineageOS 22.2 | 202404 | 35 | absent |
 | surya, /e/OS A15 | 202404 | 35 | absent |
 
-`luneos-device-config` wrote 202404 straight into gbinder's `ApiLevel`, which selects preset 36 (`aidl6`) against an A15 vendor that speaks preset 35's `aidl5`. The fix maps a dated value to `ro.vendor.build.version.sdk`, with a date table when the vendor declares no SDK, and warns on an unknown date. Checked against eight property combinations: both A15 vendors select 35, an A16 date selects 36, sargo (numeric 32 → preset 31) and an Android 13 vendor (vndk 33 → preset 33) are unchanged.
+`luneos-device-config` wrote 202404 straight into gbinder's `ApiLevel` (preset 36 against an A15 vendor); the fix is in hal-userspace.md § How it is handled now. Checked against eight property combinations: both A15 vendors select 35, an A16 date selects 36, sargo (numeric 32 → preset 31) and an Android 13 vendor (vndk 33 → preset 33) are unchanged.
 
 A property whose format changed is more dangerous than one that went missing: a missing `ro.vndk.version` falls through to a fallback; `202404` where an SDK number is expected is a valid integer and every comparison silently succeeds.
 
@@ -114,7 +114,7 @@ MACHINE=fajita bitbake linux-oneplus-fajita    # -> Image.gz-dtb-fajita.fastboot
 
 nyx module selection comes from the `halium` override in `nyx-modules-machines.inc` (nyx-modules.md § Module selection); this machine builds no rootfs anyway.
 
-**Adaptation directory is `OnePlus6T`**, the vendor's `ro.product.vendor.device`, not the codename; an `adaptations/fajita/` would never be read (deviceinfo-reference.md § When the compositor starts but ignores the touchscreen). The MACHINE stays `fajita`; a `stubbed-services.d` file, if ever added, follows the vendor name too. The adaptation sets `deviceinfo_display_dpi` 402 and `deviceinfo_device_pixel_ratio="2.4"` (carried from sargo/sunfish on the same-1080-px-width reasoning; measured there, not here), and pins `deviceinfo_key_devices_by_name="qpnp_pon;gpio-keys"`. Input nodes from `fajita.dtsi`:
+**Adaptation directory is `OnePlus6T`**, the vendor's `ro.product.vendor.device`, not `fajita` (deviceinfo-reference.md § When the compositor starts but ignores the touchscreen); a `stubbed-services.d` file, if ever added, follows the vendor name too. The adaptation sets `deviceinfo_display_dpi` 402 and `deviceinfo_device_pixel_ratio="2.4"` (carried from sargo/sunfish on the same-1080-px-width reasoning; measured there, not here), and pins `deviceinfo_key_devices_by_name="qpnp_pon;gpio-keys"`. Input nodes from `fajita.dtsi`:
 
 ```
 qpnp_pon        power key, pm8998 (and the volume-down half of the pon combo)

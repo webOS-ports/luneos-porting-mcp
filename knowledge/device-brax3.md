@@ -3,12 +3,9 @@
 BraX3 (`brax3`), Brax Technologies' privacy phone on MediaTek Dimensity 6300 (MT6835), Tier A on MediaTek's mgk android13-5.15 kernel: KMI-clean kernel built host-side; never booted.
 
 The first android13-5.15 MediaTek port and the first MediaTek device with an
-`init_boot` partition. It produced two corrections to the MT6789 method: the
-stock kernel has **BTF on**, so a host without `pahole` silently builds a kernel
-whose `struct module` no longer matches (kmi-crc-matching.md § Step 5), and the
-KMI-poison list moved — **`SYSVIPC` poisons, `USER_NS` is clean** here, the
-opposite way round from MT6789 (device-q25.md § Kernel). Same `meta-zinwa`
-shape otherwise: device tree kernel, stock vendor modules, boot images only.
+`init_boot` partition. It produced two corrections to the MT6789 method — BTF on,
+and **`SYSVIPC` poisons, `USER_NS` is clean** (soc-mediatek.md § Kernel). Same
+`meta-zinwa` shape otherwise: device tree kernel, stock vendor modules, boot images only.
 
 ## Status (as of 26 Oct 2026)
 
@@ -56,17 +53,15 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
   version 14.0.7"), the stock kernel's own string and `CLANG_VERSION` in
   `build.config.constants`; `GKI_CLANG_DIR:brax3`. The Halium 14.0 tree's
   `prebuilts/clang/host/linux-x86` has it.
-- **pahole is required.** Stock sets `DEBUG_INFO_BTF` and
-  `DEBUG_INFO_BTF_MODULES`; the second adds `btf_data_size`/`btf_data` to
-  `struct module`. Without `pahole` kconfig drops both, and the build scored
-  **774/774 failing**, `module_layout` included (0x4ccd63ed vs stock 0x0222dd63).
+- **pahole is required** (kmi-crc-matching.md § Step 5). Stock sets `DEBUG_INFO_BTF`
+  and `DEBUG_INFO_BTF_MODULES`; without `pahole` the build scored **774/774 failing**,
+  `module_layout` included (0x4ccd63ed vs stock 0x0222dd63).
   The recipe `DEPENDS` on `pahole-native` (meta-oe 1.31; stock used 1.25 —
   `PAHOLE_VERSION` feeds no struct, measured 0/774) and fails `do_configure` if
   `DEBUG_INFO_BTF_MODULES` is missing.
 - **Vermagic:** `5.15.209-android13-8-gdd511ad2a748`, set by `vermagic.cfg`
-  (`LOCALVERSION`, `LOCALVERSION_AUTO` off) plus the empty `.scmversion` (as on
-  q25). Storage (`mtk-mmc.ko`, `ufs-mediatek-mod.ko`) and USB (`mtu3.ko`) are
-  vendor_boot modules loaded by busybox `insmod`.
+  (soc-mediatek.md § Kernel). Storage (`mtk-mmc.ko`, `ufs-mediatek-mod.ko`) and USB
+  (`mtu3.ko`) are vendor_boot modules loaded by busybox `insmod`.
 - **The bisect** (kmi-crc-check.py, BaseOS = 177 vendor_boot + 597 vendor_dlkm,
   Iode = 377):
 
@@ -80,7 +75,8 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
 
   **KMI-poison on MediaTek mgk android13-5.15 / MT6835: `CONFIG_SYSVIPC`.**
   `USER_NS` is clean but stays off like every other port. `NET_L3_MASTER_DEV` is
-  **=y in stock** (off on MT6789) and must stay on. UBports' `halium.config` for
+  **=y in stock** and must stay on (kernel-config.md § Poison options: per KMI, and
+  drift is a max). UBports' `halium.config` for
   this kernel sets SYSVIPC and USER_NS (plus AppArmor, squashfs, USB-ethernet)
   — not a reference.
 - **Fragment:** q25's sections 1–2 unchanged (systemd/udev, VT, usermode
@@ -93,8 +89,8 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
   3,832 imported symbols with **0 CRC differences** and the same
   `module_layout` — one KMI — but report different releases (BaseOS
   `5.15.209-android13-8-gdd511ad2a748`, iodéOS `5.15.211-android13-8-g63db33e5daa0`).
-  The sublevel comes from the Makefile, not `LOCALVERSION`; passing
-  `SUBLEVEL=211` on the make command line gives Iode's exact string. So
+  `SUBLEVEL=211` on the make line gives Iode's exact string (soc-mediatek.md
+  § Kernel). So
   `MACHINE=brax3` builds for BaseOS and `MACHINE=brax3-iode` for iodéOS
   (`BRAX3_VENDOR`, `vermagic-<vendor>.cfg`); `do_deploy` fails if
   `kernel.release` differs from the vendor's. The `.211` is only a label: Iode
@@ -120,11 +116,11 @@ os_version 13.0.0/2023-05; `init_boot.img` v4, ramdisk 6,280,221 B, magic
   as `-idirafter`, not `-I`, in `HOSTCFLAGS`.
 - No stock boot.img is published, so `ANDROID_BOOTIMG_OS_VERSION` is **unset**
   (0): read the flashed `boot_a` header first.
-- Cmdline: q25's 20 `?` padding carried over defensively; whether MT6835's lk
-  drops 20 characters is unmeasured. BaseOS's `bootopt=64S3,32N2,64N2` lives in
-  vendor_boot, which stays stock.
-- The debug image is kernel + ramdisk in `boot` (gki_bootimg.bbclass), for a
-  device where `fastboot boot` may not exist (q25: MediaTek lk).
+- Cmdline: the 20 `?` padding, carried defensively; MT6835 unmeasured
+  (soc-mediatek.md § Boot chain: preloader and lk). BaseOS's `bootopt=64S3,32N2,64N2`
+  lives in vendor_boot, which stays stock.
+- The debug image is kernel + ramdisk in `boot` (gki_bootimg.bbclass), in case
+  `fastboot boot` does not exist (soc-mediatek.md § Boot chain: preloader and lk).
 
 ## Vendor and GSI
 
@@ -132,8 +128,9 @@ BaseOS vendor = Android 16 (LineageOS 23.2) → Halium 16.0 `halium_arm64`,
 nothing to convert, no VNDK snapshot. Tier 1 keys carried over from the MediaTek
 ports with evidence from the UBports port: `deviceinfo_force_hwc2="1"`
 (`MIR_ANDROID_FORCE_HWC2=1`), `deviceinfo_audio_sample_rate="48000"` (their
-`module-droid-card rate=48000`). Not carried: `hybris_prefer_vndk` (an A12-vendor
-libbase gap), the connac1x bluebinder mask (try first if hci0 fails).
+`module-droid-card rate=48000`). Not carried: `hybris_prefer_vndk` and the
+connac1x bluebinder mask (try first if hci0 fails) (soc-mediatek.md § Userspace and
+vendor keys).
 
 ## Yocto
 
@@ -164,9 +161,8 @@ needs platform-tools ≥ 35.0.2. Users report bricks from flashing the iodéOS S
 Flash preloader (≤ 7.6) onto newer batches (DRAM init fails): **never flash a
 preloader**; back up with mtkclient first. Brax publishes an SP
 Flash Tool package for Iode (`Brax3_IodeOs/brax3_spflash_vendor`: scatter,
-preloader, modem) but no boot images. Follow q25's flow (installing.md):
-unlocked bootloader, verification-disabled vbmeta, flash `boot` and
-`init_boot` on the inactive slot, rootfs via a prefilled `userdata` image.
+preloader, modem) but no boot images. Planned flow: q25's (installing.md § Flash
+steps per layout class), with `init_boot` flashed beside `boot` on the inactive slot.
 
 ## Open issues
 
@@ -175,8 +171,9 @@ unlocked bootloader, verification-disabled vbmeta, flash `boot` and
   the flashed `boot_a` header (os_version), whether `fastboot boot` works.
 - AIDL radio (`InterfaceType = aidl`): check ofono-binder-plugin and the RIL
   derivation in hal-userspace.md before expecting telephony.
-- Mali in a pid namespace (Waydroid): q25 needed a patched `mali_kbase`
-  (device-q25.md); unchecked for r25p0 / mt6835.
+- Mali in a pid namespace (Waydroid): Droidian's ACK kernel for the Q25 carries a gki_quirks
+  `find_get_pid` hook so `mali_kbase` resolves pids globally under `PID_NS=y` (device-q25.md § Kernel);
+  whether mt6835's r25p0 driver needs the same is unchecked.
 - Move the kernel to `shr-distribution/linux` as `brax3/5.15.209/lune`; add
   v4l2loopback there.
 

@@ -10,7 +10,7 @@ modules itself and overlays them (kmi-crc-matching.md § Step −1 — first ask
 you need to match at all). Also the device behind two general rules: the authority
 for a kernel config is the vendor whose modules the device loads, not the OEM
 (kmi-crc-matching.md), and read *every* fstab the vendor ships (connectivity.md §
-Modem).
+Modem failures on the Android side).
 
 ## Status (as of 25 Sep 2026)
 
@@ -59,15 +59,13 @@ Hardware results are from kit rev 9.
   modversions aarch64`). `LUNEOS_KERNEL_FRAGMENT ?= "1"` is the baseline switch.
 - **Toolchain: Google Clang r416183b, not OE's GCC.** With GCC every TrustZone call
   failed (`scm_call failed with error code -1` ×44, `QSEECOM: Failed to get QSEE
-  version info -19`) and took PIL, the zap shader, the GPU and the display with
-  it: `drivers/soc/qcom/scm.c`'s arm64 entry is register-pinned inline asm with
-  `__asmeq`, and the tree has never been built with anything but Clang. Point
-  `GKI_CLANG_DIR:sunfish` at r416183b.
+  version info -19`) and took PIL, the zap shader, the GPU and the display with it;
+  `drivers/soc/qcom/scm.c`'s arm64 entry is register-pinned inline asm with `__asmeq`
+  (kmi-crc-matching.md § Step 4 — the compiler). Point `GKI_CLANG_DIR:sunfish` at r416183b.
 - **LTO and CFI stay on, as `sunfish_defconfig` sets them.** Turning them off to
-  match Google's stock IKCONFIG broke LineageOS's modules, which were built with
-  CFI: `snd_event_dlkm: Unknown symbol __cfi_slowpath`. The reference is the
-  vendor whose modules load (LineageOS), not Google. LTO is a Kconfig choice
-  (select `CONFIG_LTO_NONE=y` to turn it off), but not here.
+  match Google's stock IKCONFIG broke LineageOS's CFI-built modules
+  (`snd_event_dlkm: Unknown symbol __cfi_slowpath`; kmi-crc-matching.md § Step 2 — read
+  the failure correctly).
 - **Poison options:** `FANOTIFY` and `CGROUP_DEVICE` move the CRC of 8158 of 12823
   exported symbols between them; both stay on (`CGROUP_DEVICE` is used by 7 units
   in the shipped rootfs). Measurement and analysis: kernel-config.md § What the
@@ -118,17 +116,12 @@ Hardware results are from kit rev 9.
   reproduced exactly. The trade: the device must run the LineageOS 23.2 vendor,
   which the kit now flashes.
 - **Force-loading the prebuilt modules** (`CONFIG_MODULE_FORCE_LOAD`, a host-side
-  pre-start hook) — superseded by building them. Two lessons from that round: the
-  cfg's `enable|<sysfs path>` lines are what start the DSPs, and the node one of
-  them writes (`/sys/kernel/boot_adsp/boot`) is created by `adsp_loader_dlkm.ko`
-  earlier on the list — without it no ADSP, fastrpc "Transport endpoint is not
-  connected", and no sensors. And `incrementalfs.ko` is on the vendor partition
-  but not in the cfg (Android loads it with `finit_module`, which has no force), so
-  it failed with `Exec format error` and vold could not prepare user 0. Reason from
-  the vendor partition (`debugfs -R "ls -l /lib/modules" vendor.img`), not the
-  defconfig: guessing from `=m` symbols predicted working audio on a device with no
-  ALSA card. Rules: kmi-crc-matching.md § Force-loading prebuilt modules, and when
-  it is safe.
+  pre-start hook) — superseded by building them. What that round found on sunfish:
+  `/sys/kernel/boot_adsp/boot` (the cfg's `enable|` line that starts the ADSP) is
+  created by `adsp_loader_dlkm.ko`; `incrementalfs.ko` is shipped but not in the cfg
+  and failed with `Exec format error`; `=m` symbols in the defconfig predicted audio on
+  a device with no ALSA card (kernel-modules.md § Loading a prebuilt vendor set from
+  the host).
 
 ## Boot image
 
@@ -181,12 +174,12 @@ uses.
 ## Subsystem notes
 
 - **firmware_mnt:** `mount-android.sh` once read only the first fstab glob match
-  (`fstab.persist`), so `/vendor/firmware_mnt` was never mounted, PIL failed for
-  modem, cdsp, venus, npu and ipa_fws (`Initializing image failed(rc:-5)`), the zap
-  shader never loaded, and surface-manager aborted in a loop on a black screen. It
-  now reads every fstab (connectivity.md § Modem).
-- **`vendor.all.modules.ready`** is set unconditionally by the cfg after loading,
-  so a total module failure is invisible downstream.
+  (`fstab.persist`), so `/vendor/firmware_mnt` was never mounted,
+  PIL failed for modem, cdsp, venus, npu and ipa_fws (`Initializing image
+  failed(rc:-5)`), the zap shader never loaded, and surface-manager aborted in a loop on
+  a black screen (connectivity.md § Modem failures on the Android side).
+- **`vendor.all.modules.ready`** is set unconditionally by `init.insmod.sunfish.cfg`
+  (kernel-modules.md § The vendor_dlkm set).
 - **`bad ioctl: -1072934383`** (60,304 in one boot) = `0xc00c5211` =
   `_IOWR('R', 17, 12)`: fastrpc `FASTRPC_IOCTL_GET_DSP_INFO`, which the vendor's
   `adsprpcd` calls and the older in-kernel `adsprpc` does not implement. A symptom of

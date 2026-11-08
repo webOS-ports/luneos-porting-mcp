@@ -100,9 +100,7 @@ module, `printk` included).
    <- [wlan_drv_gen3] <- wmt_lib_init [wmt_drv]
   ```
 
-  NET_POLL_CONTROLLER inserts three `ndo_*` pointers into `struct net_device_ops`, so the
-  stock-laid-out ops table was read at the wrong offsets (kmi-crc-matching.md § NETCONSOLE
-  and NET_POLL_CONTROLLER).
+  Mechanism: kmi-crc-matching.md § NETCONSOLE and NET_POLL_CONTROLLER.
 - **Instrumenting the initramfs to find that panic.** Five flash rounds showed nothing,
   because the panic came after switch_root. Reading ramoops out of DRAM found it in one read
   (Device-specific traps).
@@ -127,7 +125,7 @@ stock:
 - **Gzip is required in practice**: UBports' packer prefers `Image.gz`, and the UT adaptation
   gzips the stock kernel before packing, so that is what this lk has always been handed.
 - **lk passes the header cmdline through**: `log_buf_len=4M` and `printk.devkmsg=on` arrive in
-  `/proc/cmdline` (5 Oct log). No 20-character drop as on the G99.
+  `/proc/cmdline` (5 Oct log; soc-mediatek.md § Boot chain: preloader and lk).
 - **AVB**: the MediaTek chain (soc-mediatek.md § Boot chain), signed with Unihertz's key. The
   kit flashes the stock vbmeta with flags 3; lk logs `HASH_MISMATCH`, `img_auth_required = 0`,
   orange state, and boots ours. The unsigned footer
@@ -223,17 +221,15 @@ console to read afterwards, and expdb's kedump region came back as zeros (twice)
 own log showed `lk boot reason = 4` (`kernel_panic`, `exp_type 0x2`). What worked (method:
 soc-mediatek.md § Read ramoops straight out of DRAM over the preloader):
 
-- `mtk da peek 0x54410000 0xe0000 --filename pstore.bin`, catching the preloader **while it
-  bootloops** (holding Power or the Volume-Down BROM route from power-off loses DRAM). The
+- `mtk da peek 0x54410000 0xe0000 --filename pstore.bin` while the preloader bootloops. The
   console zone was at +0x4f000, pmsg at +0xd0000; the other ~80 4 KiB zones were empty
   dmesg-dump slots. pmsg showed the container up and surface-manager loading the vendor
   hwcomposer, so the rest of the port was healthy.
-- `dump-expdb.sh` reads DRAM first, then `mtk r expdb,cache` in the same session, and decodes
-  lk's `[AVB]` lines, the boot-image load, kernel panics, initramfs and `fs_mgr`.
-- The faillog image logs to `cache` (debugging.md § Recording the initramfs to a spare
-  partition). The first faillog `cache.bin` came back as untouched ext4: its logger started
-  only after module load. With `initrd_log_part=` it starts right after `/proc`, `/sys` and
-  devtmpfs. The empty record was itself the clue: the panic came after switch_root.
+- `dump-expdb.sh` also decodes lk's `[AVB]` lines, the boot-image load, kernel panics,
+  initramfs and `fs_mgr`.
+- The first faillog `cache.bin` (logger started after module load, before `initrd_log_part=`
+  moved it earlier) came back as untouched ext4; the empty record was itself the clue: the
+  panic came after switch_root (debugging.md § Recording the initramfs to a spare partition).
 
 ## Sources
 

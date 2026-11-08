@@ -52,10 +52,9 @@ and the stock factory images.
   `IKCFG_ST` in its `boot.img`, 6046 lines), then `luneos.cfg`.
   `LUNEOS_KERNEL_FRAGMENT ?= "1"`; `"0"` builds the pure baseline.
 - **Toolchain: Clang r416183b**, forced: `redbull_defconfig` sets `LTO_CLANG`,
-  `CFI_CLANG` and `SHADOW_CALL_STACK`. GCC stops at `'-fsanitize=shadow-call-stack'
-  requires '-ffixed-x18'`, and turning the three off would leave the stock CFI/SCS
-  modules loading into a kernel that does not maintain x18 or implement their CFI
-  checks — vermagic would not catch it (`MODULE_ARCH_VERMAGIC` is just `aarch64`).
+  `CFI_CLANG` and `SHADOW_CALL_STACK` (kmi-crc-matching.md § Step 4 — the compiler).
+  Turning them off would load CFI/SCS-built modules into a kernel without x18 or CFI,
+  and vermagic would not catch it (`MODULE_ARCH_VERMAGIC` is just `aarch64`).
   The recipe follows `linux-zinwa-q25` (own configure/compile with the prebuilt
   Clang, no kernel.bbclass), so it does not provide `virtual/kernel`
   (`linux-dummy`). Set `GKI_CLANG_DIR:bramble`.
@@ -65,19 +64,13 @@ and the stock factory images.
   whole delta
   scores 0 of 218 stock modules failing, the same as the stock-config baseline, so
   nothing in it poisons this KMI. `CONFIG_MODULE_FORCE_LOAD=y` is a bisecting
-  escape hatch only — forcing a module whose layouts moved corrupts memory, and here
-  those modules are the storage stack. No compat vDSO, unlike stock.
+  escape hatch only, here doubly so: the forced modules would be the storage stack
+  (kmi-crc-matching.md § Force-loading prebuilt modules). No compat vDSO, unlike stock.
 - **Module strategy: ship our own build.** `ANDROID_INITRAMFS_KERNEL_MODULES = "1"`
-  puts all 329 in the initramfs (ramdisk 2.8 → 24.3 MB). `init.sh`'s
-  `stage_our_kernel_modules()` copies ours over `/lib/modules` before anything is
-  modprobed, keeping the vendor's `modules.load`, `modules.dep` and
-  `modules.softdep` as the authority on what loads and in what order. The copy is
-  explicit because cpio layering does not substitute here: the vendor ramdisk has a
-  real `/lib/modules`, ours is usrmerge (`/usr/lib/modules`), and our `/lib ->
-  usr/lib` symlink cannot be created over the vendor's directory. LineageOS keeps
-  the 221 modules flat at `/lib/modules/*.ko`, while `modules_install` writes
-  `/lib/modules/<version>/kernel/...`, so `do_install` flattens them. No bind-mount
-  is needed, unlike sunfish. Rules: kernel-modules.md § The initramfs route.
+  puts all 329 in the initramfs (ramdisk 2.8 → 24.3 MB); `stage_our_kernel_modules()`
+  copies them over the vendor ramdisk's `/lib/modules`, flattened in `do_install` to
+  LineageOS's flat `/lib/modules/*.ko`, with the vendor's `modules.*` files kept. No
+  bind-mount, unlike sunfish (kernel-modules.md § The initramfs route, Shape B).
 
 ### Rejected paths
 

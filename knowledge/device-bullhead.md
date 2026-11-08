@@ -39,10 +39,9 @@ Reported by the remote tester on an LGH790 (bootloader BHZ11h) unless marked oth
 
 LineageOS 21's `kernel_lge_bullhead` (nexus5x-dev), 3.10; LuneOS branch `bullhead/3.10/lineage-21.0` in shr-distribution/linux, recipe `linux-lg-bullhead-halium` (meta-lg) with `halium_bullhead_defconfig`. The recipe lists every patch; the generic ones:
 
-- `nr_cpus=4` on the command line; arm64 smp honours it as the possible-CPU limit, lpm-levels skips the A57 cluster, and the root cpuset's `cpus_requested` is clamped to the possible CPUs (else LXC could not create its cgroups).
-- `execveat()` and `renameat2` for the arm64 glibc built for 4.9 (kernel-build.md § Legacy 3.x kernels).
-- No register dump for unimplemented syscalls (they filled the journal).
-- `SECURITY_ANDROID_GID_CAPABILITIES` (Halium's commits from its halium-7.1 branch), `CHECKPOINT_RESTORE`, `FANOTIFY`, `BT_HCIVHCI`, the systemd cgroup controllers; MemAvailable; ipc_router bind for group net_raw (as on the Galaxy A3).
+- `nr_cpus=4` on the command line; arm64 smp honours it as the possible-CPU limit, lpm-levels skips the A57 cluster, and the root cpuset's `cpus_requested` is clamped to the possible CPUs.
+- `execveat()` and `renameat2`; no register dump for unimplemented syscalls. These three are in kernel-build.md § Legacy 3.x kernels.
+- `SECURITY_ANDROID_GID_CAPABILITIES` (Halium's commits from its halium-7.1 branch), `CHECKPOINT_RESTORE`, `FANOTIFY`, `BT_HCIVHCI`, the systemd cgroup controllers; MemAvailable; ipc_router bind for group net_raw (kernel-config.md § Config facts from the other distros).
 - `android_usb`: "ffs" taken as the first f_ffs alias (the gadget setup oopsed on the alias-less template).
 - qcacld-2.0: no `WIPHY_FLAG_SUPPORTS_FW_ROAM` (the PMF fix, kernel-build.md § Legacy 3.x kernels).
 - kgsl: on an SVM `-ENOMEM`, print the process's mappings below 3 GB once (the diagnostic that found the Chromium reservation; kept).
@@ -77,7 +76,7 @@ TWRP route: `fastboot boot` the official TWRP 3.7.0 image (RAM only, never flash
 
 **Bluetooth.** Service added and binderized; then `wcnss_filter`, force-started by start-android-hals, ate the controller's replies on the UART (connectivity.md § Bluetooth). An rc override did not stop the script (round 11); `deviceinfo_android_skip_services` in round 12.
 
-**Headphone jack.** pulseaudio could not read the jack's input device (`pulse` was never in `input`, a generic bug now fixed in meta-luneos). The kernel arms MBHC with built-in calibration at card init; whether it reports a plug-in is the open question (round 12 carries an evtest script).
+**Headphone jack.** pulseaudio could not read the jack's input device (`pulse` was never in `input`, fixed in meta-luneos; audio-media.md § Audio). The kernel arms MBHC with built-in calibration at card init; whether it reports a plug-in is the open question (round 12 carries an evtest script).
 
 **Restart loops cost CPU.** In round 7 WebAppMgr restarting every 6 s and sensorfwd every second kept four A53s busy: touch was slow and sound repeated. Look for restart loops before blaming a slow port.
 
