@@ -288,7 +288,9 @@ const PROMPTS = {
             "2. Obtain and analyze the stock images (factory zip or payload.bin), extract the kernel config " +
             "via IKCONFIG, run mer_verify_kernel_config, and plan the config fragment. The KMI-poison " +
             "list is per KMI and tree: re-derive it with kmi-crc-check.py, never copy another device's " +
-            "(seen so far: FANOTIFY, NET_L3_MASTER_DEV, CGROUP_DEVICE, USER_NS). CONFIG_SYSVIPC is not needed.\n" +
+            "(seen so far: FANOTIFY, NET_L3_MASTER_DEV, CGROUP_DEVICE, USER_NS, SYSVIPC). CONFIG_SYSVIPC is not needed. " +
+            "If the stock IKCONFIG has DEBUG_INFO_BTF, put pahole on PATH or the config silently drops it " +
+            "and struct module changes (kmi-crc-matching § Step 5).\n" +
             "3. Build the kernel (ACK for Tier A, vendor tree for Tier B; a vendor's \"GKI\" may be a derivative " +
             "that ACK cannot match, e.g. MediaTek mgk on q25 - then build the device tree) and verify KMI with " +
             "kmi-crc-check.py before flashing anything.\n" +
