@@ -1,6 +1,8 @@
 # Device: goyavewifi (Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi, SM-T113)
 
-Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi SM-T113 (`goyavewifi`, Spreadtrum SC7730S), 32-bit, Tier B on the halium_arm 16.0 GSI through a Samsung `sboot` that ignores the boot-image command line. The container and the graphics HALs run and the UI draws; the rest of the hardware is untested.
+Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi (`goyavewifi`), Spreadtrum SC7730S, 32-bit, Tier B on the halium_arm 16.0 GSI: the UI draws and touch works; the rest is untested.
+
+Samsung's `sboot` ignores the boot-image command line.
 
 Nobody who works on it owns the tablet. A tester flashes one kit per round with Odin and sends logs; every round is a log analysis, a fix and a small update zip (debugging.md § Remote bring-up through a tester).
 
@@ -27,7 +29,7 @@ Hardware-verified by a tester on an SM-T113 unless marked otherwise.
 
 ## Kernel
 
-Community Spreadtrum tree (samsung-sc8830, branch hybris-14.1, 3.10.103) with a LuneOS delta, branch `goyavewifi/3.10/hybris-14.1` in shr-distribution/linux. What this tree lacked, in the order the logs showed it (each one a tester round; the generic list is kernel-porting.md § Legacy 3.x kernels):
+Community Spreadtrum tree (samsung-sc8830, branch hybris-14.1, 3.10.103) with a LuneOS delta, branch `goyavewifi/3.10/hybris-14.1` in shr-distribution/linux. What this tree lacked, in the order the logs showed it (each one a tester round; the generic list is kernel-build.md § Legacy 3.x kernels):
 
 | Missing | Symptom | Fix |
 |---|---|---|
@@ -37,7 +39,7 @@ Community Spreadtrum tree (samsung-sc8830, branch hybris-14.1, 3.10.103) with a 
 | `O_TMPFILE` (3.11) | `tombstoned` exits 1: `openat(".", O_TMPFILE) = -EISDIR` | backport series + ext3/ext4 `->tmpfile()` |
 | `memfd_create` + sealing | bionic's libc calls it | copy from the A3 (2015) 3.10 tree |
 
-All five were present in a sibling port's tree (a3-2015-halium 3.10.108, sm-t520 3.4, hammerhead).
+All five were present in a sibling port's tree (a3-2015-halium 3.10.108, sm-t520 3.4, hammerhead); one audit would have found them (kernel-build.md § Legacy 3.x kernels).
 
 ## Boot image
 
@@ -49,15 +51,15 @@ LineageOS 16.0 (Android 9, VNDK 28) built from the sc8830-Bringup trees in a Hal
 
 Device-tree edits the 16.0 userspace needed (all in the shared Halium tree, so keep them as patches):
 
-- `fstab.sc8830`: drop `encryptable=footer` from `/data`; Android 16's libfstab rejects FDE and vold then loads no fstab at all.
-- `init.sc8830.rc`: remove the `persdata` wait/mount (the device does not exist; the `wait` stalls init), and `stop media.swcodec` (it aborts every 5 s with "gralloc-mapper is missing").
+- `fstab.sc8830`: drop `encryptable=footer` from `/data` (gsi-building.md § Before deriving, item 6).
+- `init.sc8830.rc`: remove the `persdata` wait/mount (the device does not exist; the `wait` stalls init), and `stop media.swcodec` (it aborts every 5 s with "gralloc-mapper is missing"). The recipe now pins GSI `20261017-1`, which has the sphal linkerconfig change (gsi-building.md § GSI-side fixes for legacy vendors); whether the stop is still needed under it is untested.
 - `hidl.mk`: add `android.hardware.graphics.{allocator@2.0,composer@2.1}-service`; the vendor had only the `-impl` libraries.
 
-Converter-side: `libft2.so` (gsi-building.md § Before deriving, item 5), reached here as gralloc -> libdither -> libandroid_runtime -> libpdfium -> libft2; and shims for the framework copies the vendor brings (libgui, libmedia, libandroid_runtime and what they pull in), whose missing bionic symbols surfaced one per round until the scan was made version-aware.
+Converter-side: `libft2.so`, reached through `libpdfium.so` (gsi-building.md § Before deriving, item 5); and shims for the framework copies the vendor brings (libgui, libmedia, libandroid_runtime and what they pull in), whose missing bionic symbols surfaced one per round until the scan was made version-aware.
 
 ## Yocto
 
-Layer `meta-smartphone/meta-samsung`, `MACHINE=goyavewifi`; status file `meta-samsung/conf/machine/goyavewifi-STATUS.md`, the round-by-round log findings. Kernel `linux-samsung-goyavewifi`, Android side `android-system-image-goyavewifi`, adaptation `goyavewifi-deviceinfo` (luneos-device-config). The Android-side changes of 14-19 Oct are on meta-smartphone `herrie/20261019` (shr-distribution/meta-smartphone#200, open as of 20 Oct 2026).
+Layer `meta-smartphone/meta-samsung`, `MACHINE=goyavewifi`; status file `meta-samsung/conf/machine/goyavewifi-STATUS.md`, the round-by-round log findings. Kernel `linux-samsung-goyavewifi`, Android side `android-system-image-goyavewifi`, adaptation `goyavewifi-deviceinfo` (luneos-device-config). The Android-side changes of 14-19 Oct are on meta-smartphone `herrie/20261019` (shr-distribution/meta-smartphone#200, merged 22 Oct 2026).
 
 ## Install
 
@@ -69,9 +71,9 @@ Odin the LineageOS recovery, format `/data`, `adb sideload` the `luneos-dev-pack
 
 **Audio.** The LineageOS 16 build keeps its policy in the legacy `/system/etc/audio_policy.conf`, which the plain GSI does not have; without a copy (`HALIUM_LEGACY_COPY_FILES`) there was no droid card.
 
-**Stubbed services.** `stubbed-services.d/<codename>` (pre-start.d/50-stub-services): `lmkd` (Android 16's links libmemevents, whose static constructor needs BPF; `critical`, restarted every 5 s with a crash dump), `gpsd` (no GPS; exits 1), the memtrack HAL (exits 1, cause not found).
+**Stubbed services.** `stubbed-services.d/<codename>` (pre-start.d/50-stub-services): `lmkd` (`critical`, restarted every 5 s with a crash dump; soc-qualcomm.md § A LineageOS 21 vendor without VNDK), `gpsd` (no GPS; exits 1), the memtrack HAL (exits 1, cause not found).
 
-**Wi-Fi and Bluetooth stay on the host.** `vendor.wifi_hal_legacy` and `vendor.bluetooth-1-0` are skipped (`deviceinfo_android_skip_services`), as on the SM-T520 and the A3 (2015).
+**Wi-Fi and Bluetooth stay on the host.** `vendor.wifi_hal_legacy` and `vendor.bluetooth-1-0` are skipped (`deviceinfo_android_skip_services`), as on the SM-T520 (`n2awifi`); the A3 (2015) keeps its Bluetooth HAL (device-a3-2015-halium.md § Subsystem notes).
 
 ## Open issues
 
@@ -83,9 +85,9 @@ Odin the LineageOS recovery, format `/data`, `adb sideload` the `luneos-dev-pack
 
 ## Device-specific traps
 
-- **`sboot` builds its own kernel command line and drops the boot image's**; only the kernel's `CONFIG_CMDLINE` reaches the kernel. Everything the kernel or LuneOS needs from it (`androidboot.hardware=sc8830`, `androidboot.selinux=permissive`, `enable_adb` for the debug image) goes into `CONFIG_CMDLINE`. Measured from `/proc/cmdline` in the recovery, not assumed.
+- **`sboot` builds its own kernel command line and drops the boot image's**; only the kernel's `CONFIG_CMDLINE` reaches the kernel. Everything the kernel or LuneOS needs from it (`androidboot.hardware=sc8830`, `androidboot.selinux=permissive`, `enable_adb` for the debug image) goes into `CONFIG_CMDLINE`. Measured from `/proc/cmdline` in the recovery, not assumed (kernel-config.md § The kernel command line).
 - The kernel partition is `KERNEL`, not `boot`.
-- An APEX service cannot be stubbed with `stubbed-services.d` (the container's apexd mounts its own copy): stop it from the vendor `init.sc8830.rc` instead.
+- An APEX service cannot be stubbed (hal-userspace.md § Stubbing a service vs not starting it): stop it from the vendor `init.sc8830.rc`.
 
 ## Sources
 

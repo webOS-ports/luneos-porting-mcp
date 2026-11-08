@@ -24,6 +24,10 @@ Published generic GSI releases (`gh release list -R webOS-ports/halium-images`):
 | `halium-luneos-20260830` | 16.0 `halium_arm` |
 | `halium-luneos-20260910` | 16.0 `halium_arm64`, the first carrying VNDK 27–34 |
 | `halium-luneos-20261005` | 16.0 `halium_arm` (`20261005-1/-2`, `20261007-1`, `20261008-3`), 16.0 `halium_arm64` `20261007-1`, plus prebuilt vendor images for legacy devices |
+| `halium-luneos-20261103` | 16.0 `halium_arm64` `20261103-1`: the Widevine bridge's Android half (`wvbridged`, `wvlaunch`, `libwvshim.so`, webOS-ports/luneos-widevine-bridge) and the linkerconfig link that lets the vendor's Widevine HAL load `libwvshim.so`; inert unless the bridge is turned on in LuneOS |
+| `halium-luneos-20261104` | 16.0 `halium_arm` and `halium_arm64` `20261104-1`: droidmedia's decoder fixes (a failing codec wakes the reader waiting for its output; the reader stops before its source is freed; an input frame larger than the codec's buffer is refused; the buffer queue's slots are emptied under its lock) |
+| `halium-luneos-20261107` | 16.0 `halium_arm` `20261107-1`, `halium_arm64` `20261107-2`: droidmedia only |
+| `halium-luneos-20261108` | 16.0 `halium_arm` and `halium_arm64` `20261108-1`, plus `hammerhead-halium-vendor.img`: linkerconfig reads a vendor binary's target SDK from a `.version` file next to it (`enable.target.sdk.version`); CameraClient hands HAL1 recording frames back to the HAL off its callback thread (QCamera2 joins that thread in `stopRecording()` under the device lock, which deadlocked until minimediaservice restarted); `init.halium.rc` preloads `libselinux_stubs.so` for vndservicemanager by soname again. Still VNDK v27–v34 |
 
 The build tooling itself lives in no repository — `halium-images` is release hosting only — so capturing the process as CI is a first-class task.
 
@@ -42,7 +46,7 @@ m systemimage          # → out/target/product/halium_arm64/system.img
 
 Big machine, runs rarely, once per generation. This single job replaces every per-device Android build LuneOS has ever done.
 
-Verified properties of the generic image (unsparsed): it is **system-as-root** — `/init`, `/system`, `/vendor`, `/odm` at the image root, so `ANDROID_SYSTEM_IMAGE_DESTNAME = "android-rootfs.img"` stays correct and `pre-start.sh` takes its `[ -e /android/init ]` branch. `/vendor` inside it is a **real empty directory** (0755, gid 2000), a clean mount point for the device's stock vendor.
+The generic image is **system-as-root** with a real empty `/vendor` (verified unsparsed; what that means for the recipes: yocto.md § android-system-image recipes).
 
 ## halium-16.0 setup and its three traps
 
@@ -100,7 +104,10 @@ Against `Halium/android_device_halium_halium_arm64` at `8dbc6dc` (tip of `halium
 The published arm64 16.0 GSIs from `halium-luneos-20260910` on ship every snapshot the
 tree carries (`PRODUCT_EXTRA_VNDK_VERSIONS := 27 28 29 30 31 32 33 34`, v30 copied in
 from the 14.0 tree as for `halium_arm` below), so one arm64 GSI serves vendors from
-Android 8.1 to 14 and adding a device never means rebuilding the GSI. The published
+Android 8.1 to 14 and adding a device never means rebuilding the GSI. **Unresolved:** no
+Android 8.1 vendor has run under it: goyavewifi found the `halium_arm` GSI's v27 APEX empty
+and dropped its 8.1 vendor (device-goyavewifi.md § Vendor and GSI), and athena's stock 8.1
+vendor was replaced rather than tried. The published
 `herrie/16.0` branch (tip `25c6f12`) does not carry that change. Each snapshot costs ~40 MB of system.img, uncompressed.
 
 | VNDK | vendor | | VNDK | vendor |
@@ -114,9 +121,12 @@ linkerconfig looks the snapshot up by the vendor's exact `ro.vndk.version` (a Li
 vendor built with `BOARD_VNDK_VERSION := current` reports 33, and v34 cannot stand in
 for it). A15+ vendors have no `ro.vndk.version` and need no snapshot (architecture.md).
 The 32-bit `halium_arm` GSI carried 30, 32 and 34 in its first 16.0 build (`20260827-1`,
-below); the current `20261007-1` carries v27 to v34 (the mindphone recipe). Snapshots install to
+below); `20261007-1` and its successors carry v27 to v34 (the mindphone recipe). Snapshots install to
 `/system/system_ext/apex/com.android.vndk.v<N>`; check a candidate GSI with
 `debugfs -R "ls /system_ext/apex" system.img`.
+
+For the oldest generation: the Halium 9 GSI requires an **Android 9 vendor** as its
+base; Android 8.0/8.1 vendors are only "experimental" (UBports porting-notes).
 
 ## Building a 32-bit `halium_arm` GSI
 
@@ -165,11 +175,13 @@ Why sargo worked on 16 without any of this: its vendor is 12.1 (v32, already shi
 
 Package the built `system.img` as `halium-luneos-<ver>-<date>-N-<product>.tar.bz2`, publish it as a `webOS-ports/halium-images` release, and bump `HALIUM_LUNEOS_GSI16_PV`/`_SHA256` in `halium-luneos-gsi-16.inc` (every machine moves together; a device that must stay behind overrides the weak assignments in its own recipe, as mindphone does for `halium_arm`). The `.inc` does the sparse→ext4 conversion + `/android/{system,vendor,data,...}` symlinks and consumes `${UNPACKDIR}/system.img` in place (`mv` → `simg2img` → `rm`) — note modern trees use `${UNPACKDIR}`, not `${WORKDIR}`. The image installs as `android-rootfs.img` (system-as-root mode of the initramfs).
 
-Selecting between a GSI and an old device build per machine: device-bringup-yocto.md § android-system-image recipes.
+**Current pins (8 Nov 2026).** `halium-luneos-gsi-16.inc` defaults to `20261108-1` on meta-smartphone's `herrie/security-integration-v2` branch (github.com/Herrie82/meta-smartphone); `wrynose` still has `20261017-1` until that branch is merged. Recipes that pin their own on that branch: a3-2015-halium and hammerhead-halium `20261108-1` (`halium_arm`), mindphone `20261107-1` (`halium_arm`), goyavewifi, vince-halium and tenderloin `20261017-1`, bullhead-halium and `android-system-image-legacy-gsi.inc`'s own default `20261007-1`. A legacy vendor image derived against one of these comes out the same against the next (checked on hammerhead against 20261107-1 and 20261108-1), so it is not rebuilt with each bump.
+
+Selecting between a GSI and an old device build per machine: yocto.md § android-system-image recipes.
 
 There is no standalone GSI artifact the installer picks per device; each machine gets the GSI through an `android-system-image-<device>` recipe in the image. With the 16.0 GSI carrying VNDK 27–34, one GSI per architecture would cover every current vendor.
 
-When a machine moves to a newer GSI generation, its android-headers move with it: device-bringup-yocto.md § What a machine conf contains.
+When a machine moves to a newer GSI generation, its android-headers move with it: yocto.md § What a machine conf contains.
 
 ## Do not adopt Droidian's `android-system-gsi-*-bin`
 
@@ -258,26 +270,30 @@ three recipes before goyavewifi spent rounds finding it again.
    tenderloin) or `libpdfium.so` (goyavewifi: `gralloc.sc8830.so` -> `libdither.so` ->
    `libandroid_runtime.so` -> `libpdfium.so`). The symptom is a HAL service that exits with status 1
    at every start and writes **nothing** to the kernel log or the journal; only the container's logcat
-   has it (debugging.md § 2.4):
+   has it (debugging.md § 2.4 Read the container's logcat):
    ```
    vndksupport: Could not load /vendor/lib/hw/gralloc.sc8830.so from default namespace: dlopen failed:
      library "libft2.so" not found: needed by /vendor/lib/libpdfium.so
    AllocatorHal: failed to get gralloc module
    ComposerHal: failed to open hwcomposer device
    ```
-   Since halium-legacy-vendor revision 32 (meta-smartphone 3f6bd336, in shr-distribution/meta-smartphone#200,
-   open as of 20 Oct 2026) the converter does this itself: `libft2.so` is no longer counted as
+   Since halium-legacy-vendor revision 32 (meta-smartphone e06f59f3, merged with
+   shr-distribution/meta-smartphone#200 on 22 Oct 2026) the converter does this itself: `libft2.so` is no longer counted as
    provided, so anything that needs it pulls the old `/system/lib` copy (~600 KB) and `HALIUM_LEGACY_EXTRA_LIBS`
    need not name it. On an older converter the rule is: **if the vendor image has `lib/libhwui.so` or
    `lib/libpdfium.so`, set `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`**. Check it before
    the first boot: `for f in vendor/lib/*.so; do readelf -d $f | grep -q 'NEEDED.*libft2' && echo $f; done`
    lists who wants it (the result is `libhwui.so`, `libpdfium.so`, or both).
    The same fix as the framework-symbol shims in item 3 usually goes with it for the same libraries
-   (`HALIUM_LEGACY_SHIM_TARGETS`, hal-userspace.md § Display: three gaps).
+   (`HALIUM_LEGACY_SHIM_TARGETS`, soc-qualcomm.md § Display: three gaps).
+
+6. **FDE fstabs.** Android 16's libfstab rejects `encryptable=footer` (full-disk encryption) and
+   vold then loads no fstab at all: drop the flag from `/data` in the vendor fstab (found on
+   goyavewifi; device-goyavewifi.md § Vendor and GSI).
 
 For 3 and 4 the fix belongs to the daemon that needs it: putting LineageOS's system libbinder into
 `/vendor/lib*` would replace it for every vendor process. Give that daemon a private directory and
-`setenv LD_LIBRARY_PATH` in an rc `override` (device-bringup-yocto.md § Shipping fixes through
+`setenv LD_LIBRARY_PATH` in an rc `override` (yocto.md § Shipping fixes through
 /odm).
 
 A converted image can be published next to the GSI as `<machine>-vendor.img` in the same
@@ -292,5 +308,6 @@ gets is not the one the image was made against.
 - `vendor/halium/droidmedia` minimedia.cpp: `configureRpcThreadpool(5, false)` — without it a HAL1
   takePicture() deadlocks minimediaservice against the HAL.
 - Both are in the halium_arm GSI `halium-luneos-16.0-20261008-3`, published in the `halium-luneos-20261005`
-  release. Rebuilding after a linkerconfig-only change takes ~20 s; check that
+  release, and in every later `halium_arm` GSI (`20261017-1` adds droidmedia's buffer and codec fixes; the recipes'
+  pins are under § Packaging and wiring into Yocto). Rebuilding after a linkerconfig-only change takes ~20 s; check that
   `variableloader.cc` was recompiled (it is installed into the runtime APEX, not /system/bin).

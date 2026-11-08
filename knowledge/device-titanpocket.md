@@ -64,7 +64,7 @@ LuneOS commits on the branch:
 | 0007 `cmdq_pkt_get_curr_buf_va` returns `NULL`, not `-ENOMEM` | real bug: a `void *` function returning `-ENOMEM` |
 | later | CP2166 backlight inversion; Sunwave fingerprint driver v2.2.38 (from Teracube; `CONFIG_SUNWAVE_FP=y`) with sensor detection enabled for TrustKernel phones as stock has it; ov16880 (from TheKit's Titan branch) and ov8865 (from Teracube) with the ov16880 EEPROM entry and the rear camera's AVDD on its GPIO-switched regulator as stock; the Pocket's own AW9523 key matrix (read from the stock kernel) and Fn as Ctrl |
 
-Config: `luneos.cfg` (the standard delta, kernel-porting.md § The config delta) plus
+Config: `luneos.cfg` (the standard delta, kernel-config.md § The config delta) plus
 `CONFIG_FRAME_WARN=4096` (GCC gives `mtk_battery_core.c` a 2144-byte frame) and
 `CONFIG_DEBUG_INFO` off. `titanpocket_defconfig` names `ov16880_mipi_raw` and `ov8865_mipi_raw`,
 which the base tree did not contain (it ships only `gc02m0`, `gc2375h`, `gc5035`); patch 0010
@@ -100,9 +100,7 @@ module, `printk` included).
    <- [wlan_drv_gen3] <- wmt_lib_init [wmt_drv]
   ```
 
-  NET_POLL_CONTROLLER inserts three `ndo_*` pointers into `struct net_device_ops`, so the
-  stock-laid-out ops table was read at the wrong offsets (kmi-crc-matching.md § NETCONSOLE
-  and NET_POLL_CONTROLLER).
+  Mechanism: kmi-crc-matching.md § NETCONSOLE and NET_POLL_CONTROLLER.
 - **Instrumenting the initramfs to find that panic.** Five flash rounds showed nothing,
   because the panic came after switch_root. Reading ramoops out of DRAM found it in one read
   (Device-specific traps).
@@ -127,11 +125,10 @@ stock:
 - **Gzip is required in practice**: UBports' packer prefers `Image.gz`, and the UT adaptation
   gzips the stock kernel before packing, so that is what this lk has always been handed.
 - **lk passes the header cmdline through**: `log_buf_len=4M` and `printk.devkmsg=on` arrive in
-  `/proc/cmdline` (5 Oct log). No 20-character drop as on the G99.
-- **AVB**: the stock vbmeta (SHA256_RSA2048, flags 0) chains `vbmeta_system` (location 2),
-  `vbmeta_vendor` (4) and `boot` (3) to Unihertz's key, and the stock boot.img has its own
-  signed footer. The kit flashes the stock vbmeta with flags 3; lk then logs the expected
-  `HASH_MISMATCH`, `img_auth_required = 0`, orange state, and boots ours. The unsigned footer
+  `/proc/cmdline` (5 Oct log; soc-mediatek.md § Boot chain: preloader and lk).
+- **AVB**: the MediaTek chain (soc-mediatek.md § Boot chain), signed with Unihertz's key. The
+  kit flashes the stock vbmeta with flags 3; lk logs `HASH_MISMATCH`, `img_auth_required = 0`,
+  orange state, and boots ours. The unsigned footer
   (`ANDROID_BOOTIMG_AVB_PARTITION_SIZE = "33554432"`, meta-android `lib/halium/avb.py`,
   byte-identical to `avbtool add_hash_footer`) matches stock's and UBports' shape.
 - Not carried from the UBports cmdline: `security=apparmor`, `rodata=0` (only for inserting
@@ -140,8 +137,8 @@ stock:
 ## Vendor and GSI
 
 Stock Android 11 vendor (VNDK 30) → the generic Halium 16 GSI
-`halium-luneos-16.0-20260910-1-halium_arm64`, the same file sargo, athena, q25 and radon run;
-it carries `com.android.vndk.v30`, so no VNDK work was needed. Composer is HIDL
+(`halium-luneos-16.0-20260910-1-halium_arm64` when first brought up; every machine now
+takes the release pinned in meta-android's `halium-luneos-gsi-16.inc`); it carries `com.android.vndk.v30`, so no VNDK work was needed. Composer is HIDL
 (`android.hardware.graphics.composer@2.1-service`). The phone keeps its own `vendor`, `super`,
 `dtbo`, modem and firmware.
 
@@ -175,11 +172,11 @@ Fastboot (bootloader must be unlocked). Kit: `boot-titanpocket-luneos.img`,
   flashes vbmeta → boot → userdata (wiped) → reboot.
 - `flash-boot.sh --normal|--debug` (default: faillog) updates vbmeta + boot only, keeping
   userdata.
-- No `fastboot boot`: MediaTek lk frequently lacks it, so the debug image is flashed.
+- No `fastboot boot` (soc-mediatek.md § Boot chain: preloader and lk), so the debug image is flashed.
 - Revert: `fastboot flash vbmeta vbmeta-stock.img`, `fastboot flash boot boot-stock.img`,
   `fastboot -w` (both from the 2024-05-14 ROM; an older firmware should use its own). If the
   phone does not enumerate, SP Flash Tool or mtkclient over the preloader: write `vbmeta`,
-  `boot` and `userdata` only, never `preloader` (installing.md § MediaTek BROM/preloader).
+  `boot` and `userdata` only, never `preloader` (soc-mediatek.md § Install over BROM/preloader).
 
 ## Subsystem notes
 
@@ -222,19 +219,17 @@ gave up for the boot. biomd now waits up to 30 s.
 **Debugging a bootloop.** Nothing enumerates on USB when it bootloops, there is no pstore
 console to read afterwards, and expdb's kedump region came back as zeros (twice) while lk's
 own log showed `lk boot reason = 4` (`kernel_panic`, `exp_type 0x2`). What worked (method:
-debugging.md § MediaTek: read ramoops straight out of DRAM over the preloader):
+soc-mediatek.md § Read ramoops straight out of DRAM over the preloader):
 
-- `mtk da peek 0x54410000 0xe0000 --filename pstore.bin`, catching the preloader **while it
-  bootloops** (holding Power or the Volume-Down BROM route from power-off loses DRAM). The
+- `mtk da peek 0x54410000 0xe0000 --filename pstore.bin` while the preloader bootloops. The
   console zone was at +0x4f000, pmsg at +0xd0000; the other ~80 4 KiB zones were empty
   dmesg-dump slots. pmsg showed the container up and surface-manager loading the vendor
   hwcomposer, so the rest of the port was healthy.
-- `dump-expdb.sh` reads DRAM first, then `mtk r expdb,cache` in the same session, and decodes
-  lk's `[AVB]` lines, the boot-image load, kernel panics, initramfs and `fs_mgr`.
-- The faillog image logs to `cache` (debugging.md § Recording the initramfs to a spare
-  partition). The first faillog `cache.bin` came back as untouched ext4: its logger started
-  only after module load. With `initrd_log_part=` it starts right after `/proc`, `/sys` and
-  devtmpfs. The empty record was itself the clue: the panic came after switch_root.
+- `dump-expdb.sh` also decodes lk's `[AVB]` lines, the boot-image load, kernel panics,
+  initramfs and `fs_mgr`.
+- The first faillog `cache.bin` (logger started after module load, before `initrd_log_part=`
+  moved it earlier) came back as untouched ext4; the empty record was itself the clue: the
+  panic came after switch_root (debugging.md § Recording the initramfs to a spare partition).
 
 ## Sources
 

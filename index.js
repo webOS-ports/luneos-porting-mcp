@@ -61,6 +61,48 @@ function loadTopics() {
   return topics;
 }
 
+// Topics that were renamed, merged or split keep answering under their old name,
+// so a client (or an older prompt) asking for one still gets the right text.
+// Value: the topic that now holds the content, optionally with the section.
+const TOPIC_ALIASES = {
+  "device-bringup-yocto": "yocto",
+  "kernel-porting": "kernel-build",
+};
+
+// Look a topic up by name or old name. Returns { topic, movedTo } or undefined.
+function resolveTopic(topics, requested) {
+  const name = String(requested || "").replace(/\.md$/, "");
+  if (topics.has(name)) return { topic: topics.get(name) };
+  const alias = TOPIC_ALIASES[name];
+  if (!alias) return undefined;
+  const [target] = alias.split(" § ");
+  const topic = topics.get(target);
+  return topic ? { topic, movedTo: alias } : undefined;
+}
+
+function movedNote(requested, movedTo) {
+  return `<!-- "${requested}" has moved: see ${movedTo}. -->\n\n`;
+}
+
+// luneos_list_topics groups topics by name; the first matching rule wins.
+const TOPIC_GROUPS = [
+  ["SoC families", (n) => n.startsWith("soc-")],
+  ["Kernel", (n) => /^(kernel-|kmi-)/.test(n) || n === "boot-images"],
+  ["Userspace components", (n) =>
+    ["yocto", "nyx-modules", "gsi-building", "installing", "hal-userspace", "graphics",
+      "audio-media", "connectivity", "deviceinfo-reference"].includes(n)],
+  ["Devices", (n) => n.startsWith("device-")],
+  ["General", () => true],
+];
+const GROUP_ORDER = ["General", "SoC families", "Kernel", "Userspace components", "Devices"];
+TOPIC_GROUPS.sort((a, b) => GROUP_ORDER.indexOf(a[0]) - GROUP_ORDER.indexOf(b[0]));
+
+function topicGroup(name) {
+  // General is the fallback, so test it last regardless of display order.
+  for (const [g, test] of TOPIC_GROUPS) if (g !== "General" && test(name)) return g;
+  return "General";
+}
+
 function allTopicsConcatenated(topics) {
   const parts = [];
   for (const t of topics.values()) {
@@ -103,13 +145,19 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return { resources };
 });
 
+function resolvedText(topics, requested) {
+  const r = resolveTopic(topics, requested);
+  if (!r) return undefined;
+  return (r.movedTo ? movedNote(requested, r.movedTo) : "") + r.topic.content;
+}
+
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const uri = request.params.uri;
   const m = /^luneos:\/\/knowledge\/(.+)$/.exec(uri);
   if (!m) throw new Error(`Unknown resource URI: ${uri}`);
   const topics = loadTopics();
   const text =
-    m[1] === "all" ? allTopicsConcatenated(topics) : topics.get(m[1])?.content;
+    m[1] === "all" ? allTopicsConcatenated(topics) : resolvedText(topics, m[1]);
   if (text === undefined) {
     const known = [...topics.keys()].join(", ");
     throw new Error(`Unknown topic "${m[1]}". Known topics: ${known}`);
@@ -132,7 +180,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "luneos_get_topic",
       description:
         "Return the full markdown content of one LuneOS knowledge topic " +
-        "(e.g. 'kernel-porting', 'debugging', 'device-bluejay'). " +
+        "(e.g. 'kernel-build', 'debugging', 'device-bluejay'). " +
         "Use luneos_list_topics to see valid names.",
       inputSchema: {
         type: "object",
@@ -172,15 +220,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const topics = loadTopics();
 
   if (name === "luneos_list_topics") {
-    const lines = [...topics.values()].map(
-      (t) => `- **${t.name}** — ${t.title}${t.description ? `: ${t.description}` : ""}`
-    );
-    return { content: [{ type: "text", text: lines.join("\n") || "No topics found." }] };
+    const groups = new Map(TOPIC_GROUPS.map(([g]) => [g, []]));
+    for (const t of topics.values()) {
+      groups.get(topicGroup(t.name)).push(
+        `- **${t.name}** — ${t.title}${t.description ? `: ${t.description}` : ""}`
+      );
+    }
+    const text = [...groups].filter(([, l]) => l.length)
+      .map(([g, l]) => `## ${g}\n${l.join("\n")}`).join("\n\n");
+    return { content: [{ type: "text", text: text || "No topics found." }] };
   }
 
   if (name === "luneos_get_topic") {
-    const t = topics.get(String(args.topic || "").replace(/\.md$/, ""));
-    if (!t) {
+    const text = resolvedText(topics, String(args.topic || "").replace(/\.md$/, ""));
+    if (text === undefined) {
       return {
         content: [{
           type: "text",
@@ -190,7 +243,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: true,
       };
     }
-    return { content: [{ type: "text", text: t.content }] };
+    return { content: [{ type: "text", text }] };
   }
 
   if (name === "luneos_search") {
@@ -216,31 +269,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (last && start <= last.end + 1) last.end = end;
         else windows.push({ start, end });
       }
+      // At most 8 snippets per topic; the match count says how many more there are.
       const snippets = windows
         .slice(0, 8)
         .map((w) => lines.slice(w.start, w.end + 1).join("\n"))
         .join("\n    …\n");
       results.push(`## ${t.name} (${hits.length} match${hits.length > 1 ? "es" : ""})\n${snippets}`);
     }
-    const text = results.length
-      ? results.join("\n\n")
-      : `No matches for "${args.query}" in ${topics.size} topics.`;
-    // Keep responses bounded.
+    if (!results.length) {
+      return { content: [{ type: "text", text: `No matches for "${args.query}" in ${topics.size} topics.` }] };
+    }
+    // Keep responses bounded: whole topic blocks up to MAX characters, then name
+    // the topics that did not fit instead of cutting one off mid-snippet.
     const MAX = 40000;
-    return {
-      content: [{
-        type: "text",
-        text: text.length > MAX
-          ? text.slice(0, MAX) + `\n\n[truncated — narrow the query or use luneos_get_topic]`
-          : text,
-      }],
-    };
+    const kept = [];
+    let size = 0;
+    for (const r of results) {
+      if (kept.length && size + r.length > MAX) break;
+      kept.push(r.length > MAX ? r.slice(0, MAX) + "\n[…]" : r);
+      size += r.length + 2;
+    }
+    const omitted = results.slice(kept.length).map((r) => /^## (\S+)/.exec(r)[1]);
+    const note = omitted.length
+      ? `\n\n[truncated: also matched in ${omitted.join(", ")} — narrow the query or use luneos_get_topic]`
+      : "";
+    return { content: [{ type: "text", text: kept.join("\n\n") + note }] };
   }
 
   return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
 });
 
 // ----- Prompts -------------------------------------------------------------
+
+// Every topic and "topic § Heading" the prompts below send a reader to. Checked
+// at startup (a warning on stderr) and by `npm test` (scripts/check-refs.mjs), so
+// a rename or a moved section cannot leave a prompt pointing at nothing.
+const PROMPT_TOPICS = {
+  general: ["architecture", "debugging", "tools", "deviceinfo-reference"],
+  kernel: ["kernel-config", "kernel-build", "kmi-crc-matching", "kernel-modules", "boot-images"],
+  userspace: ["yocto", "nyx-modules", "gsi-building", "installing", "hal-userspace", "graphics",
+    "audio-media", "connectivity"],
+  soc: ["soc-mediatek", "soc-qualcomm"],
+  sections: [
+    "architecture § Devices",
+    "architecture § Glossary",
+    "kernel-config § The config delta",
+    "kernel-config § Poison options",
+    "kmi-crc-matching § Step 5",
+    "gsi-building § Before deriving",
+    "debugging § Method",
+    "debugging § Debug channels",
+    "debugging § Symptom",
+  ],
+};
+
+function headingsOf(content) {
+  let fence = false;
+  const out = [];
+  for (const l of content.split("\n")) {
+    if (l.startsWith("```")) { fence = !fence; continue; }
+    const m = !fence && /^#{1,6}\s+(.*)$/.exec(l);
+    if (m) out.push(m[1].replace(/[`*_]/g, "").toLowerCase());
+  }
+  return out;
+}
+
+// "topic" or "topic § Heading prefix" → error string, or "" when it resolves.
+function checkRef(topics, ref) {
+  const [name, heading] = ref.split(" § ");
+  const t = topics.get(name);
+  if (!t) return `no topic "${name}"`;
+  if (heading && !headingsOf(t.content).some((h) => h.startsWith(heading.toLowerCase())))
+    return `no heading "${heading}" in ${name}`;
+  return "";
+}
+
+const ref = (list) => list.join(", ");
 
 const PROMPTS = {
   "luneos-session-start": {
@@ -255,12 +359,11 @@ const PROMPTS = {
             "You are helping with LuneOS (webOS) development on Halium/GSI/GKI Android devices. " +
             "Read luneos://knowledge/architecture now (overview, device index, glossary), then use " +
             "luneos_search and luneos_get_topic for what the task needs; luneos://knowledge/all is " +
-            "very large, load it only when the task spans the whole base. Key ground rules: " +
-            "match the GSI to the device's vendor API level (ro.vndk.version or " +
-            "ro.vendor.build.version.sdk; ro.board.api_level is a YYYYMM date on A15+ vendors), " +
-            "never to the Android version it runs; android-headers track the GSI, not the vendor; " +
-            "derive device configuration at runtime instead of shipping per-device files; and when a " +
-            "device does not come up, follow knowledge/debugging.md stage by stage.",
+            "very large, load it only when the task spans the whole base.\n\n" +
+            "The ground rules are listed in templates/CLAUDE.md of the luneos-porting-mcp repository " +
+            "and explained in architecture: in short, pick the GSI by the vendor API level, derive " +
+            "device configuration at runtime, verify the KMI host-side before flashing, and when a " +
+            "device does not come up, follow the debugging topic stage by stage.",
         },
       },
     ],
@@ -280,36 +383,26 @@ const PROMPTS = {
           text:
             `I want to port LuneOS to a new device${a.codename ? ` (codename: ${a.codename})` : ""}.` +
             (a.details ? ` Known details: ${a.details}.` : "") +
-            "\n\nUse the luneos-mcp knowledge base. Read these topics first: architecture, " +
-            "kernel-porting, boot-images, device-bringup-yocto, nyx-modules, gsi-building, installing. " +
+            "\n\nUse the luneos-mcp knowledge base. Read these topics first: " +
+            `${ref(PROMPT_TOPICS.general)}; kernel: ${ref(PROMPT_TOPICS.kernel)}; ` +
+            `userspace: ${ref(PROMPT_TOPICS.userspace)}; and ${ref(PROMPT_TOPICS.soc)} when the device ` +
+            "is on one of those SoC families. Then find the closest existing port in architecture § Devices " +
+            "(same SoC first, then same SoC family and tier, then same vendor Android version) and read its " +
+            "device-<codename> topic" + (a.codename ? `, or device-${a.codename} if it already exists` : "") + ". " +
             "Then guide me through, in order:\n" +
-            "1. Classify the device: Tier A (GKI, Android 12+/kernel 5.10+) or Tier B (legacy vendor kernel); " +
-            "A12-launch vs A13-launch boot layout (init_boot or not); 32-bit vs 64-bit; anti-rollback state.\n" +
-            "2. Obtain and analyze the stock images (factory zip or payload.bin), extract the kernel config " +
-            "via IKCONFIG, run mer_verify_kernel_config, and plan the config fragment. The KMI-poison " +
-            "list is per KMI and tree: re-derive it with kmi-crc-check.py, never copy another device's " +
-            "(seen so far: FANOTIFY, NET_L3_MASTER_DEV, CGROUP_DEVICE, USER_NS, SYSVIPC). CONFIG_SYSVIPC is not needed. " +
-            "If the stock IKCONFIG has DEBUG_INFO_BTF, put pahole on PATH or the config silently drops it " +
-            "and struct module changes (kmi-crc-matching § Step 5).\n" +
-            "3. Build the kernel (ACK for Tier A, vendor tree for Tier B; a vendor's \"GKI\" may be a derivative " +
-            "that ACK cannot match, e.g. MediaTek mgk on q25 - then build the device tree) and verify KMI with " +
-            "kmi-crc-check.py before flashing anything.\n" +
-            "4. Build the boot image(s) with the LuneOS initramfs (module-order-aware init, cmdline " +
-            "module params) and a debug variant with enable_adb.\n" +
-            "5. Create the Yocto machine (nyx module selection lives in nyx-modules-machines.inc) and the GSI pin " +
-            "for the right GSI generation (match vendor API level).\n" +
-            "5a. Legacy vendor converted by halium-legacy-vendor (e.g. a LineageOS build): before the first derive, " +
-            "run the checklist in gsi-building § Before deriving: read LineageOS's linker shim map " +
-            "(TARGET_LD_SHIM_LIBS) into HALIUM_LEGACY_LD_SHIMS and carry /system shims with HALIUM_LEGACY_EXTRA_LIBS; " +
-            "with a converter older than revision 32, add libft2.so to HALIUM_LEGACY_EXTRA_LIBS whenever the vendor image has lib/libhwui.so or lib/libpdfium.so " +
-            "(the LLNDK list names it but the vendor namespace does not hand it over; without it allocator and composer " +
-            "exit 1 silently); " +
-            "list passthrough HALs that sensorfw, bluebinder or droidmedia need and ship a service plus " +
-            "HALIUM_LEGACY_BINDERIZED_HALS for each; run the full-tree symbol check (tools § fullres.py) on every " +
-            "vendor daemon; fetch APEX-resident libraries such as ICU. Then list the vendor services " +
-            "start-android-hals would force-start (disabled ones included) and decide which belong in " +
-            "deviceinfo_android_skip_services.\n" +
-            "6. Assemble the flash kit and install; then follow the debugging playbook for bring-up.",
+            "1. Classify the device: Tier A or Tier B, boot-image layout, 32- or 64-bit, anti-rollback state " +
+            "(architecture, boot-images).\n" +
+            "2. Get the stock images and the stock kernel config, and plan the config fragment " +
+            "(kernel-config § The config delta; the poison list is re-derived per KMI, kernel-config § Poison " +
+            "options; BTF, kmi-crc-matching § Step 5).\n" +
+            "3. Build the kernel and verify the KMI host-side before flashing anything (kernel-build, " +
+            "kmi-crc-matching, tools).\n" +
+            "4. Build the boot image(s) with the LuneOS initramfs and a debug variant (boot-images, kernel-modules).\n" +
+            "5. Create the Yocto machine and the GSI pin for the right GSI generation (yocto, nyx-modules, " +
+            "gsi-building).\n" +
+            "5a. Legacy vendor converted by halium-legacy-vendor: work through gsi-building § Before deriving " +
+            "before the first derive, then decide which vendor services to skip or stub (hal-userspace).\n" +
+            "6. Assemble the flash kit and install (installing); then follow the debugging playbook for bring-up.",
         },
       },
     ],
@@ -329,17 +422,15 @@ const PROMPTS = {
           text:
             `A LuneOS device${a.device ? ` (${a.device})` : ""} is not coming up.` +
             (a.symptom ? ` Symptom: ${a.symptom}.` : "") +
-            "\n\nUse the luneos-mcp knowledge base: read the 'debugging' topic (and the matching " +
-            "device-<codename> topic if one exists) and triage stage by stage:\n" +
-            "Stage 0 — kernel: ramoops/pstore console, fastboot boot the -debug image (enable_adb).\n" +
-            "Stage 1 — initramfs: module load order, module cmdline params, async storage probe, " +
-            "userdata resize, adb shell into the 'Halium initrd' gadget and read /dev/kmsg.\n" +
-            "Stage 2 — Android container: wait_for_prop gates (incl. the quoted-value trap), " +
-            "init log tee/breadcrumbs to /dev/socket/init.log, container logcat (not just journalctl), " +
-            "ashmem<boot_id>, vndservicemanager/selinuxfs, binder symlinks.\n" +
-            "Stage 3 — display/UI: backlight, DRM probe, panel size, node permissions (EGL_BAD_ALLOC), " +
-            "wayland socket / XDG_RUNTIME_DIR.\n" +
-            "Stage 4 — subsystems: wifi, modem (fstab selection!), BT, sensors, time.\n" +
+            "\n\nUse the luneos-mcp knowledge base: read the 'debugging' topic (debugging § Method first, " +
+            "and the symptom table when there is a symptom) and the matching device-<codename> topic if one " +
+            "exists, plus soc-mediatek or soc-qualcomm for the device's SoC. Triage stage by stage:\n" +
+            "Stage 0 — does the kernel boot (pstore, expdb on MediaTek, debugging § Debug channels).\n" +
+            "Stage 1 — initramfs.\n" +
+            "Stage 2 — Android container.\n" +
+            "Stage 3 — display and UI.\n" +
+            "Stage 4 — subsystems.\n" +
+            "Stage 5 — idle health.\n" +
             "At each stage state what evidence to collect before changing anything.",
         },
       },
@@ -365,6 +456,16 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 });
 
 // ---------------------------------------------------------------------------
+
+{
+  const topics = loadTopics();
+  const refs = [...Object.values(TOPIC_ALIASES),
+    ...Object.entries(PROMPT_TOPICS).flatMap(([, v]) => v)];
+  for (const r of refs) {
+    const err = checkRef(topics, r);
+    if (err) console.error(`luneos-mcp: warning: prompt/alias reference "${r}": ${err}`);
+  }
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

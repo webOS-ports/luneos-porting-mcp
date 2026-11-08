@@ -68,18 +68,15 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
 - **Config:** the MP01's stock `.config` (shipped loose in the factory image as
   `merged/.config`) verbatim as the base, then `vermagic.cfg`, then `luneos.cfg`;
   `LUNEOS_KERNEL_FRAGMENT ?= "1"` is the baseline switch. Toolchain clang r416183b
-  (the stock config's own `CONFIG_CC_VERSION_TEXT`; the same release the Q25 uses).
+  (the stock config's own `CONFIG_CC_VERSION_TEXT`; soc-mediatek.md § Kernel).
 - **Vermagic** matches stock exactly: the tree is genuinely 5.10.233, and
-  `vermagic.cfg` sets `CONFIG_LOCALVERSION="-android12-9-gdeb4d30d3489"` with
-  `LOCALVERSION_AUTO` off and an empty `.scmversion` (kmi-crc-matching.md § Step 0 —
-  ask the modules, they know).
-- **KMI:** 0 of 345 stock modules would fail. As on the Q25, `USER_NS` stays off
-  (device-q25.md § Kernel) and `IPC_NS` is off; `PID_NS` and `CHECKPOINT_RESTORE`
-  are clean.
+  `vermagic.cfg` sets `CONFIG_LOCALVERSION="-android12-9-gdeb4d30d3489"`
+  (soc-mediatek.md § Kernel).
+- **KMI:** 0 of 345 stock modules would fail. `USER_NS` stays off (soc-mediatek.md
+  § Kernel) and `IPC_NS` is off; `PID_NS` and `CHECKPOINT_RESTORE` are clean.
 - **ThinLTO:** stock `CONFIG_LTO_CLANG_FULL=y` makes `ld.lld -r -o vmlinux.o` run
   single-threaded (93.6% of one core on a 64-thread host, ~20 min);
-  `KERNEL_LTO_THIN = "1"` in mp01.conf drops it to 6m04s and is KMI-neutral
-  (genksyms works on preprocessed source) — verified 0/345 both ways.
+  `KERNEL_LTO_THIN = "1"` in mp01.conf drops it to 6m04s — verified 0/345 both ways.
 - **Command line:** `????????????????????log_buf_len=4M printk.devkmsg=on
   initcall_debug=0 loglevel=4 cgroup_disable=net_prio`. The 20 `?` absorb lk eating
   the first 20 characters; `initcall_debug=0 loglevel=4` undo a vendor_boot cmdline
@@ -87,10 +84,12 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   boot and shutdown — net_prio's `cgrp_css_online()` takes rtnl under cgroup_mutex,
   connmand holds rtnl in `ccmni_close()` waiting on an "events" work item, and every
   events kworker waits on cgroup_mutex in `cgroup_bpf_release()`; PID 1 then blocks
-  in `proc_cgroup_show` (kernel-porting.md § The kernel command line).
+  in `proc_cgroup_show` (soc-mediatek.md § Kernel).
 - **Own module in the initramfs:** the patched `mediatek-drm.ko` (stripped; 37 MB
-  unstripped against the vendor's 5.8 MB) is installed at `lib/modules/` and wins
-  over the vendor's copy in the concatenated ramdisk; `load_kernel_modules()` then
+  unstripped against the vendor's 5.8 MB) is installed at the vendor's own path,
+  `lib/modules/`, so the later cpio entry replaces the vendor's copy in the concatenated
+  ramdisk (a module packaged under `/usr/lib/modules` needs `stage_our_kernel_modules()`
+  instead: kernel-modules.md § Building and shipping your own modules); `load_kernel_modules()` then
   loads it in the vendor's order. `/override/modules` cannot be used: it runs before
   the vendor set and `mediatek-drm` imports 487 symbols from vendor modules.
 
@@ -101,10 +100,7 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   (5.10.198) against the MP01's stock config: 0 of 345 would fail, with zero
   mismatches on any `vmlinux`-exported symbol (the two stock configs differ by 85
   options out of 2,665, all board-level drivers). It needed `SUBLEVEL = 233` and a
-  `tree-fixup.cfg`: list-valued options (`CONFIG_TOUCHSCREEN_MTK_TOUCH`,
-  `CONFIG_CUSTOM_KERNEL_IMGSENSOR`) name source subdirectories, and `olddefconfig`
-  can drop unknown symbols but not directories that do not exist (`No rule to make
-  target .../focaltech_touch/Makefile`).
+  `tree-fixup.cfg` for the list-valued options (soc-mediatek.md § Kernel).
 - **Embedding all 180 vendor modules in our initramfs.** 5.5 MB compressed took the
   ramdisk from 6.6 to 14.8 MB and the boot image from 28 to 31.6 MB, after which
   our init stopped running entirely — no kmsg, no panic, nothing in expdb, on six
@@ -112,21 +108,18 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   partition is not the constraint, the combined ramdisk (ours plus vendor_boot's
   22.5 MB) is. The port relies on the bootloader concatenating vendor_boot's ramdisk
   instead. If `/lib/modules` ever turns out missing, embed a minimal set (storage +
-  USB + watchdog) and keep the image near 28 MB. Use `install`, not `cp -a`, in such
-  a recipe (`cp -a` keeps the extractor's uid: `KeyError: 'getpwuid(): uid not
-  found: 1000'`).
+  USB + watchdog) and keep the image near 28 MB (debugging.md § 1.8 The vendor modules
+  may not be in the merged ramdisk at all). Summary: soc-mediatek.md § Boot chain:
+  preloader and lk.
 
 ## Boot image
 
 Header **v4**, 64 MiB `boot`, kernel + non-zero ramdisk (stock: kernel 19,652,970
 B, ramdisk 1,380,093 B), no `init_boot`. `os_version` `0x1800063C` = 12.0.0 /
-**2099-12** — Minimal ship a deliberately far-future patch level; reproduce it,
-never write a lower value. Both stock ramdisks (boot and vendor_boot) are **LZ4
-legacy** (`02 21 4c 18`), so `GKI_RAMDISK_COMPRESSION = "lz4-legacy"`: with a gzip
-ramdisk behind the lz4 vendor ramdisk ours was never unpacked, the vendor's `/init`
-ran and the device landed in **Android Recovery** ("Try again / Factory data
-reset") — debugging.md § 1.10 Ramdisk compression must match across the
-concatenation. `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
+**2099-12** — Minimal ship a deliberately far-future patch level; reproduce it
+(soc-mediatek.md § Boot chain: preloader and lk). Both stock ramdisks (boot and vendor_boot) are **LZ4
+legacy** (`02 21 4c 18`), so `GKI_RAMDISK_COMPRESSION = "lz4-legacy"`; a gzip ramdisk
+landed in Android Recovery (debugging.md § 1.10 Ramdisk compression must match, found here). `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
 
 ## Vendor and GSI
 
@@ -159,27 +152,21 @@ differences:
    (`has-slot:vbmeta_system` is empty; flashing it gives `partition does not
    exist`). Harmless: `--disable-verity --disable-verification` on the top-level
    vbmeta disables the chain.
-2. **Lock-state check first.** A locked MediaTek lk does not report itself locked;
-   it refuses critical partitions individually with `FAILED (remote: 'No support by
-   lock control')`. If `flashing get_unlock_ability` is `false`, the unlock is
-   refused too — that switch only exists inside booted Android.
+2. **Lock-state check first** (soc-mediatek.md § Boot chain: preloader and lk).
 3. **Partition-size check** before flashing userdata (the scatter's 3 GiB is
    nominal).
-4. **No `fastboot -w`** (fails on the host: `make_f2fs failed`), on top of the Q25's
-   no-`fastboot boot` rule (device-q25.md § Install). Flash `userdata-luneos.img`
+4. **No `fastboot -w`** (fails on the host: `make_f2fs failed`), on top of no
+   `fastboot boot` (soc-mediatek.md § Boot chain: preloader and lk). Flash `userdata-luneos.img`
    (or stock `userdata.img`) instead.
 
 Device specifics:
 
 - Fastboot entry: power fully off, **Volume Up + Power**, navigate with Vol Up,
   select with **Vol Down**. BROM: hold **Volume Down** through a forced restart
-  (confirmed on hardware); a device in a reset loop also presents the preloader on
-  every cycle for mtkclient.
-- It does not power off with a long press while USB is connected (MediaTek
-  auto-boots on USB power).
-- `fastboot getvar current-slot` right after `--set-active` can report the old
-  slot; flash `boot_b`/`vbmeta_b` explicitly. A slot that failed to boot is marked
-  `slot-unbootable` and lk silently falls back; `--set-active` does not clear it.
+  (confirmed on hardware; soc-mediatek.md § Boot chain: preloader and lk).
+- It does not power off with a long press while USB is connected, and `current-slot`
+  can misreport right after `--set-active`, so flash `boot_b`/`vbmeta_b` explicitly
+  (soc-mediatek.md § Boot chain: preloader and lk).
 - `vendor_dlkm` is inside `super`, not a fastboot partition. For LuneOS only
   `boot_b`, `vbmeta_b` and `userdata` are flashed.
 - Full recovery that worked: flash stock boot/vendor_boot/dtbo/vbmeta to the slot,
@@ -241,10 +228,10 @@ daylight needs less light, not more. lk lights the frontlight fully for its logo
 | Reboot every ~3.5 min | clean shutdowns from `sleepd` | masked during bring-up |
 | Power-off within a minute on the charger | fuel gauge `capacity=-1` ("cali car tune 119, invalid" from MediaTek's closed `libfgauge_gm30.so`) trips batteryd's critical check | `deviceinfo_battery_critical_percent="0"` (stopgap) |
 | `Charging:false` on the cable | mt6375 reports `online=2` | nyx-modules `919ab0c` |
-| Compositor spins on DRM master | charger-mode boot (`bootreason=usb`); Android's `charger` holds master; `QT_QPA_FORCE_HWC2` lost to an `export` prefix (systemd ignores `export` lines in `EnvironmentFile=`) | `/system/bin/charger` in `DISPLAY_CONFLICT_MATCH` (the meta-luneos copy of `start-android-hals.sh` is the one that ships), generator writes plain `KEY=VALUE` |
+| Compositor spins on DRM master | charger-mode boot (`bootreason=usb`); Android's `charger` holds master (graphics.md § Charger-mode boots and DRM master); `QT_QPA_FORCE_HWC2` lost to an `export` prefix in `EnvironmentFile=` (debugging.md § Symptom → likely cause → where to look) | `/system/bin/charger` in `DISPLAY_CONFLICT_MATCH` (the meta-luneos copy of `start-android-hals.sh` is the one that ships), generator writes plain `KEY=VALUE` |
 | Compositor never starts | patched display driver needed by the vendor hwcomposer | own `mediatek-drm.ko` (Kernel) |
-| No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm` (hal-userspace.md § Vendor kernel modules) |
-| Sound card never registers | `mt6789-mt6366` defers (`snd_soc_register_card fail -517`) until `mtk-btcvsd` (component `mtk-btcvsd-snd`) loads; found via `/sys/kernel/debug/devices_deferred`, `asoc/components` and the machine node's phandles in a pulled `/proc/device-tree` | load `mtk-btcvsd` (hal-userspace.md § Audio) |
+| No audio, no camera | container's `/vendor_dlkm` was an empty bind, vendor `insmod_sh` loaded nothing | `mount-android.sh`: `_a`/`_b` dm names, bind `/android/vendor_dlkm` (kernel-modules.md § The vendor_dlkm set) |
+| Sound card never registers | `mt6789-mt6366` defers until `mtk-btcvsd` loads (soc-mediatek.md § Audio; method: debugging.md § Stage 4 — Subsystems) | load `mtk-btcvsd` |
 | pulseaudio crash | vendor `libnvram.so` needs VNDK 31 `libbase` (`android::base::Basename`) | `deviceinfo_hybris_prefer_vndk="1"`, proven first with `systemctl set-environment HYBRIS_PREFER_VNDK=1` |
 | Audio slightly off | HAL DL paths at 48 kHz | `deviceinfo_audio_sample_rate="48000"` |
 | No WiFi/BT modules | `mtk-connectivity` conditions only checked `vendor` | `9d68df46` |
@@ -253,14 +240,13 @@ daylight needs less light, not more. lk lights the frontlight fully for its logo
 | Waydroid "container failed to start" | `lxc_spawn: ... Failed to clone a new set of namespaces` — no `IPC_NS`/`USER_NS`, Waydroid's LXC config asked for them | `waydroid-luneos-prepare` adds `lxc.namespace.keep` for whichever is missing from `/proc/self/ns` |
 | Web apps sized wrong for the rotated panel | WAM used unrotated display size | WAM `herrie/panel-fix` (logical size + configd `compositorGeometry` subscription) |
 | Gestures on the wrong edge | OrientationHelper mapped from parent, missing the output rotation | luna-next-cardshell `15bf576` (`mapFromGlobal`) |
-| `setprop` fails from the host | `android-property-service` enabled but never started (no journal entries at all); MediaTek's hwcomposer sets properties during init | start the unit (debugging.md § 2.5) |
-| `stp_dump3` at 93% of a core | combo-chip dump collector busy-loops with no framework to receive a dump | stubbed |
+| `setprop` fails from the host | `android-property-service` enabled but never started (no journal entries at all); MediaTek's hwcomposer sets properties during init | start the unit (debugging.md § 2.5 The property service) |
+| `stp_dump3` at 93% of a core | soc-mediatek.md § Userspace and vendor keys | stubbed |
 | `fuse_usbotg` restarting every 5 s | nothing mounts OTG media into the container | stubbed |
 | Suspend never happens | both fingerprint HALs block uninterruptibly in the TrustKernel TEE driver (`tee_supp_cmd -> down`) waiting for a supplicant that never answers; 3240 freeze aborts in 90 min | stubbed (conflicts with fingerprint working, see Open issues) |
 
 `rt5133@18` (a regulator) stays deferred (`Failed to request HWEN gpio`) without
-anything visibly broken. `libsndcardparser.so not found` from the vendor
-`libtinycompress.so` is harmless.
+anything visibly broken.
 
 ## Open issues
 
@@ -270,8 +256,7 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
 - **Fingerprint:** `mp01.conf` declares it (owner confirmed the reader works), while
   `stubbed-services-mp01` stubs both HALs for suspend; whichever is out of date has
   to be fixed. Needs a working TEE supplicant.
-- **WiFi power-on race** with `wmt_launcher` (hal-userspace.md § MediaTek
-  connectivity).
+- **WiFi power-on race** with `wmt_launcher` (soc-mediatek.md § Connectivity combo).
 - **Web apps cropped in portrait** (548x600 of a 600x657 card). Compositor side
   measured consistent (buffer, destination, source and item all 600x657); Chromium
   reports `screen` as unrotated 800x600 `landscape-primary`. Look at the web
@@ -285,7 +270,7 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
 ## Device-specific traps
 
 - **`expdb` is the way in** (`dump-expdb.sh` in the port's tool directory wraps
-  mtkclient; debugging.md § MediaTek: `expdb` when there is no pstore and no
+  mtkclient; soc-mediatek.md § `expdb` when there is no pstore and no
   gadget). It settled what three rounds of guessing had not:
 
   ```
@@ -295,13 +280,11 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
   RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
   ```
 
-  i.e. our init was running and the watchdog was killing the debug shell. `expdb`
-  only records on an exception: a clean hang writes nothing and re-dumping returns
-  the previous crash. Boot with `initrd_no_wdt` so a hang resets and leaves a record.
-- **Watchdog:** `mtk-wdt` with a 31 s timeout resets the device every ~90-120 s with
-  no panic in the journal; `printf 'V' > /dev/watchdog` disables it for that boot
-  (verified: uptime past 180 s). Check `/proc/uptime` in the same command as any
-  measurement (debugging.md § MediaTek: the hardware watchdog).
+  i.e. our init was running and the watchdog was killing the debug shell (reading
+  expdb, and `initrd_no_wdt`: soc-mediatek.md § `expdb` when there is no pstore and no gadget).
+- **Watchdog:** `mtk-wdt` (31 s timeout) reset the device every ~90-120 s with no
+  panic; `printf 'V' > /dev/watchdog` took uptime past 180 s (soc-mediatek.md § The
+  hardware watchdog; debugging.md § Method).
 - **USB IDs:** `0e8d:201c` is fastboot, `0e8d:2000` the preloader (its own
   `/dev/ttyACM0` spews `READY` — not our console); ours is **`18d1:d001`** ("Halium
   initrd / Failed to boot"). The gadget came up as ECM + ACM, not adb (debugging.md
@@ -310,22 +293,16 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
   initramfs bound to `$(ls /sys/class/udc)`, which here is two names, so the gadget
   never bound; "telnet ready on usb0" was logged regardless. Fixed with a
   first-real-UDC loop (debugging.md § Two UDCs).
-- **mdev names:** mdev creates `/dev/sdc59`, not `userdata`, so mountroot's `find
-  /dev -name userdata` failed; the initramfs now synthesises by-name links from
-  `PARTNAME=` in sysfs.
-- **journald** lost all but the first six seconds of a minutes-long boot (default
-  `SyncIntervalSec=5m`, forced power-off). Use `Storage=persistent`,
-  `SyncIntervalSec=1s`; the real journal lives under
-  `<data>/luneos-data/var/log/journal/`.
-- `sh -x` as a drop-in `ExecStart` pinned a silent 90 s compositor timeout to the
-  first line of `surface-manager.sh` (`PmLogCtl def surface-manager`).
-- An aarch64 core with no gdb: `eu-stack --core`, map addresses via `NT_FILE`, and
-  read `si_addr` from `NT_SIGINFO` by hand — here it was ASCII text, i.e. a
-  clobbered thread pointer (debugging.md § Tooling appendix).
-- The device does not charge in fastboot or the initramfs
-  (`get_charger_charging_current: ... failed: -95`); a long session flattens it.
-- Several bootloops followed heredoc writes over `adb shell` while pushed files
-  behaved — a correlation only; prefer `adb push`.
+- **mdev names:** mdev created `/dev/sdc59`, not `userdata` (debugging.md § 1.3 Async
+  storage probe and userdata).
+- **journald** kept only the first six seconds of a minutes-long boot; the journal
+  lives under `<data>/luneos-data/var/log/journal/` (debugging.md § Tooling appendix).
+- `sh -x` as `ExecStart` pinned a silent 90 s compositor timeout to the first line of
+  `surface-manager.sh` (`PmLogCtl def surface-manager`; debugging.md § Tooling appendix).
+- A core's `si_addr` was ASCII text, i.e. a clobbered thread pointer (debugging.md
+  § Tooling appendix).
+- No charging in fastboot or the initramfs (`get_charger_charging_current: ...
+  failed: -95`; debugging.md § The device does not charge while you debug it).
 
 ## Sources
 

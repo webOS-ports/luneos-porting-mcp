@@ -18,19 +18,19 @@ Same SoC as tissot and mido, but not the same Android half. Those keep Android 9
 
 - 1080x2160, two panels in the device tree (nt36672, td4310); 401 PPI from the LineageOS README. The panels' `qcom,mdss-pan-physical-*` (69 x 122 mm) cannot give it, the height being a 16:9 panel's.
 - Fingerprint: the device tree has both Goodix and FPC nodes. IR: Peel on SPI (`peel_ir`).
-- NFC: none. The built device tree has an `nq@28` node, but it comes from `msm8953-qrd.dtsi`; the vendor has no NFC HAL or blobs. Do not read a device's features from a dtb that includes a QRD reference dtsi.
+- NFC: none; the dtb's `nq@28` node comes from `msm8953-qrd.dtsi` (kernel-build.md § Identify the platform precisely first).
 
 ## Kernel
 
 - `xiaomi-msm8953-devs/temp_android_kernel_xiaomi_vince`, lineage-18.1, 4.9.251, `vince_defconfig` + `luneos.cfg`. LineageOS's `android_kernel_xiaomi_msm8953` has no vince_defconfig on any branch, though the device tree names it. tissot's shr branch has no vince support.
 - Ten recipe patches, kept as patches because the repository is third party.
-- `arch/arm64/Makefile` here lacks the `ifeq ($(KBUILD_EXTMOD),)` guard around `vdso_prepare`, so every out-of-tree module stops with "No rule to make target 'prepare0'". Patch 0010.
+- `arch/arm64/Makefile` here lacks the `KBUILD_EXTMOD` guard around `vdso_prepare`: patch 0010 (kernel-build.md § Old BSP vs modern toolchain).
 - The tree backports `totalram_pages()` as a function at 4.9.251, which wireguard's compat.h cannot know from the version. The recipe now reads `mm.h`, as it does `skbuff.h`.
-- `ANDROID_PARANOID_NETWORK` stays on, unlike tissot. `PRONTO_WLAN=m`, `MODULE_SIG_FORCE=y`.
+- `ANDROID_PARANOID_NETWORK` stays on, unlike tissot (kernel-config.md § Config facts from the other distros). `PRONTO_WLAN=m`, `MODULE_SIG_FORCE=y`.
 
 ## Boot image
 
-Addresses from msm8953-common: kernel 0x80008000, ramdisk 0x81000000, tags 0x80000100, page 2048, boot partition 67,108,864 B. The kernel has 16,744,448 B before the ramdisk; `Image.gz-dtb` is 13,053,987 B.
+Addresses from msm8953-common: kernel 0x80008000, ramdisk 0x81000000, tags 0x80000100, page 2048, boot partition 67,108,864 B. The kernel has 16,744,448 B before the ramdisk; `Image.gz-dtb` is 13,053,987 B (boot-images.md § The kernel/ramdisk window — a build-time invariant).
 
 ## Vendor and GSI
 
@@ -39,18 +39,18 @@ Addresses from msm8953-common: kernel 0x80008000, ramdisk 0x81000000, tags 0x800
 - `ro.vndk.version=30` is in `/vendor/default.prop`, not `build.prop`. Halium's mount-android.sh then mounts all VNDK APEXes, a safe fallback.
 - The vendor image travels in the rootfs, by the published-image path of `android-system-image-legacy-gsi.inc`. GSI: halium_arm64 20261017-1.
 - 32-bit services: audio, camera provider, cas, omx.
-- `audio.primary.msm8953.so` needs `set_sched_policy`, in VNDK 30's libprocessgroup and no longer in the GSI's libcutils: `deviceinfo_hybris_prefer_vndk="1"`.
+- `audio.primary.msm8953.so` needs `set_sched_policy`, in VNDK 30's libprocessgroup and no longer in the GSI's libcutils: `deviceinfo_hybris_prefer_vndk="1"` (audio-media.md § Audio).
 
 ## Yocto
 
-- No ofono files: 40-ofono-binder derives both from the HAL. The vendor manifest has `@1.4::IRadio/slot1` and `slot2`. tissot's and mido's `ofono-conf/*` copies are older than the generator; do not copy them to a new port.
+- No ofono files: 40-ofono-binder derives both from the HAL. The vendor manifest has `@1.4::IRadio/slot1` and `slot2`. (connectivity.md § Modem).
 - fingerprint-hal-fixup's tissot block is skipped, since the vendor has no `gf_fingerprint.default.so`; only its uinput fix runs.
 
 ## Install
 
 Fastboot (`luneos-dev-fastboot-package`): `boot` and `userdata` only. `userdata.img` holds `rootfs.img`, and vendor.img and the GSI are inside that, so `system` and `cust` stay as they are. The firmware partitions must suit LineageOS 18.1. Not yet confirmed on a phone.
 
-The TWRP zip (`luneos-dev-package`) failed its first try by sideload on a freshly formatted /data: truncated tarball, `tar: short read`, cause not established. The updater script checks neither the mount nor the copy, and flashes `boot` and reports success after a failed unpack.
+The TWRP zip (`luneos-dev-package`) failed its first try by sideload on a freshly formatted /data: truncated tarball, `tar: short read`, cause not established. The updater still flashed `boot` and reported success (installing.md § Recovery sideload).
 
 ## Open issues
 

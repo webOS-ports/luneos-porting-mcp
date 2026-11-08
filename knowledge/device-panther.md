@@ -26,7 +26,7 @@ Read from factory image `panther-bp4a.251205.006` (Android 16 QPR2, sha256 `4455
 
 ## Kernel
 
-Panther's stock kernel is byte-identical to bluejay's (kernel-porting.md § One kernel per
+Panther's stock kernel is byte-identical to bluejay's (kernel-build.md § One kernel per
 KMI), so the LuneOS Tier A kernel is bluejay's: ACK `android14-6.1-2026-06_r7` (6.1.172) +
 `luneos_defconfig`, built by `linux-halium-gki_6.1.bb` with Google's clang 17 r487747c.
 `panther.conf` sets `GKI_BOOTIMG = "1"` and `PREFERRED_VERSION_linux-halium-gki = "6.1%"`.
@@ -43,9 +43,9 @@ python3 kmi-crc-check.py <kernel build dir>/Module.symvers vkb-modules
 That includes `vh_mm.ko`/`vh_sched.ko` (the bumped ACK tag covers panther too). The poison
 list (`FANOTIFY`, `NET_L3_MASTER_DEV` off) transfers unchanged. `modules.load` is
 non-topological here as well: 332 hard-dependency pairs backwards across 107 of 204 modules,
-plus 15 softdep edges (`clk_exynos_gs.ko` at line 16, its exporter `cmupmucal.ko` at line 45),
-so the initramfs's dependency-resolving loader is required (boot-images.md § Init patch
-history).
+plus 15 softdep edges (`clk_exynos_gs.ko` at line 16, its exporter `cmupmucal.ko` at line 45)
+(kernel-modules.md §
+`modules.load` is a list, not a dependency order).
 
 ## Boot image
 
@@ -72,34 +72,23 @@ Built images:
 | `init_boot-panther-luneos.img` | 6,639,616–6,647,808 | `init_boot` (8 MB) | ~1.66 MB |
 | `boot-panther-luneos-debug.img` | 23,547,904 | `fastboot boot` only | — |
 
-`vendor_boot`, `vendor_kernel_boot`, `dtbo` and `super` stay stock; the init_boot ramdisk is
-merged last, so our `init` wins and `lib/modules` from `vendor_kernel_boot` is there to load.
-**Watch the 8 MB init_boot budget**; lz4 instead of gzip is the escape hatch. The debug image
-is self-contained (kernel + ramdisk + `enable_adb`), so it works whatever the bootloader does
-with `init_boot` during `fastboot boot`. The initramfs is device-agnostic (bluejay's) and
+The two-image layout, the 8 MB init_boot budget and the self-contained debug image:
+boot-images.md § Class 3 (panther is its example). The initramfs is device-agnostic (bluejay's) and
 carries the userdata-resize fix, whose bug was found on panther's kit (boot-images.md § The
 userdata-resize-on-UFS bug).
 
 ## Vendor and GSI
 
-Same bp4a vendor build as bluejay, with one regression (rule: hal-userspace.md § HIDL vs AIDL):
-
-- **Composer: HWC3 / AIDL `android.hardware.graphics.composer3` V4** (`hwc3-default.xml`,
-  `android.hardware.composer.hwc3-service.pixel`). There is no HIDL composer on gs201, so
-  panther cannot use the sargo/bluejay HIDL display path. It needs libhybris' composer3
-  support (PR #578, #609: merged, exposed through the unchanged `hwc2_compat_*` C API so the
-  QPA plugin needs no change), which no shipping port exercises yet. **The biggest single
-  risk on panther.**
-- Gralloc (AIDL allocator v2 + `mapper.pixel.so`, `gralloc.default.so` still present), GPU
-  (Mali-G710), audio HIDL 7.1, GNSS HIDL 2.1 brcm, camera provider HIDL 2.7: as bluejay.
-- Radio: AIDL `IRadio*` per slot (+ HIDL `@1.2::ISap`) — check ofono-binder-plugin's AIDL
-  support. Sensors AIDL multihal V3, Bluetooth AIDL `IBluetoothHci`: as bluejay.
+Same bp4a vendor build as bluejay (HAL surface: hal-userspace.md § HIDL vs AIDL), with one
+regression: the composer is **AIDL composer3 V4 only** (`hwc3-default.xml`), so panther cannot
+use the sargo/bluejay HIDL display path and depends on libhybris' composer3 support, which no
+shipping port exercises yet. **The biggest single risk on panther.**
 
 No VNDK → Halium 16 GSI (`halium_arm64`); gbinder ApiLevel from the vendor at boot.
 
 ## Yocto
 
-Layer `meta-google`, `MACHINE=panther` (device-bringup-yocto.md § GKI device machines):
+Layer `meta-google`, `MACHINE=panther` (yocto.md § GKI device machines):
 
 ```
 MACHINE=panther bitbake luneos-bootimg-gki     # boot, init_boot, debug image
@@ -114,9 +103,8 @@ Pure fastboot (installing.md § Flash steps per layout class): `install.sh` flas
 ext4 with `rootfs.img` + `android-rootfs.img`) → reboot; `make-userdata.sh` rebuilds the
 userdata image. rootfs and GSI are the same files as in the bluejay kit.
 
-**Anti-rollback:** the device must be on `bp4a` or downgradable to it; never flash older
-than the installed build. A device that arrives on a newer build (cp1a/cp2a = Android 17)
-needs the factory-image analysis redone against that build (installing.md § Anti-rollback).
+**Anti-rollback:** the device must be on `bp4a` or downgradable to it; one on cp1a/cp2a
+(Android 17) needs the factory-image analysis redone (installing.md § Anti-rollback).
 
 ## Open issues
 

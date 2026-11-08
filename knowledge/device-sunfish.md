@@ -9,8 +9,8 @@ LuneOS config delta moves most exported CRCs, so the port builds the vendor's
 modules itself and overlays them (kmi-crc-matching.md § Step −1 — first ask whether
 you need to match at all). Also the device behind two general rules: the authority
 for a kernel config is the vendor whose modules the device loads, not the OEM
-(kmi-crc-matching.md), and read *every* fstab the vendor ships (debugging.md §
-Modem).
+(kmi-crc-matching.md), and read *every* fstab the vendor ships (connectivity.md §
+Modem failures on the Android side).
 
 ## Status (as of 25 Sep 2026)
 
@@ -59,18 +59,16 @@ Hardware results are from kit rev 9.
   modversions aarch64`). `LUNEOS_KERNEL_FRAGMENT ?= "1"` is the baseline switch.
 - **Toolchain: Google Clang r416183b, not OE's GCC.** With GCC every TrustZone call
   failed (`scm_call failed with error code -1` ×44, `QSEECOM: Failed to get QSEE
-  version info -19`) and took PIL, the zap shader, the GPU and the display with
-  it: `drivers/soc/qcom/scm.c`'s arm64 entry is register-pinned inline asm with
-  `__asmeq`, and the tree has never been built with anything but Clang. Point
-  `GKI_CLANG_DIR:sunfish` at r416183b.
+  version info -19`) and took PIL, the zap shader, the GPU and the display with it;
+  `drivers/soc/qcom/scm.c`'s arm64 entry is register-pinned inline asm with `__asmeq`
+  (kmi-crc-matching.md § Step 4 — the compiler). Point `GKI_CLANG_DIR:sunfish` at r416183b.
 - **LTO and CFI stay on, as `sunfish_defconfig` sets them.** Turning them off to
-  match Google's stock IKCONFIG broke LineageOS's modules, which were built with
-  CFI: `snd_event_dlkm: Unknown symbol __cfi_slowpath`. The reference is the
-  vendor whose modules load (LineageOS), not Google. LTO is a Kconfig choice
-  (select `CONFIG_LTO_NONE=y` to turn it off), but not here.
+  match Google's stock IKCONFIG broke LineageOS's CFI-built modules
+  (`snd_event_dlkm: Unknown symbol __cfi_slowpath`; kmi-crc-matching.md § Step 2 — read
+  the failure correctly).
 - **Poison options:** `FANOTIFY` and `CGROUP_DEVICE` move the CRC of 8158 of 12823
   exported symbols between them; both stay on (`CGROUP_DEVICE` is used by 7 units
-  in the shipped rootfs). Measurement and analysis: kmi-crc-matching.md § What the
+  in the shipped rootfs). Measurement and analysis: kernel-config.md § What the
   two sunfish poisoners change.
 - **Module strategy: build all 41 and overlay them.** Ours match by construction.
   `rdbg.ko` had been off for a GCC-only `-Werror=designated-init` the Clang build
@@ -95,16 +93,16 @@ Hardware results are from kit rev 9.
 
   Cost: initramfs 6.6 → 13.4 MB. Packaging traps (`KERNEL_SPLIT_MODULES = "0"` is
   mandatory under LTO; `MODULE_TARBALL_DEPLOY` makes a dependency loop):
-  kmi-crc-matching.md § Packaging traps.
-- **Other config:** `BT_BREDR` and `BT_LE` must be spelled out — `sunfish_defconfig`
-  turns both off and RFCOMM/BNEP/HIDP depend on `BT_BREDR`. `CONFIG_COMPAT_VDSO`
+  kernel-modules.md § Packaging traps.
+- **Other config:** `BT_BREDR` and `BT_LE` spelled out (kernel-config.md § Fragment
+  traps). `CONFIG_COMPAT_VDSO`
   off (no arm32 cross toolchain in the sysroot), `CONFIG_CC_WERROR` off.
 - **dtc:** `DTC_EXT` and `DTC_FLAGS=-@` are both mandatory. The in-tree dtc 1.4.4
   cannot parse the overlay sugar these dtsi files use (`&thermal_zones {` at the top
   level of a `/plugin/`), and the base dtb must carry `__symbols__` for the stock
   dtbo overlays.
 - **Cmdline:** the bootloader drops arguments it does not recognise, so anything
-  LuneOS needs goes in `CONFIG_CMDLINE` (kernel-porting.md § The kernel command
+  LuneOS needs goes in `CONFIG_CMDLINE` (kernel-config.md § The kernel command
   line); `LUNEOS_ENABLE_ADB=1` builds the debug shell's flag in.
 
 ### Rejected paths
@@ -118,17 +116,12 @@ Hardware results are from kit rev 9.
   reproduced exactly. The trade: the device must run the LineageOS 23.2 vendor,
   which the kit now flashes.
 - **Force-loading the prebuilt modules** (`CONFIG_MODULE_FORCE_LOAD`, a host-side
-  pre-start hook) — superseded by building them. Two lessons from that round: the
-  cfg's `enable|<sysfs path>` lines are what start the DSPs, and the node one of
-  them writes (`/sys/kernel/boot_adsp/boot`) is created by `adsp_loader_dlkm.ko`
-  earlier on the list — without it no ADSP, fastrpc "Transport endpoint is not
-  connected", and no sensors. And `incrementalfs.ko` is on the vendor partition
-  but not in the cfg (Android loads it with `finit_module`, which has no force), so
-  it failed with `Exec format error` and vold could not prepare user 0. Reason from
-  the vendor partition (`debugfs -R "ls -l /lib/modules" vendor.img`), not the
-  defconfig: guessing from `=m` symbols predicted working audio on a device with no
-  ALSA card. Rules: kmi-crc-matching.md § Force-loading prebuilt modules, and when
-  it is safe.
+  pre-start hook) — superseded by building them. What that round found on sunfish:
+  `/sys/kernel/boot_adsp/boot` (the cfg's `enable|` line that starts the ADSP) is
+  created by `adsp_loader_dlkm.ko`; `incrementalfs.ko` is shipped but not in the cfg
+  and failed with `Exec format error`; `=m` symbols in the defconfig predicted audio on
+  a device with no ALSA card (kernel-modules.md § Loading a prebuilt vendor set from
+  the host).
 
 ## Boot image
 
@@ -143,21 +136,19 @@ MiB. Tags follow the stock image (the board file says 0x01E00000).
 runs into the ramdisk address — a build-time invariant; on a header-v2 image loaded
 by ABL the window may not bind at all (boot-images.md § The kernel/ramdisk window —
 a build-time invariant). The current kit image: kernel section 21,163,040 B,
-12,358,624 B of headroom. Read logged headroom from `log.do_deploy*` in time order —
-the files are named by build id, so a glob does not sort them by date.
+12,358,624 B of headroom (read `log.do_deploy*` in time order: yocto.md § Build failures
+worth remembering).
 
-The **dtbo partition stays stock**. The eight `sm7150-sunfish-*` overlays select by
-`qcom,board-id`/`msm-id` inside each FDT, so a base dtb from a different build still
-gets the right overlay; the panel coming up is the evidence. If it ever fails,
+The **dtbo partition stays stock** (soc-qualcomm.md § Header v0/v1 and appended device trees):
+the eight `sm7150-sunfish-*` overlays select by board-id, and the panel coming up is the
+evidence. If it ever fails,
 build `dtbo.img` from this tree (needs AOSP `mkdtimg`, not packaged by OE).
 
 ## Vendor and GSI
 
-LineageOS 23.2 vendor (SDK 36) → Halium 16 `halium_arm64` GSI. gbinder `ApiLevel`
-is derived from the vendor at runtime (36); the shared rootfs's baked
-`ApiLevel = 32` had libgbinder speaking the API 31 servicemanager protocol, the
-suspected cause of `nfcd: registerForNotifications(android.hardware.nfc.INfc/default)
-tx error -2147483647` (hal-userspace.md § Binder and gbinder). The vendor image is
+LineageOS 23.2 vendor (SDK 36) → Halium 16 `halium_arm64` GSI; gbinder `ApiLevel` resolves
+to 36 at boot. The stale baked-in 32 is the suspected cause of the NFC failure that
+hal-userspace.md § Before blaming AIDL uses as its example. The vendor image is
 built by `extract-vendor.sh` from a LineageOS OTA zip (`payload_extract.py` on
 `payload.bin`); on a newer nightly, re-check the kernel revision in its
 `build-manifest.xml` and re-pin the recipe, or the modules will not match.
@@ -174,24 +165,21 @@ Layer `meta-smartphone/meta-google`, `MACHINE=sunfish`; rootfs `MACHINE=halium-a
 
 ## Install
 
-The kit flashes `boot`, `userdata` and the LineageOS 23.2 `vendor`. `vendor` is a
-logical partition inside `super`, so `install.sh` reboots into **fastbootd** to
-write it. Prerequisite: Google's stock factory image flashed and booted once,
-bootloader unlocked (it supplies bootloader, modem, tz and other firmware
-partitions). Ship and flash the boot image *and* the rootfs together: the boot
+The kit flashes `boot`, `userdata` and the LineageOS 23.2 `vendor` (from **fastbootd**,
+after Google's factory image: soc-qualcomm.md § Install and recovery). Ship and flash the boot image *and* the rootfs together: the boot
 image stages the modules, but `overlay_kernel_modules()` lives in the rootfs's
 `mount-android.sh` — a new boot image over an old rootfs stages modules nothing
-uses. General steps: installing.md.
+uses.
 
 ## Subsystem notes
 
 - **firmware_mnt:** `mount-android.sh` once read only the first fstab glob match
-  (`fstab.persist`), so `/vendor/firmware_mnt` was never mounted, PIL failed for
-  modem, cdsp, venus, npu and ipa_fws (`Initializing image failed(rc:-5)`), the zap
-  shader never loaded, and surface-manager aborted in a loop on a black screen. It
-  now reads every fstab (debugging.md § Modem).
-- **`vendor.all.modules.ready`** is set unconditionally by the cfg after loading,
-  so a total module failure is invisible downstream.
+  (`fstab.persist`), so `/vendor/firmware_mnt` was never mounted,
+  PIL failed for modem, cdsp, venus, npu and ipa_fws (`Initializing image
+  failed(rc:-5)`), the zap shader never loaded, and surface-manager aborted in a loop on
+  a black screen (connectivity.md § Modem failures on the Android side).
+- **`vendor.all.modules.ready`** is set unconditionally by `init.insmod.sunfish.cfg`
+  (kernel-modules.md § The vendor_dlkm set).
 - **`bad ioctl: -1072934383`** (60,304 in one boot) = `0xc00c5211` =
   `_IOWR('R', 17, 12)`: fastrpc `FASTRPC_IOCTL_GET_DSP_INFO`, which the vendor's
   `adsprpcd` calls and the older in-kernel `adsprpc` does not implement. A symptom of
@@ -199,9 +187,8 @@ uses. General steps: installing.md.
 - **Stubbed** (`stubbed-services.d/sunfish`): `pixelstats-vendor`,
   `wait_for_strongbox` (exit — init waits on it in late-fs), the Titan M
   rebootescrow HAL, `mm-pp-dpps`, the SurfaceFlinger configstore HAL,
-  `diag_mdlog` (exit), `ssr_diag`, `storaged`, and the **USB gadget HAL** — LuneOS
-  owns the gadget host-side, so the HAL's constructor finds no
-  `/config/usb_gadget/g1` and aborts (124 SIGABRTs in ten minutes).
+  `diag_mdlog` (exit), `ssr_diag`, `storaged`, and the **USB gadget HAL** (124 SIGABRTs in ten minutes unstubbed;
+  hal-userspace.md § Stubbing a service vs not starting it).
 - **Not stubbed: the health HAL.** `gnss_service` polls for `IHealth` once a second
   forever (621 `Could not find ... IHealth/default` in ten minutes when stubbed), and
   the vendor rc has no `interface` line, so only the real HAL satisfies it.

@@ -11,23 +11,23 @@ adb reboot bootloader        # or the device's key combo
 ./install.sh                 # vbmeta (verification off) → boot [→ init_boot] → userdata → reboot
 ```
 
-- `fastboot flash vbmeta` verification-disabled (a self-built boot image never verifies against a stock vbmeta that chains `boot`; see below).
+- `fastboot flash vbmeta` verification-disabled **when the stock vbmeta chains `boot`** (a self-built boot image never verifies against it). Some bootloaders need none: sargo's unlocked ABL reports but does not enforce, and athena's ROM has no vbmeta to disable (boot-images.md § AVB: does the stock vbmeta cover `boot`?).
 - `fastboot flash boot` — and on A13-launch devices also `fastboot flash init_boot` (kernel and ramdisk live in separate partitions there).
 - `fastboot flash userdata userdata-luneos.img` — an ext4 image holding `rootfs.img` + `android-rootfs.img`.
 - `userdata` must end up **unencrypted** (FBE is on by default from Android 10); flashing the prebuilt ext4 image satisfies this.
-- Everything else stays stock. Reverting = reflash stock boot/vbmeta and wipe the files.
+- Everything else stays stock on a port that runs over the phone's own vendor. Ports that replace the stock vendor with a LineageOS or /e/OS build (athena, bramble, sunfish, surya, fajita) also flash `vendor` through fastbootd; see the device file. Reverting = reflash stock boot/vbmeta (and vendor) and wipe the files.
 
 ## vbmeta: flags 2 vs flags 3
 
 ```
-avbtool make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta-disabled.img
+avbtool make_vbmeta_image --flags 3 --padding_size 4096 --output vbmeta-disabled.img
 ```
 
-sets flags 2, VERIFICATION_DISABLED only. Flags 2 boots: the mindphone kit ships its
-stock vbmeta with the flags word set to 2 (sm-t220 likewise). `fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img` is
-**not** equivalent: it sets flags 3 (HASHTREE_DISABLED | VERIFICATION_DISABLED), as the
-radon and surya vbmeta images do. Prefer flags 3 (`--flags 3`, or the two fastboot
-switches) for new kits. An empty unsigned AVB image (256-byte header, `algorithm_type 0`,
+sets flags 3 (HASHTREE_DISABLED | VERIFICATION_DISABLED), the value to use for new kits.
+`--flags 2` sets VERIFICATION_DISABLED only, and also boots: the mindphone kit ships its
+stock vbmeta with the flags word set to 2 (sm-t220 likewise).
+`fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img` also sets flags
+3, as the radon and surya vbmeta images have. An empty unsigned AVB image (256-byte header, `algorithm_type 0`,
 zero-padded to 4096) is trivially regenerable, so a kit can ship its own rather than
 redistributing a vendor's. Whether a device needs a vbmeta at all, and how to read the
 stock one: boot-images.md § AVB: does the stock vbmeta cover `boot`?
@@ -89,47 +89,23 @@ fastboot flash userdata userdata-luneos.img
 fastboot reboot
 ```
 
-Flash **both** boot slots to keep A/B consistent.
+Flash **both** boot slots to keep A/B consistent. **Unresolved:** this is not the
+practice everywhere: sargo flashes the active slot only (an inactive-slot flash is a silent
+no-op there), and q25 and mp01 keep Android on slot A and LuneOS on slot B on purpose.
 
 ## Other install routes
 
 ### MediaTek BROM/preloader: SP Flash Tool / mtkclient, no fastboot
 
-Some MediaTek devices are flashed over the BROM/preloader link only — SP Flash Tool on
-Windows, `mtkclient` on Linux — with no fastboot step and no `fastboot getvar` to
-interrogate the device. Rules (found on radon, the FuriPhone FLX1s; see
-device-radon.md):
-
-- Write partitions **by name** (`mtk w <name> <file>`), never by offset (`wo`/`wf`): a
-  wrong offset overwrites what follows, and on these SoCs that can include the
-  preloader — the one genuinely hard-to-recover MediaTek brick.
-- Partition sizes come from `mtk printgpt`; the active slot lives in `misc` and is
-  unknowable from the host, so write both slots; unlock state is not exposed.
-- **Read the vendor's own flash package before deciding a device needs no vbmeta** —
-  a kernel package's "no vbmeta" setting says nothing about what the flash package
-  writes.
-- **Scatter-file sizes for the LAST partition are nominal** (`userdata` declared 3 GiB on
-  MT6877 and MT6789 against far larger real partitions); treat a reported `userdata` at or
-  below the nominal figure as suspect and ask, rather than refusing.
-- **MTK lk does not verify the boot header's SHA-1 `id` field**; do not chase an `id`
-  mismatch on a MediaTek device.
-- `expdb` is the debugging channel when USB never comes up, readable over the same link
-  (debugging.md § Stage 0); save a baseline from a healthy phone first.
-- When no factory image is published, back up `boot_a`/`boot_b` before flashing; that
-  is the only cheap way back.
+Some MediaTek devices are flashed only over the BROM/preloader link. The rules (write by name, never `preloader`, nominal scatter sizes, back up `boot_a`/`boot_b`): soc-mediatek.md § Install over BROM/preloader.
 
 ### lk2nd (old Qualcomm devices with a Samsung or other locked SBL)
 
-- lk2nd lives in the first 512 KiB of the boot partition and boots the real boot image
-  from 0x80000. `fastboot flash boot` inside lk2nd writes behind it; `fastboot boot`
-  RAM-boots and passes the previous bootloader's arguments on (including
-  `androidboot.mode=charger`).
-- **Never dd a boot image to the start of the partition** — it overwrites lk2nd. Keep a
-  copy of lk2nd's 512 KiB; restore over Samsung Download mode with
-  `heimdall flash --BOOT <lk2nd 512 KiB + boot.img>`.
+lk2nd sits in the first 512 KiB of `boot`; never dd a boot image over it. Rules and recovery: soc-qualcomm.md § lk2nd.
 
-Device detail (charger-mode boots on the Samsung SBL, the postinst that did overwrite
-lk2nd): device-a3-2015-halium.md.
+### Recovery sideload (`luneos-dev-package`)
+
+A recovery zip like hammerhead's and tenderloin's, `adb sideload`ed from the LineageOS recovery or TWRP onto a formatted `/data` (goyavewifi, vince). Its updater script checks neither the mount nor the copy: after a failed unpack it still flashes `boot` and reports success (found on vince; device-vince.md). Verify the rootfs on `/data` before rebooting.
 
 ### Samsung Download mode (Odin, TWRP)
 

@@ -43,7 +43,7 @@ bump (201/203 before — the two `vh_*` fails were pin skew), panther 204/204.
 the bisect instrument for finding which config options poison the KMI. On
 bluejay (android14-6.1) it took the fragment from 3145 drifted symbols to **0**;
 the poisoners there are FANOTIFY and NET_L3_MASTER_DEV. The list is per KMI and
-tree; method in kmi-crc-matching.md § Poison options.
+tree; method in kernel-config.md § Poison options.
 
 **Location:** `tools/symvers-drift.py` in [luneos-bootimg-bluejay](https://github.com/Herrie82/luneos-bootimg-bluejay).
 
@@ -96,14 +96,21 @@ Works on FULL payloads (mindphone's was 717 MB, minor_version=0, 16 partitions).
 
 **Location:** unpublished.
 
+**Block OTAs** (LineageOS-family zips without `payload.bin`) ship `vendor.new.dat.br` +
+`vendor.transfer.list` instead: `brotli -d` (OE ships `brotli-native`), then apply the
+transfer list's `new` commands into a flat image (block size 4096, ranges are pairs
+`[a,b)`; only `new` consumes bytes, so a sparse file gives the rest for free). **Verify with
+`e2fsck -fn`**: an off-by-one in the range arithmetic produces a plausible-looking image
+(athena, surya).
+
 ## unpack_bootimg.py
 
 **Purpose:** unpack/inspect boot images with header v0–v2 — kernel, ramdisk,
 dtb, and all header fields (load addresses, offsets, cmdline, os_version).
 Use it to record the stock header recipe and to sanity-check every image you
 build: `./unpack_bootimg.py boot-luneos.img /tmp/x`, then diff the printed
-fields against the stock table. It also identified mindphone's v2 dtb field as
-an AOSP dt_table (magic `0xd7b7ab1e`), not a bare FDT.
+fields against the stock table. It also tells a v2 dtb field that is an AOSP dt_table
+(magic `0xd7b7ab1e`, mindphone) from a bare FDT (radon).
 
 **Location:** unpublished.
 
@@ -111,12 +118,10 @@ an AOSP dt_table (magic `0xd7b7ab1e`), not a bare FDT.
 
 <https://github.com/bkerler/mtkclient>
 
-The MediaTek answer to "the device resets and there is no console, no adb and no
-pstore". MediaTek SoCs keep an **exception database** in a partition called
-`expdb`: preloader/lk logs, the AP watchdog status, and the kernel's last
-`RAM_CONSOLE` — i.e. the kmsg from *before* the reset. It is readable over the
-preloader/BROM USB connection, which still enumerates on a device that boots
-nothing at all.
+Reads MediaTek's `expdb` partition (preloader/lk logs, watchdog status, the kmsg from
+before the reset) over the preloader/BROM USB connection, which still enumerates on a
+device that boots nothing. What to look for, and reading ramoops straight out of DRAM:
+soc-mediatek.md § Debugging a mute device.
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
@@ -132,9 +137,10 @@ The entry point moved between versions: newer trees install a console script
 bootlooping and mtkclient will grab the preloader as it cycles past; if not,
 power fully off and plug in holding **Volume Down** to force BROM.
 
-**Only ever use `mtk r`.** The same tool writes partitions and reflashes the
-preloader, and a bad preloader write is the one genuinely hard-to-recover brick
-on MediaTek.
+**Reading expdb needs only `mtk r`.** The same tool writes partitions and reflashes
+the preloader, and a bad preloader write is the one genuinely hard-to-recover brick
+on MediaTek; when installing with it, follow soc-mediatek.md § Install over BROM/preloader
+(write by name, never `preloader`).
 
 A wrapper script (`dump-expdb.sh`, unpublished) does all of the above, including
 the greps, and takes `--analyse` to re-read an existing dump.
@@ -166,7 +172,7 @@ is the only record.
 **Purpose:** check a kernel config against the Mer/Halium/systemd requirement
 list. Run it on the *stock* config (extracted via IKCONFIG) to size the LuneOS
 delta, and on the *shipped* config to confirm every remaining error is
-deliberate. Reference results: kernel-porting.md § The config delta.
+deliberate. Reference results: kernel-config.md § The config delta.
 
 **Known quirks (don't chase these):**
 - predates the 5.13 `NF_LOG_SYSLOG` rename → `NF_LOG_IPV4/6` stay "errors" even
@@ -192,10 +198,10 @@ tested on both factory zips.
 ## mkbootimg / mkdtboimg
 
 AOSP tools used for hand assembly:
-- `mkbootimg` — see boot-images.md for the exact mindphone v2 command with
+- `mkbootimg` — see device-mindphone.md § Boot image for the exact mindphone v2 command with
   base/offsets. For v3/v4 the Yocto writer below replaces it.
 - `mkdtboimg.py create` — wrap a self-built dtb into the dt_table format that
-  MTK lk (and the v2 dtb field) expects.
+  some MTK lk builds expect in the v2 dtb field (boot-images.md § Class 1 — legacy header v2).
 
 The Yocto v3/v4 writer `meta-android/lib/halium/bootimg.py` reproduces AOSP
 `mkbootimg.py` **byte-identically** across all four shipped shapes (kernel-only,
@@ -360,7 +366,7 @@ bitbake is the canonical one — it carries the module-loader/cmdline-params and
 userdata-resize fixes via `initramfs-scripts-halium`, and has been *newer* than
 hand-maintained overlay ramdisks in practice (it picked up the find-the-Android-
 image fix the hand kits lacked). The GKI kernel recipe and `GKI_KERNEL_IMAGE`:
-kernel-porting.md § Step 4.
+kernel-build.md § Step 4.
 
 ## build-bootimg.sh (luneos-bootimg-bluejay repo)
 

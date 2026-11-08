@@ -18,13 +18,13 @@ assumed.**
 |---|---|---|
 | v0 | ≤ Android 8 | |
 | v1 | Android 9 | |
-| v2 | Android 10/11 | adds a `dtb` field (an AOSP dt_table, not a bare FDT) |
+| v2 | Android 10/11 | adds a `dtb` field (an AOSP dt_table or a bare FDT, per bootloader) |
 | v3/v4 | GKI (Android 12+) | v4 adds `boot_signature` for GKI certification; no dtb section exists |
 
 - A11/A12: generic ramdisk in `boot`.
 - **A13+ launch devices: `boot` = GKI kernel only; the generic ramdisk moved to
   `init_boot`.** LuneOS replaces both (the stock GKI config is not sufficient, see
-  kernel-porting.md) and leaves `vendor_boot` stock.
+  kernel-config.md § The config delta) and leaves `vendor_boot` stock.
 - **v1 has no dtb section.** v1 adds only the `recovery_dtbo` fields to v0, so a v1
   image carries its device tree appended to the kernel (`Image.gz-dtb`).
   `kernel_android.bbclass` once split the appended FDT off a v1 kernel and then wrote it
@@ -85,7 +85,7 @@ device (a stock ROM, or another distro's port) proves its offsets on that
 bootloader. Moving `ramdisk_offset` up to buy room replaces a verified address with
 an unverified one — a bad trade while a boot failure is already being debugged.
 Shrink the image instead: trim the appended device trees first (usually the biggest
-and most pointless chunk — see kernel-porting.md), then `CONFIG_IKHEADERS`,
+and most pointless chunk — see soc-qualcomm.md § The appended-DTB glob trap), then `CONFIG_IKHEADERS`,
 `CONFIG_KALLSYMS_ALL`, vendor debug loggers. `CONFIG_DEBUG_INFO` is a red herring:
 it lives in `vmlinux`, not in `Image`. On surya those two levers alone took the
 LuneOS kernel inside a window its own vendor kernel overruns (see device-surya.md).
@@ -97,24 +97,7 @@ value `KERNEL_BOOTIMAGE_INITRAMFS_OFFSET`.
 
 ## Header v0 with an appended device tree (Qualcomm aboot)
 
-Pre-Android-10 Qualcomm devices carry the device tree **concatenated onto the
-compressed kernel** (`BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb`) rather than in a
-header section. There is no `dtb` field in a v0 header and often no `dtbo.img`.
-aboot scans the blobs after the gzip stream and selects one by matching
-`qcom,msm-id` (SoC id) and `qcom,board-id` (platform/subtype) against what the
-hardware reports — so the set must contain the board, and only needs to contain
-the board.
-
-To read them back out of an image, decompress the gzip member and scan the
-remainder for the FDT magic `d00dfeed`; `dtc -I dtb -O dts` then shows the
-`model` / `msm-id` / `board-id` of each. Comparing that list against a working
-image for the same device is the fastest way to confirm a board match.
-
-`abootimg` is what builds v0 here, and it **defaults to 2048-byte pages and takes
-no notice of `ANDROID_BOOTIMG_PAGESIZE`** — a 4096-byte-page v0 device needs
-`ANDROID_BOOTIMG_EXTRA_ABOOTIMG_ARGS = "-c pagesize=4096"` or the sections land at
-the wrong offsets. (Verified: `abootimg -c pagesize=4096` does produce a correct v0
-header.) Only `android_bootimg_v2()` reads the pagesize variable.
+Pre-Android-10 Qualcomm devices append the device trees to the compressed kernel; aboot picks one by `qcom,msm-id`/`qcom,board-id`. Reading them back, the `abootimg` page-size trap and QCDT: soc-qualcomm.md § Header v0/v1 and appended device trees.
 
 ## Class 1 — legacy header v2 (no vendor_boot)
 
@@ -126,9 +109,14 @@ device-mindphone.md.
 
 - Take every header field (base, offsets, page size, cmdline, `os_version`,
   `os_patch_level`) from the stock image, and check the boot partition size.
-- The v2 `dtb` field is **not a bare FDT** — it is an AOSP **dt_table** (magic
-  `0xd7b7ab1e`), the same format as `dtbo.img`. Reuse the stock one verbatim, or wrap a
-  self-built dtb with `mkdtboimg.py create`.
+  **Unresolved:** whether a lower `os_version` than stock is ever refused. mp01, q25 and
+  radon keep the stock value as a rule ("never lower"); titanpocket's lk boots an older
+  patch level than stock.
+- The v2 `dtb` field holds whatever the bootloader parses: an AOSP **dt_table** (magic
+  `0xd7b7ab1e`, the `dtbo.img` format) on the MediaTek lk of mindphone, titanpocket and
+  sm-t220 (which does not parse a bare FDT), a **bare FDT** on radon's lk and on Qualcomm
+  ABL (surya, sunfish). Read the stock image's magic; reuse a stock dt_table verbatim, or
+  wrap a self-built dtb with `mkdtboimg.py create`.
 
 ```
 mkbootimg --header_version 2 --pagesize <stock> \
@@ -150,7 +138,8 @@ Read the stock `vbmeta.img` (`avbtool info_image`) before flashing. If it is sig
 verification enforced (`flags 0`) and its descriptors chain `boot` — the stock boot.img
 then carries its own vbmeta in an `AVBf` footer — a self-built boot image will **not**
 verify; with the bootloader unlocked, flash a verification-disabled vbmeta (flags 2 vs
-3: see installing.md). MTK lk in unlocked/orange state then boots the unsigned image. An
+3: see installing.md). MediaTek lk in orange state then boots the unsigned image (soc-mediatek.md § Boot chain:
+preloader and lk). An
 unsigned hash footer is optional once verification is off.
 
 The opposite case exists too: check whether the community ROM that already boots on the
@@ -160,13 +149,23 @@ AVB footer, there is nothing to disable. (Found on athena; see device-athena.md.
 ### The `skip_initramfs` trap
 
 Many Android 8–10 vendor kernels honour `skip_initramfs` and bypass the packed ramdisk
-entirely; see debugging.md § Stage 1 for the fix.
+entirely: a repacked boot.img flashes fine and your init never runs (no gadget, no logs,
+stock-looking behaviour). The fix is in the kernel: grep `init/initramfs.c` for
+`skip_initramfs`; if the tree offers `CONFIG_INITRAMFS_IGNORE_SKIP_FLAG` (LineageOS trees,
+e.g. Sony's sdm660 `common.config` sets it), enable it, otherwise revert the commit that
+added the option.
+
+The LuneOS initramfs reads the flag too: its `init.sh` boots Android recovery when
+`/proc/cmdline` lacks `skip_initramfs` **and** `/recovery/init` exists, so a ramdisk that
+carries an Android recovery boots into it on a bootloader that does not pass the flag.
 
 ---
 
 ## Class 2 — A12-launch GKI (ramdisk in `boot`)
 
-No `init_boot`. Stock `boot` is header v4 with the kernel only (ramdisk size 0);
+No `init_boot`. Stock `boot` is header v4; whether it carries the generic ramdisk depends
+on the build: bluejay's has the kernel only (ramdisk size 0), the MediaTek MT6789 ones
+(q25, mp01) carry a non-zero generic ramdisk (device-q25.md § Boot image).
 `vendor_boot` is v4 with its ramdisk fragments (typically a PLATFORM fragment with
 first-stage init and a DLKM fragment with the early modules under `lib/modules`) and the
 dtb; separate `dtbo.img`, real `super`, a `vendor_dlkm` partition. Example: bluejay
@@ -198,7 +197,8 @@ Consequence: **two images instead of one** — `boot` gets our GKI kernel with n
 `init` wins and `lib/modules` (from vendor_kernel_boot) is there to modprobe.
 
 **Watch the init_boot size** — the partition can be small (8 MB on panther); lz4 instead
-of gzip is the escape hatch if the ramdisk grows. The debug image is self-contained
+of gzip is the escape hatch if the ramdisk grows, but it must be **legacy** lz4 and match
+the vendor ramdisk's compression (debugging.md § 1.10 Ramdisk compression must match). The debug image is self-contained
 (kernel + ramdisk + `enable_adb`), so it works regardless of what the bootloader does
 with `init_boot` during `fastboot boot`.
 
@@ -228,9 +228,9 @@ modules at all (`mount_kernel_modules` is a no-op) — fine on sargo where stora
 is built-in, **fatal on GKI devices** (UFS driver is a module). First attempt
 insmod'd `/lib/modules/modules.load` in list order → kernel panic
 (`exynos4_timer_resources: unable to determine tick clock rate`): `clk_exynos_gs`
-at line 15 needs symbols from `cmupmucal` at line 45. **`modules.load` is NOT
-dependency-ordered** — stock init resolves deps via modules.dep
-(libmodprobe, `load_modules_parallel=true`). v2 made repeated passes over the
+at line 15 needs symbols from `cmupmucal` at line 45: **`modules.load` is NOT
+dependency-ordered** (kernel-modules.md § `modules.load` is a list, not a dependency
+order). v2 made repeated passes over the
 remaining list until a pass makes no progress (bluejay: 88/203, 37/115, 26/78),
 logging per-pass progress to kmsg and WARNING any module that never loaded
 (never silence insmod errors with 2>/dev/null — that hid the diagnosis). Also:
@@ -278,12 +278,16 @@ fallback, warn to kmsg if neither yields a size.
 
 ### Debug images
 
-Same image + cmdline `enable_adb` → init panics into the initramfs debug shell. On
-Pixels, `fastboot boot boot-<dev>-luneos-debug.img` runs it without flashing — that is
-the push/rescue channel. If boot fails on any halium device, the initramfs drops to the
-same shell behind a USB gadget named "Failed to boot"; with the default
-`USB_FUNCTIONS=rndis` that is telnet on `192.168.2.15`, adb only where the machine adds
-it (debugging.md § Debug channels).
+Same image + cmdline `enable_adb` → init panics into the initramfs debug shell. Where
+the bootloader keeps the header cmdline, the debug image carries `enable_adb` there
+(`ANDROID_BOOTIMG_DEBUG_CMDLINE`, `gki_bootimg.bbclass`); where it drops or mangles it
+(kernel-config.md § The kernel command line), the debug image is a kernel rebuilt with
+`enable_adb` in `CONFIG_CMDLINE` (`LUNEOS_ENABLE_ADB=1`: sargo, sunfish, radon).
+**Unresolved:** bluejay's file says the Pixel bootloader drops unrecognised header
+arguments, yet the bluejay/panther debug images rely on header `enable_adb`; whether that
+works under `fastboot boot` on Tensor is not recorded. On Pixels,
+`fastboot boot boot-<dev>-luneos-debug.img` runs it without flashing — that is
+the push/rescue channel. Using the shell it drops into: debugging.md § The debug boot image.
 
 - MediaTek lk often does not implement `fastboot boot`; there the debug image has to be
   flashed (mp01), and devices with no fastboot at all take it through their flash tool.
@@ -291,15 +295,7 @@ it (debugging.md § Debug channels).
   fastboot's own load addresses, so it will not reproduce a load-address bug. (Found on
   athena; see device-athena.md.)
 
-Heritage note: hybris-boot (the ancestor of Halium's initramfs) signals the boot
-*stage* through its debug channel — telnet on port **23** means still in the
-initrd (pre-switch_root), port **2323** means post-switch_root, and marker files
-(`init_enter_debug` / `init_enter_debug2` on the data partition) halt boot at a
-chosen point deliberately (https://github.com/mer-hybris/hybris-boot). The LuneOS
-initramfs (`initramfs-scripts-halium` `init.sh`) has the first: on its debug path it
-starts telnetd at `192.168.2.15` port 23 and announces the stage in the USB
-gadget's iSerial string. There is no halt-boot flag file. The full debug flow is
-in debugging.md.
+The hybris-boot heritage of the telnet channel: debugging.md § The telnet / USB-networking ladder.
 
 ---
 
@@ -310,7 +306,7 @@ in debugging.md.
   device.
 - Expected GKI shapes: header v4, header_size 1584; on an A13-launch device the boot
   image has `ramdisk=0` and the init_boot image `kernel=0`. The Yocto writer and its
-  validation: device-bringup-yocto.md § GKI device machines.
+  validation: yocto.md § GKI device machines.
 
 ---
 
@@ -328,4 +324,4 @@ in debugging.md.
   the self-contained hand build of the bluejay boot image, carrying the init patch as
   `overlay/init-gki-modules.diff`; contents: tools.md § build-bootimg.sh.
 - **Yocto**: kernel and boot images from bitbake, the writer and the recipes —
-  device-bringup-yocto.md § GKI device machines.
+  yocto.md § GKI device machines.

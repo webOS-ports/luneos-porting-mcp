@@ -36,9 +36,9 @@ Before flashing: the rootfs in the staging kit predates the `OnePlus6T` adaptati
 
 **No vendor kernel modules, so nothing to match.** `CONFIG_QCA_CLD_WLAN=y` (qcacld-3.0 built in); `device/oneplus/{fajita,sdm845-common}` has no `.ko` (none in `proprietary-files.txt` or `common.mk`, no `BOARD_VENDOR_KERNEL_MODULES`). The `insmod /vendor/lib/modules/qca_cld3_wlan.ko` and `modprobe`s for `pinctrl-wcd`, `wcd-dsp-glink`, `snd-soc-wcd-spi`, `snd-soc-sdm845` in CAF `init.target.rc` refer to OxygenOS-era files a LineageOS vendor lacks and fail harmlessly (kmi-crc-matching.md § Step −1). `CONFIG_MODULE_SIG_FORCE=y` stays as stock, with the signing key pinned in the recipe (sargo's, byte for byte) so out-of-tree module recipes survive a rebuild. This holds for a *LineageOS* vendor only: OxygenOS 11 ships `qca_cld3_wlan.ko` and is a different port (and the Halium 11 GSI).
 
-**Config delta (`luneos.cfg`)**, each entry checked against `enchilada_defconfig` (kernel-porting.md § The config delta). Off in stock and turned on: `FHANDLE`, `VT` (and the console/PTY set), `DEVTMPFS`, `UTS_NS`, `PID_NS`, `USER_NS`, `NET_NS`, `CGROUP_DEVICE`, `MEMCG`, `FANOTIFY`, `BT_HCIVHCI` and the BT stack, `HIDRAW`, `SQUASHFS`, `VETH`, the netfilter extras, `NETCONSOLE` (safe: no prebuilt network module loads). Already on: **`CONFIG_OVERLAY_FS=y`**, so `luneos-device-config` applies the adaptation as one overlay mount. Changed from stock: `KALLSYMS_ALL` off (window lever), `RT_GROUP_SCHED` off (`waydroid-kernel.inc` forces it). `CONFIG_CC_WERROR` off (below).
+**Config delta (`luneos.cfg`)**, each entry checked against `enchilada_defconfig` (kernel-config.md § The config delta). Off in stock and turned on: `FHANDLE`, `VT` (and the console/PTY set), `DEVTMPFS`, `UTS_NS`, `PID_NS`, `USER_NS`, `NET_NS`, `CGROUP_DEVICE`, `MEMCG`, `FANOTIFY`, `BT_HCIVHCI` and the BT stack, `HIDRAW`, `SQUASHFS`, `VETH`, the netfilter extras, `NETCONSOLE` (safe: no prebuilt network module loads). Already on: **`CONFIG_OVERLAY_FS=y`**, so `luneos-device-config` applies the adaptation as one overlay mount. Changed from stock: `KALLSYMS_ALL` off (window lever), `RT_GROUP_SCHED` off (`waydroid-kernel.inc` forces it). `CONFIG_CC_WERROR` off (below).
 
-**4.9-tree tax:** `unifdef.c`'s `static bool constexpr;` → `BUILD_CFLAGS:append = " -std=gnu17"` (kernel-porting.md § Old BSP vs modern toolchain); the USB gadget functions must be forced from `m` back to `y` after `oldconfig`, or the configfs gadget (adb, netconsole) does not exist.
+**4.9-tree tax:** `unifdef.c`'s `static bool constexpr;` → `BUILD_CFLAGS:append = " -std=gnu17"` (kernel-build.md § Old BSP vs modern toolchain); the USB gadget functions are forced back to `y` after `oldconfig` (kernel-config.md § Fragment traps).
 
 **-Werror against GCC 15.** `CONFIG_CC_WERROR=y` in the defconfig adds a tree-wide `-Werror`; the first two failures were style warnings, so it is turned off in `luneos.cfg` rather than patched (warnings still print):
 
@@ -49,7 +49,7 @@ Before flashing: the rootfs in the staging kit predates the `OnePlus6T` adaptati
 
 qcacld sets its own `-Werror` in `drivers/staging/qcacld-3.0/Kbuild`, untouched by `CC_WERROR=n`; GCC 13's `-Wenum-int-mismatch` fires on `wlan_hdd_send_hang_reason_event` (`int` in the header, `enum qdf_hang_reason` in the definition). One patch drops the unconditional flag and leaves `-Werror=<specific>` alone — one hunk, where surya needed 27, because this tree keeps audio in `sound/soc/msm` and nothing under `techpack/` sets `-Werror`.
 
-**Appended dtbs come from the dtbo bases.** With `CONFIG_BUILD_ARM64_DT_OVERLAY=y`, `dtb-y` for SDM845 is empty (the base list is in the `else` branch of `arch/arm64/boot/dts/qcom/Makefile`). The bases are still built: `scripts/Makefile.dtbo` does `multi_depend($(dtbo), , -base)` and every fajita overlay declares `…-overlay.dtbo-base := sdm845-v2.1.dtb`. `arch/arm64/boot/Makefile` then appends `$(shell find $(obj)/dts/ -name \*.dtb)`, because the defconfig sets `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y` without `..._NAMES`; safe only because `Image.gz-dtb` depends on `dtbs` in the parent make. The appended set is every base dtb for every enabled SoC, as LineageOS ships. Leave `KERNEL_DEVICETREE` **unset**, or the bbclass concatenates a second copy.
+**Appended dtbs come from the dtbo bases.** With `CONFIG_BUILD_ARM64_DT_OVERLAY=y`, `dtb-y` for SDM845 is empty (the base list is in the `else` branch of `arch/arm64/boot/dts/qcom/Makefile`). The bases are still built: `scripts/Makefile.dtbo` does `multi_depend($(dtbo), , -base)` and every fajita overlay declares `…-overlay.dtbo-base := sdm845-v2.1.dtb`. `arch/arm64/boot/Makefile` then appends `$(shell find $(obj)/dts/ -name \*.dtb)`, because the defconfig sets `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y` without `..._NAMES` (soc-qualcomm.md § The appended-DTB glob trap); safe only because `Image.gz-dtb` depends on `dtbs` in the parent make. The appended set is every base dtb for every enabled SoC, as LineageOS ships. Leave `KERNEL_DEVICETREE` **unset**, or the bbclass concatenates a second copy.
 
 ## Boot image
 
@@ -73,11 +73,11 @@ image total 20,357,120 B of a 64 MB boot partition
 - **Window:** `0x01000000 - 0x8000 = 16,744,448 B`; kernel 13,697,391 B (bases built with `DTC_FLAGS=-@`), **3,047,057 B spare** with `KALLSYMS_ALL` off. Whether this ABL honours the offsets is unknown; the image fits regardless (boot-images.md § The kernel/ramdisk window — a build-time invariant). `IKHEADERS` does not exist on 4.9.
 - Release and debug images are different kernels (13,697,391 vs 13,697,509 B); the debug one carries `CONFIG_CMDLINE=" loglevel=3 systemd.unified_cgroup_hierarchy=0 SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 enable_adb"` with `CMDLINE_EXTEND=y`.
 
-Both header corrections needed `bitbake -f -c deploy` (device-bringup-yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
+Both header corrections needed `bitbake -f -c deploy` (yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
 
 ## Vendor and GSI
 
-Target: the **LineageOS 22.2 vendor** (Android 15, SDK 35, `ro.board.api_level=202404`), so `PREFERRED_VERSION_android-headers-halium = "16.0%"` and the Halium 16 GSI with no VNDK snapshot (architecture.md § Glossary, VNDK). Read from the vendor's own build.prop, not reasoned from `BOARD_VNDK_VERSION := current`. A stock OxygenOS 11 phone is vendor API 30 and wants the Halium 11 GSI. The installer picks the GSI at install time; only `android-headers-halium` is pinned in the build. `VENDOR_SECURITY_PATCH := 2021-11-01` in `BoardConfigCommon.mk` is the OxygenOS 11 blob vintage, not an API level.
+Target: the **LineageOS 22.2 vendor** (Android 15, SDK 35, `ro.board.api_level=202404`), so `PREFERRED_VERSION_android-headers-halium = "16.0%"` and the Halium 16 GSI with no VNDK snapshot (architecture.md § Glossary, VNDK). Read from the vendor's own build.prop, not reasoned from `BOARD_VNDK_VERSION := current`. A stock OxygenOS 11 phone is vendor API 30, which the 16.0 GSI serves through its VNDK 30 snapshot (gsi-building.md § VNDK snapshot matrix); the GSI comes in through the machine's `android-system-image-<device>` recipe. `VENDOR_SECURITY_PATCH := 2021-11-01` in `BoardConfigCommon.mk` is the OxygenOS 11 blob vintage, not an API level.
 
 Shipped because of the matched pair: `vendor.img` from the same `lineage-22.2-20260922` build as the kernel SRCREV, extracted from the OTA `payload.bin` with `payload_extract.py` (sha256-verified against the manifest). No module coupling here, but the HAL-to-kernel-interface coupling exists and pinning both halves is cheap.
 
@@ -90,9 +90,7 @@ Found here, confirmed on surya; the mechanism and the resolution table are in ha
 | fajita, LineageOS 22.2 | 202404 | 35 | absent |
 | surya, /e/OS A15 | 202404 | 35 | absent |
 
-`luneos-device-config` wrote 202404 straight into gbinder's `ApiLevel`, which selects preset 36 (`aidl6`) against an A15 vendor that speaks preset 35's `aidl5`. The fix maps a dated value to `ro.vendor.build.version.sdk`, with a date table when the vendor declares no SDK, and warns on an unknown date. Checked against eight property combinations: both A15 vendors select 35, an A16 date selects 36, sargo (numeric 32 → preset 31) and an Android 13 vendor (vndk 33 → preset 33) are unchanged.
-
-A property whose format changed is more dangerous than one that went missing: a missing `ro.vndk.version` falls through to a fallback; `202404` where an SDK number is expected is a valid integer and every comparison silently succeeds.
+`luneos-device-config` wrote 202404 straight into gbinder's `ApiLevel` (preset 36 against an A15 vendor); the fix is in hal-userspace.md § How it is handled now. Checked against eight property combinations: both A15 vendors select 35, an A16 date selects 36, sargo (numeric 32 → preset 31) and an Android 13 vendor (vndk 33 → preset 33) are unchanged.
 
 ## Yocto
 
@@ -114,7 +112,7 @@ MACHINE=fajita bitbake linux-oneplus-fajita    # -> Image.gz-dtb-fajita.fastboot
 
 nyx module selection comes from the `halium` override in `nyx-modules-machines.inc` (nyx-modules.md § Module selection); this machine builds no rootfs anyway.
 
-**Adaptation directory is `OnePlus6T`**, the vendor's `ro.product.vendor.device`, not the codename; an `adaptations/fajita/` would never be read (deviceinfo-reference.md § When the compositor starts but ignores the touchscreen). The MACHINE stays `fajita`; a `stubbed-services.d` file, if ever added, follows the vendor name too. The adaptation sets `deviceinfo_display_dpi` 402 and `deviceinfo_device_pixel_ratio="2.4"` (carried from sargo/sunfish on the same-1080-px-width reasoning; measured there, not here), and pins `deviceinfo_key_devices_by_name="qpnp_pon;gpio-keys"`. Input nodes from `fajita.dtsi`:
+**Adaptation directory is `OnePlus6T`**, the vendor's `ro.product.vendor.device`, not `fajita` (deviceinfo-reference.md § When the compositor starts but ignores the touchscreen); a `stubbed-services.d` file, if ever added, follows the vendor name too. The adaptation sets `deviceinfo_display_dpi` 402 and `deviceinfo_device_pixel_ratio="2.4"` (carried from sargo/sunfish on the same-1080-px-width reasoning; measured there, not here), and pins `deviceinfo_key_devices_by_name="qpnp_pon;gpio-keys"`. Input nodes from `fajita.dtsi`:
 
 ```
 qpnp_pon        power key, pm8998 (and the volume-down half of the pon combo)
@@ -134,8 +132,7 @@ Deliberately not shipped: a stubbed-services file (LineageOS's livedisplay here 
 
 Fastboot A/B kit (installing.md). Kit: `boot-fajita-luneos.img` / `-debug.img` (20,357,120 B each), `vendor.img` (1,073,741,824 B, paired LineageOS build), `vbmeta.img` (LineageOS's own, signed SHA256_RSA2048, flags 0x3), `vbmeta-disabled.img` (generated empty unsigned fallback for a stock-OOS vbmeta), `android-rootfs.img` (1,058,705,408 B, shared Halium 16 `halium_arm64`), `rootfs.img` (3,109,787,648 B, `halium-arm64`), `userdata-luneos.img` (4,587,520,000 B ext4, both images at the root, verified with `debugfs`); scripts `install.sh`, `make-userdata.sh`, `make-vbmeta.sh`, `make-debug-boot.sh`, `payload_extract.py`.
 
-- **Flash both slots** (`boot_a`/`boot_b`, `vendor_a`/`vendor_b`): the bootloader can fall back to the inactive slot.
-- `vendor` is a real partition, so bootloader fastboot writes it; no fastbootd.
+- **Flash both slots** (`boot_a`/`boot_b`, `vendor_a`/`vendor_b`); `vendor` is a real partition, written from bootloader fastboot (soc-qualcomm.md § Install and recovery).
 - LineageOS already builds vbmeta with `--set_hashtree_disabled_flag --set_verification_disabled_flag` (`BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS`); flashing with `--disable-verity --disable-verification` is still the habit.
 - Flashing `boot` replaces recovery. Keep the LineageOS boot.img.
 

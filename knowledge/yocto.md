@@ -1,4 +1,4 @@
-# Device Bring-up in meta-smartphone / Yocto
+# Yocto: Wiring a Port into meta-smartphone
 
 How a LuneOS port is wired into Yocto: layer geography, machine confs, the generic halium-arm64 machine, GKI boot-image machines, GSI recipes, LXC config and build traps.
 
@@ -142,18 +142,7 @@ Files that make it work:
 | `meta-google/conf/machine/{bluejay,panther}.conf` | the machines (`GKI_BOOTIMG = "1"`, `PREFERRED_VERSION_linux-halium-gki = "6.1%"`) |
 | `meta-android/recipes-bsp/gki-bootimg/luneos-bootimg-gki_1.0.bb` | the packing recipe, enabled by `GKI_BOOTIMG = "1"` |
 
-**The kernel is built in-tree, but not with the OE toolchain.** `linux-halium-gki_6.1.bb`
-builds ACK android14-6.1 with plain kbuild and Google's prebuilt clang 17 (r487747c), the
-compiler the KMI was frozen with: rebuilding ACK with OE's cross toolchain would move the
-exported-symbol CRCs under `CONFIG_MODVERSIONS` and the stock vendor modules would stop
-loading — which is the whole Tier A property (stock `vendor_boot`/`vendor_dlkm` modules
-keep loading against our kernel). `gki_bootimg.bbclass` takes the kernel from
-`GKI_KERNEL_PROVIDER ?= "linux-halium-gki"` by default; setting `GKI_KERNEL_IMAGE`
-overrides it with an out-of-tree Image (e.g. one built by `build-bootimg.sh` in
-github.com/Herrie82/luneos-bootimg-bluejay). `PREFERRED_PROVIDER_virtual/kernel =
-"linux-dummy"` only means the rootfs carries no kernel. bluejay, panther and
-tangorpro use the 6.1 recipe; there is no `linux-halium-gki_5.10.bb` (q25 builds its
-own kernel: `GKI_KERNEL_PROVIDER = "linux-zinwa-q25"`).
+**The kernel is built in-tree, but not with the OE toolchain**: Google's prebuilt clang the KMI was frozen with, plain kbuild, and `GKI_KERNEL_PROVIDER`/`GKI_KERNEL_IMAGE` to pick the kernel the boot image packs (kernel-build.md § Step 4: Build ACK).
 
 No nyx-modules file is needed per machine: module selection lives in
 `nyx-modules-machines.inc` (see nyx-modules.md).
@@ -283,7 +272,7 @@ are unavailable in the initramfs. It:
 - LuneOS does not need `CONFIG_SYSVIPC`, so `IPC_NS` is off with it, and `USER_NS` is
   KMI-poison on MediaTek mgk (q25, mp01); **LXC must not unshare the IPC or user
   namespace** — the shipped `lxc-config` keeps both; `PID_NS` is available
-  (kernel-porting.md § The config delta).
+  (kernel-config.md § The config delta).
 - LXC 4.0.12 on a 4.14/arm32 kernel: legacy clone kept `CLONE_PIDFD` → `EINVAL`; patched
   in the lxc recipe (found on mindphone).
 - **Do not enable `lxc@android.service`.** `android-system.service` starts the container
@@ -343,8 +332,8 @@ already-stripped ldflags textrel dev-so file-rdeps"` for prebuilt Android ELFs, 
   wam-clang with "sstate manifest could not be found". Do not retune the machine instead —
   an old `cortexa8hf-neon-halium` Chromium sstate predates the `INSANE_SKIP 32bit-time`
   change, its hashes can never match, and retuning invalidates every cached task anyway.
-- Old BSP kernels against gcc 14/binutils 2.4x: see kernel-porting.md for the patch
-  classes.
+- Old BSP kernels against gcc 14/binutils 2.4x: see kernel-build.md § Old BSP vs modern
+  toolchain for the patch classes.
 
 ## Build failures worth remembering
 
@@ -361,7 +350,7 @@ already-stripped ldflags textrel dev-so file-rdeps"` for prebuilt Android ELFs, 
    Fixed (`4815b208`) by parsing `/sys/.../uevent` instead of sourcing it. By-name
    partition symlinks are what let a generic build mount the stock vendor as
    `/dev/disk/by-partlabel/vendor$slot` instead of hardcoding `mmcblk0p*`.
-5. Kernel host tools failing on `constexpr` under C23: kernel-porting.md § Old BSP vs
+5. Kernel host tools failing on `constexpr` under C23: kernel-build.md § Old BSP vs
    modern toolchain.
 6. `GROUPMEMS_PARAM` in a recipe that does not `inherit useradd` does nothing, silently. The
    pulseaudio-modules-droid recipes asked for `pulse` in `input` that way (and with `-G input`,
@@ -371,6 +360,8 @@ already-stripped ldflags textrel dev-so file-rdeps"` for prebuilt Android ELFs, 
    `-j 32`; `-j 24` peaked at 81 GB. Pass a one-off `bitbake -R <file>` with
    `PARALLEL_MAKE:pn-webruntime-clang` rather than editing local.conf, and watch the systemd
    unit's state, not a status file the killed build never writes.
+8. Read `log.do_deploy*` (logged boot-image headroom, for one) in time order: the files are
+   named by build id, so a glob does not sort them by date (found on sunfish).
 
 ## Device-agnostic principles
 
@@ -380,6 +371,9 @@ architecture.md.
 
 ## Build-tree traps after the build directory was cleaned
 
+- **Keep flash-kit scripts outside any disk-cleaned area, and treat images as regenerable:**
+  a kernel recipe's `_deploy` sstate entry holds the finished boot image, so a wiped
+  `tmp/deploy` costs an untar, not a rebuild (found on athena; device-athena.md § Install).
 - **Export `DISTRO=luneos`** (`setup-local` does). Without it `meta-luneui`'s mesa
   patches live in a `luneos/` override directory that the `nativesdk` variant does
   not search, and parsing stops with "Unable to get checksum ... file could not be

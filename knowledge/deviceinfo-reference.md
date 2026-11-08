@@ -67,14 +67,14 @@ Sources:
 | `deviceinfo_init_boot_partition_size` | e.g. `8388608` (8 MB — panther's real constraint) |
 | `deviceinfo_vendor_boot_partition_size` | vendor_boot size (sample uses `$((100*$((2**20))))`) |
 | `deviceinfo_bootimg_has_vendor_kernel_boot_partition` | `"true"` on devices with a separate `vendor_kernel_boot` (panther-style) |
-| `deviceinfo_ramdisk_compression` | `gzip` or `lz4` — the size escape hatch when init_boot headroom runs out |
+| `deviceinfo_ramdisk_compression` | `gzip` or `lz4` — the size escape hatch when init_boot headroom runs out; must match the vendor ramdisk's compression, and lz4 must be the legacy format (debugging.md § 1.10 Ramdisk compression must match) |
 
 ## dtb / dtbo handling
 
 | Variable | Meaning |
 |---|---|
 | `deviceinfo_bootimg_prebuilt_dtb` / `deviceinfo_bootimg_dt` | prebuilt dtb file to embed |
-| `deviceinfo_dtb_has_dt_table` | `"true"` → the dtb slot wants an AOSP dt_table, so the raw FDT is wrapped via `mkdtboimg.py create` (exactly the mindphone v2 finding — the v2 dtb field is a dt_table, not a bare FDT) |
+| `deviceinfo_dtb_has_dt_table` | `"true"` → the dtb slot wants an AOSP dt_table, so the raw FDT is wrapped via `mkdtboimg.py create` (mindphone, titanpocket, sm-t220; radon's lk and Qualcomm ABL take a bare FDT) |
 | `deviceinfo_dtb_id` / `_rev` / `_custom0`–`_custom3` | dt_table entry metadata |
 | `deviceinfo_prebuilt_dtbo` | prebuilt `dtbo.img` to flash |
 | `deviceinfo_dtbo` | `"true"` → build dtbo from the kernel tree |
@@ -104,7 +104,7 @@ Sources:
 ## How the header version drives image assembly (HGABT behavior)
 
 - **v0/v1** — legacy offsets, optional `--dt` blob appended.
-- **v2** — adds the dtb section + `dtb_offset` (the mindphone recipe; dtb is a dt_table).
+- **v2** — adds the dtb section + `dtb_offset` (the mindphone recipe; its lk wants a dt_table).
 - **v3/v4** — split images: `boot` = kernel(-only), generic ramdisk either in `boot`
   (A11/A12 launch) or in `init_boot` when `bootimg_has_init_boot_partition=true`
   (A13+ launch); vendor ramdisk fragments + dtb live in `vendor_boot`.
@@ -178,10 +178,18 @@ empty by `luneos-device-config` first.
 | `deviceinfo_audio_sample_rate` | adds `rate=<n>` to `module-droid-card` in `webos-system.pa` |
 | `deviceinfo_bluebinder_ext_features_page_2_mask` | `BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`: bits bluebinder clears from Read Local Extended Features page 2 (byte 0 = top byte) |
 | `deviceinfo_bluebinder_local_commands_set` | `BLUEBINDER_LOCAL_COMMANDS_SET`, `<octet>:<hex>,...` added to Read Local Supported Commands |
+| `deviceinfo_android_skip_services` | container services `start-android-hals.sh` must not start (hal-userspace.md § Derive, don't ship) |
+| `deviceinfo_hardware_egl` | which `libGLES_*` to use when the vendor sets no `ro.hardware.egl` (soc-mediatek.md § Userspace and vendor keys) |
+| `deviceinfo_hwc_no_hw_fb` | `1` → libhybris' hwcomposer window leaves out `GRALLOC_USAGE_HW_FB` (goyavewifi) |
+| `deviceinfo_fb_kick` | `1` → `luneos-fb-kick` pans the framebuffer once the compositor is up (goyavewifi) |
+| `deviceinfo_touch_rotate` | evdevtouch rotation (`0` = none, or 90/180/270); overrides the default taken from `deviceinfo_compositor_geometry`, which double-rotates taps where the compositor already carries touch (tangorpro) |
+| `deviceinfo_alsa_mixer_init` | `Control=v[,v];…` set at boot, for HALs that touch no ALSA control (Q25) |
+| `deviceinfo_key_actions`, `deviceinfo_keyboard_layout` | key remaps such as `Key_HomePage=call.hangup`, and the hardware keyboard layout (Q25) |
+| `deviceinfo_backlight_outdoor_scale` | scale of the brightness setting outdoors (MP01: 25% on a reflective panel) |
 
-Devices built as their own `MACHINE` with their own rootfs (tissot, mido,
-mindphone) can use a machine package instead; devices on the shared
-`halium-arm64` rootfs (MP01) must use these keys, because a machine package never
+Devices whose machine builds its own rootfs (the 32-bit ports, e.g. mindphone) can use
+a machine package instead; devices on the shared `halium-arm64` rootfs (MP01,
+tissot-halium, mido-halium; hal-userspace.md § Binder and gbinder) must use these keys, because a machine package never
 reaches that rootfs.
 
 ## When the compositor starts but ignores the touchscreen
@@ -250,7 +258,7 @@ describes behaviour you have never actually verified.
 
 - Boot-image assembly per layout class, initramfs patches, AVB: see boot-images.md.
 - Kernel fragment content and KMI constraints (what a `deviceinfo`-driven Tier B build
-  may set that a Tier A GKI build must not): see kernel-porting.md and kmi-crc-matching.md.
+  may set that a Tier A GKI build must not): see kernel-config.md and kmi-crc-matching.md.
 - Where deviceinfo sits in the adaptation tiers (Tier 1: only what cannot be read off a
   running device): see architecture.md.
 - How the nyx keys reach the modules (`/etc/nyx.conf`): see nyx-modules.md.

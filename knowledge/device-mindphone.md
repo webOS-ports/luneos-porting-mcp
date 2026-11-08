@@ -41,9 +41,9 @@ Tier B, built whole from the MT6739 ALPS tree: `linux-greentouch-mindphone`,
 github.com/shr-distribution/linux branch `dnim/4.14.186` (SRCREV `06873421d`), defconfig
 `arch/arm/configs/k39tv1_bsp_1g_defconfig` + `luneos.cfg` (ported from the arm64
 `k39tv1_64_bsp_defconfig_luneos`, `CONFIG_DUMMY` kept `=y`). Platform identification and
-defconfig method: kernel-porting.md § Tier B.
+defconfig method: kernel-build.md § Tier B.
 
-- **gcc 14 / binutils 2.4x patch series** (the classes: kernel-porting.md § Old BSP vs modern
+- **gcc 14 / binutils 2.4x patch series** (the classes: kernel-build.md § Old BSP vs modern
   toolchain), as layer patches next to the recipe:
   1. `0001` obsolete `#alloc` section-flag syntax in 28 arm32 asm files (backport of upstream
      790756c7e022);
@@ -61,11 +61,10 @@ defconfig method: kernel-porting.md § Tier B.
   `QProcess::startDetached()` gets EINVAL, so luna-surfacemanager could neither
   `initctl emit lsm-ready` (no `READY=1`, a restart every 90 s, no first-use, no launcher
   icons, no maliit) nor `chgrp` its `wayland-0` socket to `compositor` (web apps got EACCES).
-  Rule: kernel-porting.md § pidfd_open() without waitid(P_PIDFD).
-- **Vendor modules**: the stock WMT/wlan/BT/GPS modules CRC-mismatch the reconfigured kernel,
-  so `luneos.cfg` sets `CONFIG_MODULE_FORCE_LOAD=y` and they are force-loaded
-  (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe). This fragment
-  also carries `CONFIG_NETCONSOLE=y`; see Open issues.
+  Rule: kernel-build.md § pidfd_open() without waitid(P_PIDFD).
+- **Vendor modules**: the stock WMT/wlan/BT/GPS modules are force-loaded
+  (`CONFIG_MODULE_FORCE_LOAD=y`; soc-mediatek.md § Connectivity combo (WMT/connac)). This
+  fragment also carries `CONFIG_NETCONSOLE=y`; see Open issues.
 - `FW_LOADER_USER_HELPER` is off in `luneos.cfg` (Halium default) and on in stock.
 
 ```
@@ -105,18 +104,19 @@ mkbootimg --header_version 2 --pagesize 2048 \
 - Shipped `boot-mindphone-luneos.img`: kernel 9,362,176 B (32-bit zImage, head
   `00 00 a0 e1`), ramdisk 5,064,178 B, dtb byte-identical to stock; 14,499,840 B total = 57%
   of the 24 MiB partition. Must stay ≤ 24 MB.
-- AVB: stock `vbmeta.img` (avbtool 1.1.0, SHA256_RSA2048, flags 0) chains `vbmeta_system`
-  (rollback slot 2), `vbmeta_vendor` (4) and `boot` (3); the stock boot.img carries its own
-  `AVBf` footer, so a self-built image needs a verification-disabled vbmeta (boot-images.md
-  § AVB: does the stock vbmeta cover boot?).
+- AVB: stock `vbmeta.img` (avbtool 1.1.0) is the MediaTek chain, and the stock boot.img
+  carries its own `AVBf` footer (soc-mediatek.md § Boot chain: preloader and lk;
+  boot-images.md § AVB: does the stock vbmeta cover boot?).
 
 ## Vendor and GSI
 
 Android 11 vendor, VNDK 30, 32-bit → the 32-bit `halium_arm` GSI. Build: gsi-building.md §
 Building a 32-bit halium_arm GSI (the v30 VNDK port and the `apex_vndk` block that was
 silently missing). Current pin in `android-system-image-mindphone.bb`:
-`halium-luneos-16.0-20261007-1-halium_arm` (carries `com.android.vndk.v27` to `v34`; the
-build `android-system-image-legacy-gsi.inc` also names), pinned separately because the
+`halium-luneos-16.0-20261107-1-halium_arm` on meta-smartphone `herrie/security-integration-v2`
+(`20261017-1` on `wrynose`); both carry `com.android.vndk.v27` to `v34`, the sphal linkerconfig
+change and droidmedia fixes, 20261107-1 also droidmedia's decoder fixes; gsi-building.md § GSI-side
+fixes for legacy vendors), pinned separately because the
 arm64 releases do not always publish a `halium_arm` asset. It travels inside `rootfs.img` as
 `android-rootfs.img` (`VIRTUAL-RUNTIME_android-system-image = "android-system-image-mindphone"`),
 not beside it. `android-headers-halium` is 16.0%. The hardware results in Status were
@@ -128,7 +128,7 @@ Layer `meta-greentouch`, `MACHINE=mindphone`: `TARGET_ARCH = "arm"`, `tune-corte
 `MACHINEOVERRIDES =. "halium-arm:"`, `KERNEL_IMAGETYPE = "zImage"`, `IMAGE_CLASSES +=
 "userdataimg"`. 32-bit machine rules (arch check, the webruntime tune split and the
 `defaulttunes.inc` bridge `DEFAULTTUNE:mindphone` + `PACKAGE_EXTRA_ARCHS:append:mindphone`):
-device-bringup-yocto.md § 32-bit (arm) machines. The port was first set up arm64 —
+yocto.md § 32-bit (arm) machines. The port was first set up arm64 —
 arch-arm64.inc, Image.gz-dtb, a Qualcomm cmdline, an arm64 defconfig, the `halium_arm64` GSI —
 wrong on every count.
 
@@ -138,7 +138,7 @@ wrong on every count.
 | `bluebinder/mindphone` | LE command-bitmap fix (below) |
 | `stubbed-services-mindphone` | health HAL, `storaged`, `sdcard`, `stp_dump3` |
 | `mindset-deviceinfo` | `deviceinfo_display_dpi="190"`, `device_pixel_ratio="1.0"`, `video_call="false"`, `hybris_prefer_vndk="1"` |
-| `nyx-conf/mindphone/nyx.conf` (meta-luneos) | keys pinned to `/dev/input/event1`; touch, battery, charger derived |
+| nyx | one shared `nyx.conf`, written per device by luneos-device-config's `30-nyx-conf` generator; key pins live in the adaptation (meta-luneos `2aa63a5ad`, 20 Oct 2026, replaced the per-machine `nyx-conf/mindphone/nyx.conf`) |
 
 Nyx module selection comes from the `halium` default in `nyx-modules-machines.inc`
 (nyx-modules.md § Module selection); there is no per-machine nyx file. `NYXMOD_OW_HAPTICS`
@@ -155,8 +155,8 @@ legacy-v2 sequence). Kit: `boot-mindphone-luneos.img`, `boot-mindphone-luneos-de
 `vbmeta-disabled.img` (stock vbmeta with flags 2), `userdata-luneos.img` (3.0 GB ext4 holding
 `rootfs.img`, built by `userdataimg.bbclass`), `install.sh` (`--debug` flashes the debug
 image). Fastboot mode: `adb reboot bootloader` or Vol-Down + Power; `fastboot flashing unlock`
-needs the OEM-unlock toggle. Flash both boot slots. MediaTek lk here has no `fastboot boot`, so
-the debug image is flashed, not RAM-booted.
+needs the OEM-unlock toggle. Flash both boot slots. lk here has no `fastboot boot`, so the debug
+image is flashed, not RAM-booted (soc-mediatek.md § Boot chain: preloader and lk).
 
 Revert: stock `boot.img` and `vbmeta.img`, then `fastboot -w`. If the phone stops enumerating,
 mtkclient over the preloader recovers it — write `boot` and `userdata` only, never `preloader`.
@@ -164,27 +164,25 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 ## Subsystem notes
 
 - **UI**: the boot-splash hang's root cause was the quoted
-  `wait_for_prop hwservicemanager.ready "true"` gate (debugging.md § 2.2). Also needed:
-  libhybris hook patches 0003/0004 (hal-userspace.md § libhybris fixes), LXC `CLONE_PIDFD` on
+  `wait_for_prop hwservicemanager.ready "true"` gate (debugging.md § 2.2 The quoted-property trap). Also needed:
+  libhybris hook patches 0003/0004 (graphics.md § libhybris fixes), LXC `CLONE_PIDFD` on
   4.14/arm32, binderfs symlinks, a DRM probe guard, the fb0 `modes` panel fallback, and a
   backlight kick.
 - **Wi-Fi**: force-loaded stock WMT modules, firmware path, `echo 1 > /dev/wmtWifi` retry —
-  generalised into `meta-android/recipes-core/mtk-connectivity` (hal-userspace.md § MediaTek
-  connectivity).
+  generalised into `meta-android/recipes-core/mtk-connectivity` (soc-mediatek.md § Connectivity combo).
 - **Modem**: `mount-android.sh` picked `fstab.enableswap` over `fstab.mt6739`, leaving the NV
   partitions unmounted (`md1.status` "exception"). After the fix: `md1.status=ready`,
   `vendor.ril-daemon-mtk` running, IRadio@1.0 em1/em2 registered, ofono `/ril_0` + `/ril_1`
-  Powered (debugging.md § Modem).
-- **Bluetooth**: `/dev/stpbt` ownership and the MAC from
-  `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr` (hal-userspace.md § Bluetooth). The combo chip
+  Powered (connectivity.md § Modem).
+- **Bluetooth**: `/dev/stpbt` ownership and the nvram MAC as for every MediaTek combo
+  (soc-mediatek.md § Connectivity combo (WMT/connac)). The combo chip
   answers every LE command but advertises none (octets 25–28 of Read_Local_Supported_Commands
   are zero), so BlueZ set LE event mask 0x10 and LE scan/connect found nothing;
   `bluebinder/mindphone` sets four event-gating bits back (`BLUEBINDER_LOCAL_COMMANDS_SET`),
   giving the LE event mask 0x1f confirmed on the device. A working `hci0` needs
   `CONFIG_BT_HCIVHCI`.
-- **GPU / web apps**: `/dev/pvr_sync` (shared `65-android.rules`) and `/dev/ion` must be 0666
-  — `wam` is not in group `system`, and without it every `eglCreateContext` returns
-  `EGL_BAD_ALLOC`.
+- **GPU / web apps**: `/dev/pvr_sync` (shared `65-android.rules`) and `/dev/ion` (layer
+  rules) are 0666 because `wam` is not in group `system` (soc-mediatek.md § Display).
 - **Audio**: on armv7 PDM was linked with none of its device handlers (they register from
   static initialisers in a static archive nothing references), so audiod never got the sound
   card: no sound, no volume, no USB storage or MTP. Fixed by linking the core archive
@@ -192,9 +190,8 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 - **Keypad**: 12-key T9 pad on `mtk-kpd`; T9 multi-tap is webos-keyboard patch 0004. udev tags
   `mtk-kpd` `ID_INPUT_KEY` only, and the compositor finds keyboards by `ID_INPUT_KEYBOARD`
   (nyx-modules.md § Copy-paste is fiction until verified on hardware).
-- **`stp_dump3`**: the vendor's `persist.vendor.connsys.coredump.mode=2` starts the combo-chip
-  dump collector, which busy-loops on `pselect6()` for `/dev/stpwmt` (54,249 s of CPU in
-  54,653 s uptime); stubbed.
+- **`stp_dump3`** (`persist.vendor.connsys.coredump.mode=2`): 54,249 s of CPU in 54,653 s
+  uptime; stubbed (soc-mediatek.md § Userspace and vendor keys).
 
 ## Open issues
 
@@ -215,10 +212,9 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 
 ## Device-specific traps
 
-- Check the stock kernel's word size before writing a machine conf (`bootopt=`).
-- Keep the boot image well under the 24 MiB partition: on the same lk family the MP01
-  stopped starting our init once its boot image grew from 28 to 31.6 MB with a larger
-  ramdisk (device-mp01.md § Rejected paths).
+- 32-bit kernel on a 64-bit SoC (`bootopt=64S3,32S1,32S1`): kernel-build.md § Identify the
+  platform precisely first.
+- Boot image ≤ 24 MB (soc-mediatek.md § Boot chain: preloader and lk).
 
 ## Sources
 

@@ -88,7 +88,7 @@ until haptics moved to the open-webOS implementation. That is now the halium def
 Rule of thumb: when `nyx-modules-hybris` fails to build against the machine's
 android-headers version because an Android API was removed, move that module to the
 `nyx-modules` side (`NYXMOD_OW_<X>` in `NYX_MODULES_REQUIRED`) rather than pinning older
-headers (the headers version must track the GSI — see device-bringup-yocto.md).
+headers (the headers version must track the GSI — see yocto.md).
 
 ## Wakeup alarms: timerfd, in nyx-modules, and watched
 
@@ -155,6 +155,10 @@ the same paths through the real module on a device (`rtc-time`, `next-alarm`,
 `set-alarm`, `clear-alarm`, `watch`), and reports who holds `/dev/rtc` when it
 cannot open it — which on a running system is always sleepd, exclusively, for its
 whole life.
+
+Never judge an RTC test against the system clock alone: on a fresh boot both can read 1970,
+and a zero delta looks like success. Require a sane system clock and honour `hwclock`'s exit
+status (found on sargo; device-sargo.md).
 
 ## Copy-paste is fiction until verified on hardware
 
