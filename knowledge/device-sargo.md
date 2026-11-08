@@ -73,7 +73,7 @@ the generation from `halium-luneos-gsi-16.inc`; the old per-device
 `device` (its `20240307-1` vendor.img is corrupt; the recipe restores `20240301-3` from a
 shipped testing package). Published `halium_arm64` GSIs for 9.0, 11.0, 13.0, 14.0 and 16.0
 are on github.com/webOS-ports/halium-images (release `halium-luneos-20260826` carries all
-five); android-headers track the GSI (device-bringup-yocto.md).
+five); android-headers track the GSI (yocto.md).
 
 The control experiment that started it all: same device, same 4.9 kernel, same Android 9
 vendor, same LuneOS build, only `/android` swapped from the sargo device image to a generic
@@ -99,7 +99,7 @@ evidence in the container's logcat.
 Layer `meta-google`, `MACHINE=sargo` (`sargo.conf`), in `$BUILD_DIR` with
 `MACHINE=sargo . ./setup-env`. The machine builds only the boot image; the rootfs is the
 generic `halium-arm64` one. A `MACHINE=sargo` rootfs once shipped without Waydroid because
-`packagegroup-luneos-extended` appends it only for `halium-arm64` (device-bringup-yocto.md §
+`packagegroup-luneos-extended` appends it only for `halium-arm64` (yocto.md §
 The generic halium-arm64 machine). What is sargo-specific lives in `luneos-device-config`:
 `adaptations/sargo/deviceinfo` (scaling, key devices), `sparse/etc/libncicore.conf` (NFC),
 `70-sargo.rules` (32 udev rules beyond `65-android.rules`), and `stubbed-services.d/sargo`.

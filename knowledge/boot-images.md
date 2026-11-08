@@ -333,7 +333,7 @@ in debugging.md.
   device.
 - Expected GKI shapes: header v4, header_size 1584; on an A13-launch device the boot
   image has `ramdisk=0` and the init_boot image `kernel=0`. The Yocto writer and its
-  validation: device-bringup-yocto.md § GKI device machines.
+  validation: yocto.md § GKI device machines.
 
 ---
 
@@ -351,4 +351,4 @@ in debugging.md.
   the self-contained hand build of the bluejay boot image, carrying the init patch as
   `overlay/init-gki-modules.diff`; contents: tools.md § build-bootimg.sh.
 - **Yocto**: kernel and boot images from bitbake, the writer and the recipes —
-  device-bringup-yocto.md § GKI device machines.
+  yocto.md § GKI device machines.

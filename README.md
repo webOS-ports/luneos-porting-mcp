@@ -60,7 +60,7 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `boot-images` | header layouts, the kernel/ramdisk window, per-layout repack recipes, initramfs init patches, AVB, debug images |
 | `installing` | flash kits, vbmeta flags, flash steps per layout, SP Flash Tool / lk2nd / Odin routes, anti-rollback |
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), published releases, VNDK snapshot matrix |
-| `device-bringup-yocto` | meta-smartphone layers, machine confs, GKI boot-image recipes, bitbake traps, mount-android/LXC |
+| `yocto` | meta-smartphone layers, machine confs, GKI boot-image recipes, bitbake traps, mount-android/LXC |
 | `nyx-modules` | nyx module selection and runtime-derived nyx.conf, time ownership |
 | `hal-userspace` | libhybris/libgbinder stack by subsystem: graphics, gbinder ApiLevel, MTK connectivity, audio, modem, BT, sensors |
 | `debugging` | staged "device doesn't come up" playbook, debug channels, symptom → cause table |

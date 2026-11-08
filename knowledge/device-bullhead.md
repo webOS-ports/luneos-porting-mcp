@@ -2,7 +2,7 @@
 
 LG Nexus 5X (`bullhead-halium`), MSM8992, 3.10 arm64 kernel, Tier B on the 16.0 GSI over a LineageOS 21 vendor: UI, Wi-Fi, sensors, NFC work; BT in progress.
 
-The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (device-bringup-yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (hal-userspace.md § Adreno 4xx on a 3.10 kgsl).
+The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (hal-userspace.md § Adreno 4xx on a 3.10 kgsl).
 
 ## Status (as of 11 Oct 2026)
 
@@ -55,7 +55,7 @@ Android boot image with `Image.gz-dtb`; `android-kernel-bootimg`'s postinst writ
 
 LineageOS 21 `lineage-21.0-20240911-UNOFFICIAL-bullhead.zip` (nexus5x-dev/OTA): monolithic, vendor under `/system/vendor`, built with `RELEASE_DEPRECATE_VNDK` (no `ro.vndk.version`, `HALIUM_LEGACY_VNDK = ""`). Converted by halium-legacy-vendor and published as `bullhead-halium-vendor.img` in the `halium-luneos-20261005` release; plain arm64 GSI `20261007-1`. The recipe rewrites `/system/etc/data/` to `/vendor/etc/data/` in place in netmgrd, qmuxd and libdsi_netctrl (and the qcril.db copy in init.bullhead.rc), so the plain GSI can be used.
 
-Everything round 8 to 12 added on the Android side ships under the host's `/odm` (device-bringup-yocto.md § Shipping fixes through /odm), so the published image stays as it is: sensors and Bluetooth services and the VINTF fragment that makes them hwbinder, the camera's private library directory and shims, rild's private libbinder, LineageOS's shims for the RIL, ATFWD and cnd, the media APEX link for libdroidmedia. A new derive should do the vendor side with `HALIUM_LEGACY_LD_SHIMS`, `HALIUM_LEGACY_EXTRA_LIBS` and `HALIUM_LEGACY_BINDERIZED_HALS` instead (gsi-building.md § Before deriving).
+Everything round 8 to 12 added on the Android side ships under the host's `/odm` (yocto.md § Shipping fixes through /odm), so the published image stays as it is: sensors and Bluetooth services and the VINTF fragment that makes them hwbinder, the camera's private library directory and shims, rild's private libbinder, LineageOS's shims for the RIL, ATFWD and cnd, the media APEX link for libdroidmedia. A new derive should do the vendor side with `HALIUM_LEGACY_LD_SHIMS`, `HALIUM_LEGACY_EXTRA_LIBS` and `HALIUM_LEGACY_BINDERIZED_HALS` instead (gsi-building.md § Before deriving).
 
 ## Yocto
 

@@ -99,7 +99,7 @@ No VNDK → Halium 16 GSI (`halium_arm64`); gbinder ApiLevel from the vendor at 
 
 ## Yocto
 
-Layer `meta-google`, `MACHINE=panther` (device-bringup-yocto.md § GKI device machines):
+Layer `meta-google`, `MACHINE=panther` (yocto.md § GKI device machines):
 
 ```
 MACHINE=panther bitbake luneos-bootimg-gki     # boot, init_boot, debug image

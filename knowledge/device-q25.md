@@ -10,7 +10,7 @@ and the device's own tree failed 0 (kernel-porting.md § Step 1: Check that the 
 kernel really is GKI). Also the device behind "vermagic must match exactly when
 busybox insmod loads the storage modules" (kmi-crc-matching.md § Step 0 — ask the
 modules, they know) and "MACHINE_FEATURES-gated packages never reach the generic
-rootfs" (device-bringup-yocto.md § The generic `halium-arm64` machine). Same SoC and
+rootfs" (yocto.md § The generic `halium-arm64` machine). Same SoC and
 kernel generation as the MP01 (device-mp01.md).
 
 ## Status (as of 7 Oct 2026)
@@ -214,7 +214,7 @@ meta-android pieces it relies on: `luneos-bootimg-gki` (gated on `GKI_BOOTIMG`),
 selection is in `nyx-modules-machines.inc` (nyx-modules.md § Module selection: `nyx-modules-machines.inc`).
 kbdscroll ships on the generic rootfs for `halium-arm64`/`halium-arm`, because a
 package gated on `trackpad` in q25.conf could never reach this device
-(device-bringup-yocto.md § The generic `halium-arm64` machine); its profiles are
+(yocto.md § The generic `halium-arm64` machine); its profiles are
 selected at runtime by codename (`by-codename/q25.conf`).
 
 ```sh

@@ -73,7 +73,7 @@ image total 20,357,120 B of a 64 MB boot partition
 - **Window:** `0x01000000 - 0x8000 = 16,744,448 B`; kernel 13,697,391 B (bases built with `DTC_FLAGS=-@`), **3,047,057 B spare** with `KALLSYMS_ALL` off. Whether this ABL honours the offsets is unknown; the image fits regardless (boot-images.md § The kernel/ramdisk window — a build-time invariant). `IKHEADERS` does not exist on 4.9.
 - Release and debug images are different kernels (13,697,391 vs 13,697,509 B); the debug one carries `CONFIG_CMDLINE=" loglevel=3 systemd.unified_cgroup_hierarchy=0 SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 enable_adb"` with `CMDLINE_EXTEND=y`.
 
-Both header corrections needed `bitbake -f -c deploy` (device-bringup-yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
+Both header corrections needed `bitbake -f -c deploy` (yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
 
 ## Vendor and GSI
 

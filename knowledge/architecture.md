@@ -109,7 +109,7 @@ launch generation are in boot-images.md.
 From Android 10, `system`/`vendor`/`product` are logical partitions inside `super` (or,
 on devices retrofitted from an older launch, spread over `system` and `vendor` with no
 `super` partition at all). LuneOS maps them from systemd, not the initramfs — see
-device-bringup-yocto.md § mount-android.sh and the LXC container.
+yocto.md § mount-android.sh and the LXC container.
 
 ## The adaptation tier model — derive first, declare second, ship files last
 
@@ -148,7 +148,7 @@ roots — `/usr/lib/droid-vendor-overlay/` and `/usr/lib/droid-system-overlay/`,
 mirroring the partition's directory structure — whose contents shadow individual files of
 the mounted stock partitions without modifying them (used in practice to ship a patched
 `vndservicemanager` binary and tweaked vendor rc files). LuneOS ships such files through
-`/odm` (device-bringup-yocto.md § Shipping fixes through /odm) or bind-mounts a patched
+`/odm` (yocto.md § Shipping fixes through /odm) or bind-mounts a patched
 file over the vendor's (device-sm-t220.md). (Droidian,
 https://docs.droidian.org/porting-guide/debugging-tips/)
 

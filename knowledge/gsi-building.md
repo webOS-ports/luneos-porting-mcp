@@ -168,11 +168,11 @@ Why sargo worked on 16 without any of this: its vendor is 12.1 (v32, already shi
 
 Package the built `system.img` as `halium-luneos-<ver>-<date>-N-<product>.tar.bz2`, publish it as a `webOS-ports/halium-images` release, and bump `HALIUM_LUNEOS_GSI16_PV`/`_SHA256` in `halium-luneos-gsi-16.inc` (every machine moves together; a device that must stay behind overrides the weak assignments in its own recipe, as mindphone does for `halium_arm`). The `.inc` does the sparse→ext4 conversion + `/android/{system,vendor,data,...}` symlinks and consumes `${UNPACKDIR}/system.img` in place (`mv` → `simg2img` → `rm`) — note modern trees use `${UNPACKDIR}`, not `${WORKDIR}`. The image installs as `android-rootfs.img` (system-as-root mode of the initramfs).
 
-Selecting between a GSI and an old device build per machine: device-bringup-yocto.md § android-system-image recipes.
+Selecting between a GSI and an old device build per machine: yocto.md § android-system-image recipes.
 
 There is no standalone GSI artifact the installer picks per device; each machine gets the GSI through an `android-system-image-<device>` recipe in the image. With the 16.0 GSI carrying VNDK 27–34, one GSI per architecture would cover every current vendor.
 
-When a machine moves to a newer GSI generation, its android-headers move with it: device-bringup-yocto.md § What a machine conf contains.
+When a machine moves to a newer GSI generation, its android-headers move with it: yocto.md § What a machine conf contains.
 
 ## Do not adopt Droidian's `android-system-gsi-*-bin`
 
@@ -280,7 +280,7 @@ three recipes before goyavewifi spent rounds finding it again.
 
 For 3 and 4 the fix belongs to the daemon that needs it: putting LineageOS's system libbinder into
 `/vendor/lib*` would replace it for every vendor process. Give that daemon a private directory and
-`setenv LD_LIBRARY_PATH` in an rc `override` (device-bringup-yocto.md § Shipping fixes through
+`setenv LD_LIBRARY_PATH` in an rc `override` (yocto.md § Shipping fixes through
 /odm).
 
 A converted image can be published next to the GSI as `<machine>-vendor.img` in the same

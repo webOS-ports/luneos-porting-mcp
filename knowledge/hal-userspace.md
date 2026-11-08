@@ -438,7 +438,7 @@ the first `/dev/input/event*` with `SW_HEADPHONE_INSERT` (the codec's "Headset J
 when the card is created, and marks the headphone/headset ports available. That input belongs to
 group `input`, from host udev and the container's ueventd alike, so `pulse` must be in it. It was
 not on any Halium machine until meta-luneos added it in `pulseaudio_%.bbappend` (Oct 2026): the
-droid module recipes' `GROUPMEMS_PARAM` was never applied (device-bringup-yocto.md § Build failures,
+droid module recipes' `GROUPMEMS_PARAM` was never applied (yocto.md § Build failures,
 item 6). The tell is `droid-extevdev.c: Unable to open device /dev/input/eventN, ignored:
 Permission denied` for every node. Check on a device with `id pulse`, then `evtest
 /dev/input/eventN` while plugging in, then `pactl --server unix:/var/run/pulse/native list cards`
@@ -553,7 +553,7 @@ vhci `hci0` for BlueZ.
   and bluebinder times out. Then each `close()` aborts the service in
   `BluetoothHci::close()` → `std::__throw_bad_function_call` (close before a successful
   initialize), and hwservicemanager restarts it in a loop. Fix: `start_hci_filter` in
-  `deviceinfo_android_skip_services` (an rc override does not stop the script; device-bringup-yocto.md
+  `deviceinfo_android_skip_services` (an rc override does not stop the script; yocto.md
   § Shipping fixes through /odm). Found on bullhead.
 
 ## Sensors

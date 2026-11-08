@@ -88,7 +88,7 @@ until haptics moved to the open-webOS implementation. That is now the halium def
 Rule of thumb: when `nyx-modules-hybris` fails to build against the machine's
 android-headers version because an Android API was removed, move that module to the
 `nyx-modules` side (`NYXMOD_OW_<X>` in `NYX_MODULES_REQUIRED`) rather than pinning older
-headers (the headers version must track the GSI — see device-bringup-yocto.md).
+headers (the headers version must track the GSI — see yocto.md).
 
 ## Wakeup alarms: timerfd, in nyx-modules, and watched
 

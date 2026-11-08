@@ -65,6 +65,7 @@ function loadTopics() {
 // so a client (or an older prompt) asking for one still gets the right text.
 // Value: the topic that now holds the content, optionally with the section.
 const TOPIC_ALIASES = {
+  "device-bringup-yocto": "yocto",
 };
 
 // Look a topic up by name or old name. Returns { topic, movedTo } or undefined.
@@ -308,7 +309,7 @@ const PROMPTS = {
             `I want to port LuneOS to a new device${a.codename ? ` (codename: ${a.codename})` : ""}.` +
             (a.details ? ` Known details: ${a.details}.` : "") +
             "\n\nUse the luneos-mcp knowledge base. Read these topics first: architecture, " +
-            "kernel-porting, boot-images, device-bringup-yocto, nyx-modules, gsi-building, installing. " +
+            "kernel-porting, boot-images, yocto, nyx-modules, gsi-building, installing. " +
             "Then guide me through, in order:\n" +
             "1. Classify the device: Tier A (GKI, Android 12+/kernel 5.10+) or Tier B (legacy vendor kernel); " +
             "A12-launch vs A13-launch boot layout (init_boot or not); 32-bit vs 64-bit; anti-rollback state.\n" +

@@ -1,4 +1,4 @@
-# Device Bring-up in meta-smartphone / Yocto
+# Yocto: Wiring a Port into meta-smartphone
 
 How a LuneOS port is wired into Yocto: layer geography, machine confs, the generic halium-arm64 machine, GKI boot-image machines, GSI recipes, LXC config and build traps.
 

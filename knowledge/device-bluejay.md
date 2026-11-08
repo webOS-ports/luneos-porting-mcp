@@ -130,7 +130,7 @@ libhybris). The A12+ ashmem fix applies (debugging.md § 2.4).
 
 ## Yocto
 
-Layer `meta-google`, `MACHINE=bluejay` (`meta-google/conf/machine/bluejay.conf`); the pattern is device-bringup-yocto.md § GKI device
+Layer `meta-google`, `MACHINE=bluejay` (`meta-google/conf/machine/bluejay.conf`); the pattern is yocto.md § GKI device
 machines.
 
 ```

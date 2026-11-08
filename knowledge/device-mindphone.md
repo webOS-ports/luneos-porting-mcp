@@ -129,7 +129,7 @@ Layer `meta-greentouch`, `MACHINE=mindphone`: `TARGET_ARCH = "arm"`, `tune-corte
 `MACHINEOVERRIDES =. "halium-arm:"`, `KERNEL_IMAGETYPE = "zImage"`, `IMAGE_CLASSES +=
 "userdataimg"`. 32-bit machine rules (arch check, the webruntime tune split and the
 `defaulttunes.inc` bridge `DEFAULTTUNE:mindphone` + `PACKAGE_EXTRA_ARCHS:append:mindphone`):
-device-bringup-yocto.md § 32-bit (arm) machines. The port was first set up arm64 —
+yocto.md § 32-bit (arm) machines. The port was first set up arm64 —
 arch-arm64.inc, Image.gz-dtb, a Qualcomm cmdline, an arm64 defconfig, the `halium_arm64` GSI —
 wrong on every count.
 

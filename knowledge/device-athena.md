@@ -125,7 +125,7 @@ deviceinfo_kernel_cmdline="… selinux=0 console=tty0 …"
 
 Result: `Image.gz-dtb` **24,903,202 → 13,146,188 B**, one appended dtb, ramdisk at `0x01000000`, **3.60 MB** spare — more than the stock 4.4 image's 2.99 MB (13.76 MB kernel). That 13.1 MB kernel produced the 1406-line dmesg. The pre-fix image is reconstructible from the older `_deploy` sstate entry if anyone wants to settle the causal question.
 
-The staging kit's `check-bootimg.sh` asserts the window and caught a dropped `ANDROID_BOOTIMG_RAMDISK_RAM_BASE` that silently fell back to the bbclass default `0x00000000`; restoring it then appeared to change nothing until `do_deploy` was forced (device-bringup-yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
+The staging kit's `check-bootimg.sh` asserts the window and caught a dropped `ANDROID_BOOTIMG_RAMDISK_RAM_BASE` that silently fell back to the bbclass default `0x00000000`; restoring it then appeared to change nothing until `do_deploy` was forced (yocto.md § ANDROID_BOOTIMG_* changes do not always re-run do_deploy).
 
 **AVB: nothing to disable.** Four checks: `unzip -l <rom>.zip | grep -i vbmeta` finds nothing in the /e/OS package; its updater-script writes only `boot`, `system`, `vendor`; its `boot.img` has no `AVBf` footer or `AVB0` blob; `BoardConfigCommon.mk` sets no AVB/VERITY/VBMETA vars on `lineage-22.2` or `lineage-23.2`. And aboot accepted and executed an unsigned LuneOS image. Rule: boot-images.md § AVB: does the stock vbmeta cover `boot`?
 
@@ -208,7 +208,7 @@ Reaching the chip-ID switch means the part answered NCI RESET over i2c. Recognis
 
 **Fingerprint.** `servicemanager: Found android.hardware.biometrics.fingerprint.IFingerprint/default`, then `biomd: Failed to initialize HIDL fingerprint backend`: the HAL is alive, `biomd` has no AIDL backend (hal-userspace.md § Android 15 vendors are AIDL).
 
-**Container.** `android-system.service` starts it; never enable `lxc@android.service` as well (device-bringup-yocto.md § mount-android.sh and the LXC container).
+**Container.** `android-system.service` starts it; never enable `lxc@android.service` as well (yocto.md § mount-android.sh and the LXC container).
 
 ## Open issues
 
