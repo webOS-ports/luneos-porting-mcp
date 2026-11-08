@@ -15,7 +15,7 @@ Symptom-first triage for a black or frozen screen is in debugging.md § Stage 3;
 | Patch 0003 (mindphone): q linker missing legacy `StaticTlsLayout::finish_layout` | headers<16 builds | layer + device |
 
 The A12+ ashmem trap (`/dev/ashmem<boot_id>` must exist on the host, or the HIDL composer's
-command queue is never created) is in debugging.md § 2.4; it applies to bluejay/panther and
+command queue is never created) is in debugging.md § 2.4 Read the container's logcat; it applies to bluejay/panther and
 every other A12+ GSI.
 
 ## Mali under libhybris
@@ -90,6 +90,10 @@ with "Failed to create wl_display" → every QML app defunct. The bridge is a
 Verified: symlink removed → restored in <3 s; compositor restart → Phone launches. The
 watcher is not in meta-luneos, so the per-service `XDG_RUNTIME_DIR` env files for
 webapp-mgr/maliit are still what the layer ships; they become redundant once it is.
+
+**maliit-server and webapp-mgr abort instead of exiting when the Wayland socket disappears**
+("The Wayland connection broke…" → SIGABRT), so each compositor restart leaves their
+coredumps behind (found on sargo; device-sargo.md § Idle health).
 
 ## Browser (Atlas) UI scaling
 

@@ -270,7 +270,7 @@ three recipes before goyavewifi spent rounds finding it again.
    tenderloin) or `libpdfium.so` (goyavewifi: `gralloc.sc8830.so` -> `libdither.so` ->
    `libandroid_runtime.so` -> `libpdfium.so`). The symptom is a HAL service that exits with status 1
    at every start and writes **nothing** to the kernel log or the journal; only the container's logcat
-   has it (debugging.md § 2.4):
+   has it (debugging.md § 2.4 Read the container's logcat):
    ```
    vndksupport: Could not load /vendor/lib/hw/gralloc.sc8830.so from default namespace: dlopen failed:
      library "libft2.so" not found: needed by /vendor/lib/libpdfium.so
@@ -286,6 +286,10 @@ three recipes before goyavewifi spent rounds finding it again.
    lists who wants it (the result is `libhwui.so`, `libpdfium.so`, or both).
    The same fix as the framework-symbol shims in item 3 usually goes with it for the same libraries
    (`HALIUM_LEGACY_SHIM_TARGETS`, soc-qualcomm.md § Display: three gaps).
+
+6. **FDE fstabs.** Android 16's libfstab rejects `encryptable=footer` (full-disk encryption) and
+   vold then loads no fstab at all: drop the flag from `/data` in the vendor fstab (found on
+   goyavewifi; device-goyavewifi.md § Vendor and GSI).
 
 For 3 and 4 the fix belongs to the daemon that needs it: putting LineageOS's system libbinder into
 `/vendor/lib*` would replace it for every vendor process. Give that daemon a private directory and

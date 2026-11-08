@@ -78,7 +78,7 @@ TWRP route: `fastboot boot` the official TWRP 3.7.0 image (RAM only, never flash
 
 **Headphone jack.** pulseaudio could not read the jack's input device (`pulse` was never in `input`, fixed in meta-luneos; audio-media.md § Audio). The kernel arms MBHC with built-in calibration at card init; whether it reports a plug-in is the open question (round 12 carries an evtest script).
 
-**Restart loops cost CPU.** In round 7 WebAppMgr restarting every 6 s and sensorfwd every second kept four A53s busy: touch was slow and sound repeated. Look for restart loops before blaming a slow port.
+**Restart loops cost CPU.** In round 7 WebAppMgr restarting every 6 s and sensorfwd every second kept four A53s busy: touch was slow and sound repeated (debugging.md § Stage 5).
 
 ## Open issues
 

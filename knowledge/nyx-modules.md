@@ -156,6 +156,10 @@ the same paths through the real module on a device (`rtc-time`, `next-alarm`,
 cannot open it — which on a running system is always sleepd, exclusively, for its
 whole life.
 
+Never judge an RTC test against the system clock alone: on a fresh boot both can read 1970,
+and a zero delta looks like success. Require a sane system clock and honour `hwclock`'s exit
+status (found on sargo; device-sargo.md).
+
 ## Copy-paste is fiction until verified on hardware
 
 From the mindphone bring-up: its nyx values (keypad `/dev/input/event1`, touchpanel

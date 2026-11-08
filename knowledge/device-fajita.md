@@ -92,8 +92,6 @@ Found here, confirmed on surya; the mechanism and the resolution table are in ha
 
 `luneos-device-config` wrote 202404 straight into gbinder's `ApiLevel` (preset 36 against an A15 vendor); the fix is in hal-userspace.md § How it is handled now. Checked against eight property combinations: both A15 vendors select 35, an A16 date selects 36, sargo (numeric 32 → preset 31) and an Android 13 vendor (vndk 33 → preset 33) are unchanged.
 
-A property whose format changed is more dangerous than one that went missing: a missing `ro.vndk.version` falls through to a fallback; `202404` where an SDK number is expected is a valid integer and every comparison silently succeeds.
-
 ## Yocto
 
 | File | |

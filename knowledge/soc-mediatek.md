@@ -48,9 +48,9 @@ this file holds what is MediaTek-only.
   mp01's boot image from 28 to 31.6 MB (ramdisk 6.6 → 14.8 MB) and lk stopped starting our
   init, with nothing in kmsg or expdb on six images; the constraint was the combined
   ramdisk (ours plus vendor_boot's 22.5 MB), not the 64 MiB partition. mindphone's image
-  must stay ≤ 24 MB. Ship a minimal module set if one is needed (debugging.md § 1.8).
+  must stay ≤ 24 MB. Ship a minimal module set if one is needed (debugging.md § 1.8 The vendor modules may not be in the merged ramdisk).
 - **Ramdisk compression** matches vendor_boot's: LZ4 *legacy* on mp01 and brax3
-  (`GKI_RAMDISK_COMPRESSION = "lz4-legacy"`; debugging.md § 1.10).
+  (`GKI_RAMDISK_COMPRESSION = "lz4-legacy"`; debugging.md § 1.10 Ramdisk compression must match).
 - **Never truly off.** A MediaTek device auto-boots on USB power and does not power off
   with a long press while USB is connected (mp01); with a cable attached it boots with
   `androidboot.bootreason=usb` into charger mode (§ Display).
@@ -92,11 +92,13 @@ device-radon.md):
 
 ### `expdb` when there is no pstore and no gadget
 
-MediaTek kernels frequently ship **no pstore console**, and if the USB controller is a vendor module (debugging.md § 1.8) there is no debug gadget either — a failing device can be completely mute, nothing on `lsusb` but the preloader flashing past on each reset. `expdb` is the way in: a partition holding preloader/lk logs, AP watchdog status and the kernel's `RAM_CONSOLE` (kmsg from before the reset), readable over the preloader connection that still enumerates (mtkclient usage: tools.md § mtkclient). On the MP01 it showed our init running and the debug shell coming up, then:
+MediaTek kernels frequently ship **no pstore console**, and if the USB controller is a vendor module (debugging.md § 1.8 The vendor modules may not be in the merged ramdisk) there is no debug gadget either — a failing device can be completely mute, nothing on `lsusb` but the preloader flashing past on each reset. `expdb` is the way in: a partition holding preloader/lk logs, AP watchdog status and the kernel's `RAM_CONSOLE` (kmsg from before the reset), readable over the preloader connection that still enumerates (mtkclient usage: tools.md § mtkclient). On the MP01 it showed our init running and the debug shell coming up, then:
 
 ```
 RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
 ```
+
+**`expdb` records only on an exception:** a clean hang writes nothing and re-dumping returns the previous crash. Boot with `initrd_no_wdt` so a hang resets and leaves a record (found on mp01; device-mp01.md).
 
 **Read `wdt_status`.** Non-zero means the hardware watchdog reset the SoC rather than the kernel panicking — a different problem (§ The hardware watchdog).
 
@@ -120,7 +122,7 @@ On the Titan Pocket this gave the whole answer after five flash rounds of initra
 
 ### The hardware watchdog
 
-The preloader arms a **hardware watchdog** before handing off; stock Android's init feeds it, ours does not. `CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y` makes the kernel watchdog core pet it until userspace takes over — but only once the driver is loaded, and on MediaTek `mtk_wdt.ko` is a vendor module. Until modules load nothing feeds it, and the SoC resets after ~20–30 s — happily killing a working debug shell (debugging.md § 1.9).
+The preloader arms a **hardware watchdog** before handing off; stock Android's init feeds it, ours does not. `CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y` makes the kernel watchdog core pet it until userspace takes over — but only once the driver is loaded, and on MediaTek `mtk_wdt.ko` is a vendor module. Until modules load nothing feeds it, and the SoC resets after ~20–30 s — happily killing a working debug shell (debugging.md § 1.9 Debug mode must come after module loading).
 
 Later in boot the same watchdog shows up as a reset every ~90–120 s with **no panic and no oops**:
 
@@ -157,7 +159,7 @@ This is MediaTek-specific in practice: on the Qualcomm and Tensor ports the watc
   off) plus an empty `.scmversion` (q25, mp01, brax3); the sublevel comes from the
   Makefile, so a vendor whose release differs only there takes `SUBLEVEL=` on the make
   line (brax3's iodéOS machine). The ramdisk's busybox `insmod` needs an exact match
-  (debugging.md § 1.11).
+  (debugging.md § 1.11 Vermagic: match it rather than force it).
 - **BTF**: the MT6835 stock kernel has `DEBUG_INFO_BTF` on, and a host without `pahole`
   silently builds a kernel whose `struct module` differs (brax3; kmi-crc-matching.md
   § Step 5).

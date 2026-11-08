@@ -114,7 +114,7 @@ and sensors (AIDL multihal) are not boot-blocking.
 No VNDK (A15+ vendor) → Halium 16 GSI (`halium_arm64`); gbinder ApiLevel comes from the
 vendor at boot (hal-userspace.md § Binder and gbinder). The open unknown is the Mali-G78 blob
 under the hybris linker; carry the Mali patch set from day one (graphics.md § Mali under
-libhybris). The A12+ ashmem fix applies (debugging.md § 2.4).
+libhybris). The A12+ ashmem fix applies (debugging.md § 2.4 Read the container's logcat).
 
 ## Yocto
 

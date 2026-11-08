@@ -110,10 +110,7 @@ os_version 13.0.0/2023-05; `init_boot.img` v4, ramdisk 6,280,221 B, magic
 - Sizes (26 Oct 2026): `boot` 22,679,552 B (64 MiB partition); `init_boot`
   8,015,872 B against an **8 MiB** partition — ~364 KiB headroom, the binding
   constraint on the initramfs (UBports' is 6.3 MB); debug image 30,691,328 B.
-- Host build trap: `pahole-native` drags in `libbpf-native`, whose
-  `linux/bpf.h` shadows the tree's `tools/include` and breaks the host build of
-  `resolve_btfids` ("redefinition of 'bpf_core_relo'"); pass the native sysroot
-  as `-idirafter`, not `-I`, in `HOSTCFLAGS`.
+- Host build trap: native headers via `-idirafter` (kmi-crc-matching.md § Step 5).
 - No stock boot.img is published, so `ANDROID_BOOTIMG_OS_VERSION` is **unset**
   (0): read the flashed `boot_a` header first.
 - Cmdline: the 20 `?` padding, carried defensively; MT6835 unmeasured

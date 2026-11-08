@@ -119,7 +119,7 @@ B, ramdisk 1,380,093 B), no `init_boot`. `os_version` `0x1800063C` = 12.0.0 /
 **2099-12** — Minimal ship a deliberately far-future patch level; reproduce it
 (soc-mediatek.md § Boot chain: preloader and lk). Both stock ramdisks (boot and vendor_boot) are **LZ4
 legacy** (`02 21 4c 18`), so `GKI_RAMDISK_COMPRESSION = "lz4-legacy"`; a gzip ramdisk
-landed in Android Recovery (debugging.md § 1.10, found here). `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
+landed in Android Recovery (debugging.md § 1.10 Ramdisk compression must match, found here). `ANDROID_BOOTIMG_DEBUG_CMDLINE = "enable_adb"` for the debug image.
 
 ## Vendor and GSI
 
@@ -240,7 +240,7 @@ daylight needs less light, not more. lk lights the frontlight fully for its logo
 | Waydroid "container failed to start" | `lxc_spawn: ... Failed to clone a new set of namespaces` — no `IPC_NS`/`USER_NS`, Waydroid's LXC config asked for them | `waydroid-luneos-prepare` adds `lxc.namespace.keep` for whichever is missing from `/proc/self/ns` |
 | Web apps sized wrong for the rotated panel | WAM used unrotated display size | WAM `herrie/panel-fix` (logical size + configd `compositorGeometry` subscription) |
 | Gestures on the wrong edge | OrientationHelper mapped from parent, missing the output rotation | luna-next-cardshell `15bf576` (`mapFromGlobal`) |
-| `setprop` fails from the host | `android-property-service` enabled but never started (no journal entries at all); MediaTek's hwcomposer sets properties during init | start the unit (debugging.md § 2.5) |
+| `setprop` fails from the host | `android-property-service` enabled but never started (no journal entries at all); MediaTek's hwcomposer sets properties during init | start the unit (debugging.md § 2.5 The property service) |
 | `stp_dump3` at 93% of a core | soc-mediatek.md § Userspace and vendor keys | stubbed |
 | `fuse_usbotg` restarting every 5 s | nothing mounts OTG media into the container | stubbed |
 | Suspend never happens | both fingerprint HALs block uninterruptibly in the TrustKernel TEE driver (`tee_supp_cmd -> down`) waiting for a supplicant that never answers; 3240 freeze aborts in 90 min | stubbed (conflicts with fingerprint working, see Open issues) |
@@ -280,9 +280,8 @@ anything visibly broken.
   RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
   ```
 
-  i.e. our init was running and the watchdog was killing the debug shell. `expdb`
-  only records on an exception: a clean hang writes nothing and re-dumping returns
-  the previous crash. Boot with `initrd_no_wdt` so a hang resets and leaves a record.
+  i.e. our init was running and the watchdog was killing the debug shell (reading
+  expdb, and `initrd_no_wdt`: soc-mediatek.md § `expdb` when there is no pstore and no gadget).
 - **Watchdog:** `mtk-wdt` (31 s timeout) reset the device every ~90-120 s with no
   panic; `printf 'V' > /dev/watchdog` took uptime past 180 s (soc-mediatek.md § The
   hardware watchdog; debugging.md § Method).
@@ -294,9 +293,8 @@ anything visibly broken.
   initramfs bound to `$(ls /sys/class/udc)`, which here is two names, so the gadget
   never bound; "telnet ready on usb0" was logged regardless. Fixed with a
   first-real-UDC loop (debugging.md § Two UDCs).
-- **mdev names:** mdev creates `/dev/sdc59`, not `userdata`, so mountroot's `find
-  /dev -name userdata` failed; the initramfs now synthesises by-name links from
-  `PARTNAME=` in sysfs.
+- **mdev names:** mdev created `/dev/sdc59`, not `userdata` (debugging.md § 1.3 Async
+  storage probe and userdata).
 - **journald** kept only the first six seconds of a minutes-long boot; the journal
   lives under `<data>/luneos-data/var/log/journal/` (debugging.md § Tooling appendix).
 - `sh -x` as `ExecStart` pinned a silent 90 s compositor timeout to the first line of

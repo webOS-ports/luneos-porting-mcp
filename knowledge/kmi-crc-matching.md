@@ -380,7 +380,10 @@ none on `PATH` olddefconfig quietly unsets `DEBUG_INFO_BTF` and
 move: on the BraX3 a config identical to stock scored 774 of 774 failing. Check
 whether the vendor's IKCONFIG has BTF on (MT6789 does not, MT6835 and Tensor
 do), put `pahole` on `PATH` (`pahole-native`, or `GKI_BUILD_TOOLS_DIR`), and
-make the recipe fail when the option is missing (device-brax3.md § Kernel).
+make the recipe fail when the option is missing (device-brax3.md § Kernel). In Yocto,
+`pahole-native` drags in `libbpf-native`, whose `linux/bpf.h` shadows the tree's
+`tools/include` and breaks the host build of `resolve_btfids` ("redefinition of
+'bpf_core_relo'"): pass the native sysroot as `-idirafter`, not `-I`, in `HOSTCFLAGS`.
 Diff the resulting `.config` against IKCONFIG every time, not the defconfig you
 asked for.
 

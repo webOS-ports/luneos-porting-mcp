@@ -88,7 +88,7 @@ vendor, same LuneOS build, only `/android` swapped from the sargo device image t
 | `.capex` never mounted | `PRODUCT_COMPRESSED_APEX := false` | device tree |
 | TLS abort in every `getprop`/`setprop` | TheKit's Android 16 libhybris adaptation | `Herrie82/libhybris` `herrie/android16-tls` |
 | GPU driver not found | `/vendor/lib{,64}/egl` on the default LD paths | same branch |
-| Boot splash never cleared | create `/dev/ashmem<boot_id>` on the host | `mount-android.sh` (debugging.md § 2.4) |
+| Boot splash never cleared | create `/dev/ashmem<boot_id>` on the host | `mount-android.sh` (debugging.md § 2.4 Read the container's logcat) |
 
 The last one is the one to remember: 0 failed units, working audio, no display, and the only
 evidence in the container's logcat.
@@ -146,8 +146,8 @@ loopback test that pins it: yocto.md § mount-android.sh and the LXC container.
 ### Init stuck on `wait_for_prop`
 
 `init.<board>.rc` gates `post-fs-data` on `wait_for_prop vendor.qcom.time.set true`; the gate
-and what setting it brought up are in debugging.md § 2.1, which was found here. sargo's gates
-carry no quotes, so it never hit the quoted-property bug (debugging.md § 2.2).
+and what setting it brought up are in debugging.md § 2.1 Init "stuck" vs "curtailed", which was found here. sargo's gates
+carry no quotes, so it never hit the quoted-property bug (debugging.md § 2.2 The quoted-property trap).
 
 ### RIL slots
 
@@ -187,8 +187,8 @@ Consequences:
   Wakeup alarms).
 - The clock jumps mid-boot (journald: "Time jumped backwards, rotating"), so timestamps within
   one boot cannot be trusted and wall-clock deadlines can misfire across the jump.
-- Never judge an RTC test against the system clock alone: on a fresh boot both read 1970 and a
-  zero delta looks like success. Require a sane system clock and honour `hwclock`'s exit status.
+- Both clocks read 1970 on a fresh boot, so the RTC tests require a sane system clock
+  (nyx-modules.md § Host tests for this module).
 
 Test kit `sargo-nyx-system`: `test-rtc-write.sh` (the three outcomes above),
 `test-system-alarm.sh` (13 passed / 0 failed / 4 skipped, the skips being these device
@@ -201,9 +201,8 @@ memory leaks (`surface-manager` 166 MB at 17 min vs 165 MB at 10.5 h on tissot) 
 unexplained crashes, but no suspend at all in that boot.
 
 - Coredumps of `composer@2.1-service` (SIGABRT ×2) and `MaliitServer` coincided with
-  explicit `systemctl restart surface-manager-daemon`. The defect: **maliit-server and
-  webapp-mgr abort instead of exiting when the Wayland socket disappears** ("The Wayland
-  connection broke…" → SIGABRT). Not chased further.
+  explicit `systemctl restart surface-manager-daemon`: maliit-server and webapp-mgr abort
+  on Wayland socket loss (graphics.md § Wayland socket). Not chased further.
 - `qpnp_smb2` ships `debug_mask=31` (~4 of ~7 kernel lines/s on a charger): 0.19 → 0.10 GB/h
   whole-disk writes with `debug_mask=0`. Fixed by a `tmpfiles.d` rule
   (`meta-luneos/recipes-core/luneos-kernel-log-quirks/`); the boot header also carries
@@ -223,13 +222,9 @@ unexplained crashes, but no suspend at all in that boot.
 
 ### Waydroid
 
-Two faults kept Android in the container from reaching `sys.boot_completed`: the session
-bind-mounted `/tmp/xdg/wayland-0` by inode, so a compositor restart left the container on a
-dead socket (`waydroid-luneos-session.service` now has `PartOf=surface-manager-daemon.service`);
-and `configstore` is stubbed on the host while Waydroid's SurfaceFlinger asks the host
-hwservicemanager for it through `/dev/host_hwbinder` (`waydroid-luneos-prepare` now sets the
-nine `ro.surface_flinger.*` props). Prop setters run after `waydroid upgrade -o`, which
-regenerates `waydroid_base.prop`.
+Android in the container did not reach `sys.boot_completed` until two faults were fixed: the
+session's wayland socket bound by inode, and the host-stubbed `configstore` its SurfaceFlinger
+asks for (both in hal-userspace.md § Waydroid).
 
 ### Browser (Atlas) scaling
 

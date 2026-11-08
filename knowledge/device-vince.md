@@ -18,7 +18,7 @@ Same SoC as tissot and mido, but not the same Android half. Those keep Android 9
 
 - 1080x2160, two panels in the device tree (nt36672, td4310); 401 PPI from the LineageOS README. The panels' `qcom,mdss-pan-physical-*` (69 x 122 mm) cannot give it, the height being a 16:9 panel's.
 - Fingerprint: the device tree has both Goodix and FPC nodes. IR: Peel on SPI (`peel_ir`).
-- NFC: none. The built device tree has an `nq@28` node, but it comes from `msm8953-qrd.dtsi`; the vendor has no NFC HAL or blobs. Do not read a device's features from a dtb that includes a QRD reference dtsi.
+- NFC: none; the dtb's `nq@28` node comes from `msm8953-qrd.dtsi` (kernel-build.md § Identify the platform precisely first).
 
 ## Kernel
 
@@ -43,14 +43,14 @@ Addresses from msm8953-common: kernel 0x80008000, ramdisk 0x81000000, tags 0x800
 
 ## Yocto
 
-- No ofono files: 40-ofono-binder derives both from the HAL. The vendor manifest has `@1.4::IRadio/slot1` and `slot2`. tissot's and mido's `ofono-conf/*` copies are older than the generator; do not copy them to a new port.
+- No ofono files: 40-ofono-binder derives both from the HAL. The vendor manifest has `@1.4::IRadio/slot1` and `slot2`. (connectivity.md § Modem).
 - fingerprint-hal-fixup's tissot block is skipped, since the vendor has no `gf_fingerprint.default.so`; only its uinput fix runs.
 
 ## Install
 
 Fastboot (`luneos-dev-fastboot-package`): `boot` and `userdata` only. `userdata.img` holds `rootfs.img`, and vendor.img and the GSI are inside that, so `system` and `cust` stay as they are. The firmware partitions must suit LineageOS 18.1. Not yet confirmed on a phone.
 
-The TWRP zip (`luneos-dev-package`) failed its first try by sideload on a freshly formatted /data: truncated tarball, `tar: short read`, cause not established. The updater script checks neither the mount nor the copy, and flashes `boot` and reports success after a failed unpack.
+The TWRP zip (`luneos-dev-package`) failed its first try by sideload on a freshly formatted /data: truncated tarball, `tar: short read`, cause not established. The updater still flashed `boot` and reported success (installing.md § Recovery sideload).
 
 ## Open issues
 

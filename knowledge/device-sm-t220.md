@@ -92,7 +92,7 @@ Samsung Download mode route (installing.md § Samsung Download mode (Odin, TWRP)
 
 **appinstalld2.** It unpacks an IPK with `ar`, which the standard image lacks (busybox built without the applet; `binutils` only in the developer package group): `Failed to execute child process "ar"`. Its package database under `/media/cryptofs/apps` cannot see system packages, so `Depends: cordova` fails with `nothing provides cordova`; repack without `Depends:` for a test. A hand-run `opkg install` succeeds into the system root, which is misleading. `LunaAppManager`, `appinstalld` and `ApplicationInstallerUtility` log the exact `opkg` command line in the journal.
 
-Audio-debugging and logging techniques found here (jack-state check via `EVIOCGSW`, `amixer contents` diffs on the host, strace from the deploy directory's ipk, `logcat -b all -c` against a flooding tag) are in debugging.md (§ Audio, § Tooling appendix). On this chatty MTK kernel the dmesg ring and the journal's kernel part rotate within minutes, so audio/accdet/i2c probe lines are gone by the time you ssh in: reboot and read them at once, or capture `journalctl -k -b` early. `AudioALSAPlaybackHandlerNormal` alone filled logcat with 35,000 lines.
+Audio-debugging and logging techniques found here (jack-state check via `EVIOCGSW`, `amixer contents` diffs on the host, strace from the deploy directory's ipk, `logcat -b all -c` against a flooding tag) are in debugging.md (§ Audio, § Tooling appendix). On this chatty MTK kernel the audio/accdet/i2c probe lines rotate out within minutes (debugging.md § Tooling appendix). `AudioALSAPlaybackHandlerNormal` alone filled logcat with 35,000 lines.
 
 ## Open issues
 

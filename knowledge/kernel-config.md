@@ -84,6 +84,9 @@ Independently of any poison list, **LXC must not unshare the IPC namespace**:
 - **USB gadget functions can fall back to `m` after `oldconfig`.** On fajita's 4.9
   tree they had to be forced back to `y`, or there was no configfs gadget (no adb,
   no netconsole). Check the merged `.config`.
+- **A device defconfig can turn off what an enabled option depends on.**
+  `sunfish_defconfig` turns off `BT_BREDR` and `BT_LE`, and RFCOMM/BNEP/HIDP depend on
+  `BT_BREDR`: spell both out (found on sunfish; device-sunfish.md).
 - **`CONFIG_LOCALVERSION` in a fragment does not survive a `kernel.bbclass` recipe**;
   where to set it instead: kmi-crc-matching.md § Step 5.
 

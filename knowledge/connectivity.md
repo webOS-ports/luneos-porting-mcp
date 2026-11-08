@@ -137,7 +137,9 @@ name=slot2
 
 Per our Tier-0 rule LuneOS *derives* the slot topology from the HAL
 (enumerating `IRadio/slotN` on hwservicemanager) rather than hand-writing this file —
-but these are the key names the generator must emit.
+but these are the key names the generator must emit. The generator is `40-ofono-binder`;
+tissot's and mido's hand-written `ofono-conf/*` files are older than it — do not copy them to a
+new port (found on vince; device-vince.md).
 
 ### Modem failures on the Android side
 

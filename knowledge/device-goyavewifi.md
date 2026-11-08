@@ -51,7 +51,7 @@ LineageOS 16.0 (Android 9, VNDK 28) built from the sc8830-Bringup trees in a Hal
 
 Device-tree edits the 16.0 userspace needed (all in the shared Halium tree, so keep them as patches):
 
-- `fstab.sc8830`: drop `encryptable=footer` from `/data`; Android 16's libfstab rejects FDE and vold then loads no fstab at all.
+- `fstab.sc8830`: drop `encryptable=footer` from `/data` (gsi-building.md § Before deriving, item 6).
 - `init.sc8830.rc`: remove the `persdata` wait/mount (the device does not exist; the `wait` stalls init), and `stop media.swcodec` (it aborts every 5 s with "gralloc-mapper is missing"). The recipe now pins GSI `20261017-1`, which has the sphal linkerconfig change (gsi-building.md § GSI-side fixes for legacy vendors); whether the stop is still needed under it is untested.
 - `hidl.mk`: add `android.hardware.graphics.{allocator@2.0,composer@2.1}-service`; the vendor had only the `-impl` libraries.
 
@@ -87,7 +87,7 @@ Odin the LineageOS recovery, format `/data`, `adb sideload` the `luneos-dev-pack
 
 - **`sboot` builds its own kernel command line and drops the boot image's**; only the kernel's `CONFIG_CMDLINE` reaches the kernel. Everything the kernel or LuneOS needs from it (`androidboot.hardware=sc8830`, `androidboot.selinux=permissive`, `enable_adb` for the debug image) goes into `CONFIG_CMDLINE`. Measured from `/proc/cmdline` in the recovery, not assumed (kernel-config.md § The kernel command line).
 - The kernel partition is `KERNEL`, not `boot`.
-- An APEX service cannot be stubbed with `stubbed-services.d` (the container's apexd mounts its own copy): stop it from the vendor `init.sc8830.rc` instead.
+- An APEX service cannot be stubbed (hal-userspace.md § Stubbing a service vs not starting it): stop it from the vendor `init.sc8830.rc`.
 
 ## Sources
 

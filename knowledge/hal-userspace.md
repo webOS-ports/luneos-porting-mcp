@@ -62,6 +62,24 @@ mindphone stub it (on sargo `healthd` armed a 60 s alarm that woke the SoC every
 sunfish cannot, because its `gnss_service` polls for `IHealth` once a second when it is
 missing (device-sunfish.md § Subsystem notes).
 
+### Stubbing a service vs not starting it
+
+- **Not started:** `deviceinfo_android_skip_services` keeps `start-android-hals.sh` from
+  force-starting a service (deviceinfo-reference.md § LuneOS runtime keys).
+- **Stubbed:** `pre-start.d/50-stub-services` (meta-android `android-system`) bind-mounts a
+  stub over each binary listed in `stubbed-services.d/<codename>` — one container-relative
+  path per line, optionally followed by `exit` so the stub exits 0 for a helper init waits on —
+  so init sees the service run and it does no work. Bind mounts also work on a read-only
+  image. The codename comes from the vendor `build.prop` (`ro.product.vendor.device` first,
+  then the device tree), because the script runs before the container's property service
+  exists; a single `stubbed-services` file is the fallback for a machine that builds its own
+  rootfs.
+- **An APEX service cannot be stubbed this way**: the container's apexd mounts its own copy.
+  Stop it from the vendor rc instead (found on goyavewifi; device-goyavewifi.md).
+- **The USB gadget HAL** finds no `/config/usb_gadget/g1`, because LuneOS owns the gadget
+  host-side, and aborts in its constructor; stub it (found on sunfish, 124 SIGABRTs in ten
+  minutes; device-sunfish.md).
+
 ### udev rules from the container's own ueventd files — the next derivation to adopt
 
 GPU-node (`pvr_sync`/`ion` 0666) and BT-node (`stpbt` ownership) fixes were both
@@ -109,7 +127,10 @@ are in device-athena.md § Vendor and GSI.
 
 **Check this first, on every device, before writing or hunting a backend.** It is
 one line of configuration and it invalidates any missing-backend diagnosis when
-wrong.
+wrong. A property whose format changed is more dangerous than one that went missing: a
+missing `ro.vndk.version` falls through to a fallback, while `202404` where an SDK number is
+expected is a valid integer and every comparison silently succeeds (found on fajita;
+device-fajita.md).
 
 `libgbinder` chooses its servicemanager protocol from `ApiLevel` in
 `/etc/gbinder.conf` (or any `/etc/gbinder.d/*.conf`, which override it). It picks
@@ -262,3 +283,5 @@ What only one SoC family needs lives in its own topic: the MediaTek connectivity
 ## Waydroid
 
 Upstream `container_manager.py` runs `systemctl stop nfcd` on container start and only restarts it on stop, so a failed start leaves NFC dead until reboot (meta-luneos waydroid patch 0010 removes both calls). A fresh userdata has no `/var/lib/waydroid/waydroid.cfg`, so the session units skip until `waydroid init` has downloaded its ~1 GB of images. When it genuinely fails, `/var/lib/waydroid/waydroid.log` has the `lxc-start` output; `lxc_spawn: ... Failed to clone a new set of namespaces` means the kernel lacks `CONFIG_IPC_NS`/`CONFIG_USER_NS` and Waydroid's generated config, unlike the Android container's, has no `lxc.namespace.keep = ipc user`. `waydroid-luneos-prepare` adds it for whichever is missing from `/proc/self/ns`, after `waydroid upgrade -o` regenerates the config (found on mp01).
+
+Two more faults keep Android in the container from reaching `sys.boot_completed` (found on sargo; device-sargo.md § Waydroid): a session that bind-mounts `/tmp/xdg/wayland-0` by inode is left on a dead socket by a compositor restart (`waydroid-luneos-session.service` has `PartOf=surface-manager-daemon.service`); and Waydroid's SurfaceFlinger asks the host's hwservicemanager for `configstore` through `/dev/host_hwbinder` while LuneOS stubs it on the host, so `waydroid-luneos-prepare` sets the nine `ro.surface_flinger.*` props — after `waydroid upgrade -o`, which regenerates `waydroid_base.prop`.

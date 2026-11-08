@@ -94,8 +94,8 @@ Hardware results are from kit rev 9.
   Cost: initramfs 6.6 → 13.4 MB. Packaging traps (`KERNEL_SPLIT_MODULES = "0"` is
   mandatory under LTO; `MODULE_TARBALL_DEPLOY` makes a dependency loop):
   kernel-modules.md § Packaging traps.
-- **Other config:** `BT_BREDR` and `BT_LE` must be spelled out — `sunfish_defconfig`
-  turns both off and RFCOMM/BNEP/HIDP depend on `BT_BREDR`. `CONFIG_COMPAT_VDSO`
+- **Other config:** `BT_BREDR` and `BT_LE` spelled out (kernel-config.md § Fragment
+  traps). `CONFIG_COMPAT_VDSO`
   off (no arm32 cross toolchain in the sysroot), `CONFIG_CC_WERROR` off.
 - **dtc:** `DTC_EXT` and `DTC_FLAGS=-@` are both mandatory. The in-tree dtc 1.4.4
   cannot parse the overlay sugar these dtsi files use (`&thermal_zones {` at the top
@@ -136,8 +136,8 @@ MiB. Tags follow the stock image (the board file says 0x01E00000).
 runs into the ramdisk address — a build-time invariant; on a header-v2 image loaded
 by ABL the window may not bind at all (boot-images.md § The kernel/ramdisk window —
 a build-time invariant). The current kit image: kernel section 21,163,040 B,
-12,358,624 B of headroom. Read logged headroom from `log.do_deploy*` in time order —
-the files are named by build id, so a glob does not sort them by date.
+12,358,624 B of headroom (read `log.do_deploy*` in time order: yocto.md § Build failures
+worth remembering).
 
 The **dtbo partition stays stock** (soc-qualcomm.md § Header v0/v1 and appended device trees):
 the eight `sm7150-sunfish-*` overlays select by board-id, and the panel coming up is the
@@ -187,9 +187,8 @@ uses.
 - **Stubbed** (`stubbed-services.d/sunfish`): `pixelstats-vendor`,
   `wait_for_strongbox` (exit — init waits on it in late-fs), the Titan M
   rebootescrow HAL, `mm-pp-dpps`, the SurfaceFlinger configstore HAL,
-  `diag_mdlog` (exit), `ssr_diag`, `storaged`, and the **USB gadget HAL** — LuneOS
-  owns the gadget host-side, so the HAL's constructor finds no
-  `/config/usb_gadget/g1` and aborts (124 SIGABRTs in ten minutes).
+  `diag_mdlog` (exit), `ssr_diag`, `storaged`, and the **USB gadget HAL** (124 SIGABRTs in ten minutes unstubbed;
+  hal-userspace.md § Stubbing a service vs not starting it).
 - **Not stubbed: the health HAL.** `gnss_service` polls for `IHealth` once a second
   forever (621 `Could not find ... IHealth/default` in ten minutes when stubbed), and
   the vendor rc has no `interface` line, so only the real HAL satisfies it.

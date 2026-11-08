@@ -103,6 +103,10 @@ Some MediaTek devices are flashed only over the BROM/preloader link. The rules (
 
 lk2nd sits in the first 512 KiB of `boot`; never dd a boot image over it. Rules and recovery: soc-qualcomm.md § lk2nd.
 
+### Recovery sideload (`luneos-dev-package`)
+
+A recovery zip like hammerhead's and tenderloin's, `adb sideload`ed from the LineageOS recovery or TWRP onto a formatted `/data` (goyavewifi, vince). Its updater script checks neither the mount nor the copy: after a failed unpack it still flashes `boot` and reports success (found on vince; device-vince.md). Verify the rootfs on `/data` before rebooting.
+
 ### Samsung Download mode (Odin, TWRP)
 
 Samsung's lk speaks Odin only. What worked (found on SM-T220; see device-sm-t220.md):

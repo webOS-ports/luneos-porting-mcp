@@ -287,10 +287,7 @@ the bootloader keeps the header cmdline, the debug image carries `enable_adb` th
 arguments, yet the bluejay/panther debug images rely on header `enable_adb`; whether that
 works under `fastboot boot` on Tensor is not recorded. On Pixels,
 `fastboot boot boot-<dev>-luneos-debug.img` runs it without flashing — that is
-the push/rescue channel. If boot fails on any halium device, the initramfs drops to the
-same shell behind a USB gadget named "Failed to boot"; with the default
-`USB_FUNCTIONS=rndis` that is telnet on `192.168.2.15`, adb only where the machine adds
-it (debugging.md § Debug channels).
+the push/rescue channel. Using the shell it drops into: debugging.md § The debug boot image.
 
 - MediaTek lk often does not implement `fastboot boot`; there the debug image has to be
   flashed (mp01), and devices with no fastboot at all take it through their flash tool.
@@ -298,15 +295,7 @@ it (debugging.md § Debug channels).
   fastboot's own load addresses, so it will not reproduce a load-address bug. (Found on
   athena; see device-athena.md.)
 
-Heritage note: hybris-boot (the ancestor of Halium's initramfs) signals the boot
-*stage* through its debug channel — telnet on port **23** means still in the
-initrd (pre-switch_root), port **2323** means post-switch_root, and marker files
-(`init_enter_debug` / `init_enter_debug2` on the data partition) halt boot at a
-chosen point deliberately (https://github.com/mer-hybris/hybris-boot). The LuneOS
-initramfs (`initramfs-scripts-halium` `init.sh`) has the first: on its debug path it
-starts telnetd at `192.168.2.15` port 23 and announces the stage in the USB
-gadget's iSerial string. There is no halt-boot flag file. The full debug flow is
-in debugging.md.
+The hybris-boot heritage of the telnet channel: debugging.md § The telnet / USB-networking ladder.
 
 ---
 

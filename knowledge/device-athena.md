@@ -161,7 +161,7 @@ MACHINE=athena bitbake linux-blackberry-athena    # kernel + boot image (<image>
 
 ## Install
 
-Non-A/B fastboot device. The kit's `install.sh` flashes `vendor` (the extracted LineageOS 22 image), `boot` and `userdata`; `system` is left alone and `userdata` carries `rootfs.img` + `android-rootfs.img` (installing.md). No vbmeta step (§ Boot image). Keep the kit's scripts outside any disk-cleaned area and treat images as regenerable: the kernel recipe's `_deploy` sstate entry holds the finished `.fastboot` image, so a wiped `tmp/deploy` costs an untar, not a rebuild.
+Non-A/B fastboot device. The kit's `install.sh` flashes `vendor` (the extracted LineageOS 22 image), `boot` and `userdata`; `system` is left alone and `userdata` carries `rootfs.img` + `android-rootfs.img` (installing.md). No vbmeta step (§ Boot image). The finished `.fastboot` image is recoverable from the kernel recipe's `_deploy` sstate entry (yocto.md § Build-tree traps after the build directory was cleaned).
 
 ## Subsystem notes
 
@@ -226,7 +226,7 @@ The part answered NCI RESET over i2c; its chip ID is not among the recognised `N
 
 ## Device-specific traps
 
-- `sed -i` on the running device fails with "Device or resource busy" (it renames). Use `sed ... > <scratch> && cat <scratch> > <file>`, then `sync`. The rootfs is rw (`/.writable_image`), so `/etc` edits persist.
+- The rootfs is rw (`/.writable_image`), so `/etc` edits persist; `sed -i` fails there (debugging.md § Tooling appendix).
 - `enable_adb` panics to the debug gadget before userdata is looked up, so a known-good-kernel + our-initramfs bisect works without a `rootfs.img` (debugging.md § Method).
 - The bring-up journal's 954 `surface-manager` and 281 `keymaster-3-0` crashes were all in boots 1 and 4, already fixed by the vendor swap; the live `nfcd` registration failure fired once in all thirteen boots (debugging.md § Method).
 - General traps first met here: `fastboot boot` and load addresses (boot-images.md § Debug images), a fragment comment starting `# CONFIG_` (kernel-config.md § Fragment traps; it cost an hour).

@@ -148,6 +148,10 @@ compiler in the version string, the serial console, and the tune. Get
 TARGET_ARCH, the image type, the console and the tune right first (found on
 mindphone, set up arm64 and wrong on every count; see device-mindphone.md).
 
+Do not read a device's features from a dtb that includes a QRD (Qualcomm reference
+design) dtsi: vince's built tree has an `nq@28` NFC node from `msm8953-qrd.dtsi`, and
+the vendor has no NFC HAL or blobs (device-vince.md).
+
 ### Find the stock defconfig via IKCONFIG
 
 Stock IKCONFIG usually names the BSP project, and with it the defconfig in the

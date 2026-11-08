@@ -164,7 +164,7 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
 ## Subsystem notes
 
 - **UI**: the boot-splash hang's root cause was the quoted
-  `wait_for_prop hwservicemanager.ready "true"` gate (debugging.md § 2.2). Also needed:
+  `wait_for_prop hwservicemanager.ready "true"` gate (debugging.md § 2.2 The quoted-property trap). Also needed:
   libhybris hook patches 0003/0004 (graphics.md § libhybris fixes), LXC `CLONE_PIDFD` on
   4.14/arm32, binderfs symlinks, a DRM probe guard, the fb0 `modes` panel fallback, and a
   backlight kick.

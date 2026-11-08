@@ -148,8 +148,8 @@ Two routes.
 
 ## Device-specific traps
 
-- **Instrumentation must not change the result.** Panic-only dumping (`dump_fail_to_part`) wrote 8 MiB of zeros because this device hung, never panicked; a periodic dumper to `init_boot_b` was the right shape (debugging.md § Recording the initramfs to a spare partition). A heavy one (`systemd.log_level=debug`, 8 MiB `log_buf_len`, the ring written every 2 s) made the boot get less far. Zero the log partitions before each boot and require a header in the reader; run one mtkclient process at a time.
-- **ext4 will not mount a device rw while it is mounted ro elsewhere**; it quietly gives another ro mount ("source write-protected"). A leftover `mount -o ro /dev/furios/luneos` blocked every write; `umount -l` keeps the superblock held.
+- **Instrumentation must not change the result** (debugging.md § Recording the initramfs to a spare partition): panic-only `dump_fail_to_part` wrote 8 MiB of zeros because this device hung; the periodic dumper to `init_boot_b` worked; an 8 MiB `log_buf_len` with `systemd.log_level=debug` made the boot get less far.
+- A leftover `mount -o ro /dev/furios/luneos` blocked every write (ext4's silent second ro mount: debugging.md § Tooling appendix).
 - **USB transport:** xHCI enumeration failed on three ports (`device descriptor read/64, error -110`, 146 TX errors) until a different cable fixed it. FuriOS' NetworkManager re-applies `172.16.42.1/24` on `usb0` (`pt2usb` profile); use IPv6 link-local: `ping6 -c4 -I usb0 ff02::1`, then `ssh furios@fe80::<phone>%usb0`. FuriOS' tethering advertises `FuriOS forky Device on rndis0 10.15.19.82` in iSerial.
 - The vendor's `bootopt=` is lk's, not ours to change; and do not copy mp01's 20-character cmdline padding, KMI-poison list, panel rotation, `GKI_BOOTIMG` or ThinLTO.
 

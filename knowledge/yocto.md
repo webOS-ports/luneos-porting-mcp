@@ -360,6 +360,8 @@ already-stripped ldflags textrel dev-so file-rdeps"` for prebuilt Android ELFs, 
    `-j 32`; `-j 24` peaked at 81 GB. Pass a one-off `bitbake -R <file>` with
    `PARALLEL_MAKE:pn-webruntime-clang` rather than editing local.conf, and watch the systemd
    unit's state, not a status file the killed build never writes.
+8. Read `log.do_deploy*` (logged boot-image headroom, for one) in time order: the files are
+   named by build id, so a glob does not sort them by date (found on sunfish).
 
 ## Device-agnostic principles
 
@@ -369,6 +371,9 @@ architecture.md.
 
 ## Build-tree traps after the build directory was cleaned
 
+- **Keep flash-kit scripts outside any disk-cleaned area, and treat images as regenerable:**
+  a kernel recipe's `_deploy` sstate entry holds the finished boot image, so a wiped
+  `tmp/deploy` costs an untar, not a rebuild (found on athena; device-athena.md § Install).
 - **Export `DISTRO=luneos`** (`setup-local` does). Without it `meta-luneui`'s mesa
   patches live in a `luneos/` override directory that the `nativesdk` variant does
   not search, and parsing stops with "Unable to get checksum ... file could not be
