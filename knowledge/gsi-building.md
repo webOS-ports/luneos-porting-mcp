@@ -100,7 +100,10 @@ Against `Halium/android_device_halium_halium_arm64` at `8dbc6dc` (tip of `halium
 The published arm64 16.0 GSIs from `halium-luneos-20260910` on ship every snapshot the
 tree carries (`PRODUCT_EXTRA_VNDK_VERSIONS := 27 28 29 30 31 32 33 34`, v30 copied in
 from the 14.0 tree as for `halium_arm` below), so one arm64 GSI serves vendors from
-Android 8.1 to 14 and adding a device never means rebuilding the GSI. The published
+Android 8.1 to 14 and adding a device never means rebuilding the GSI. **Unresolved:** no
+Android 8.1 vendor has run under it: goyavewifi found the `halium_arm` GSI's v27 APEX empty
+and dropped its 8.1 vendor (device-goyavewifi.md § Vendor and GSI), and athena's stock 8.1
+vendor was replaced rather than tried. The published
 `herrie/16.0` branch (tip `25c6f12`) does not carry that change. Each snapshot costs ~40 MB of system.img, uncompressed.
 
 | VNDK | vendor | | VNDK | vendor |
@@ -114,7 +117,7 @@ linkerconfig looks the snapshot up by the vendor's exact `ro.vndk.version` (a Li
 vendor built with `BOARD_VNDK_VERSION := current` reports 33, and v34 cannot stand in
 for it). A15+ vendors have no `ro.vndk.version` and need no snapshot (architecture.md).
 The 32-bit `halium_arm` GSI carried 30, 32 and 34 in its first 16.0 build (`20260827-1`,
-below); the current `20261007-1` carries v27 to v34 (the mindphone recipe). Snapshots install to
+below); `20261007-1` and its successors carry v27 to v34 (the mindphone recipe). Snapshots install to
 `/system/system_ext/apex/com.android.vndk.v<N>`; check a candidate GSI with
 `debugfs -R "ls /system_ext/apex" system.img`.
 
@@ -265,8 +268,8 @@ three recipes before goyavewifi spent rounds finding it again.
    AllocatorHal: failed to get gralloc module
    ComposerHal: failed to open hwcomposer device
    ```
-   Since halium-legacy-vendor revision 32 (meta-smartphone 3f6bd336, in shr-distribution/meta-smartphone#200,
-   open as of 20 Oct 2026) the converter does this itself: `libft2.so` is no longer counted as
+   Since halium-legacy-vendor revision 32 (meta-smartphone e06f59f3, merged with
+   shr-distribution/meta-smartphone#200 on 22 Oct 2026) the converter does this itself: `libft2.so` is no longer counted as
    provided, so anything that needs it pulls the old `/system/lib` copy (~600 KB) and `HALIUM_LEGACY_EXTRA_LIBS`
    need not name it. On an older converter the rule is: **if the vendor image has `lib/libhwui.so` or
    `lib/libpdfium.so`, set `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`**. Check it before
@@ -292,5 +295,6 @@ gets is not the one the image was made against.
 - `vendor/halium/droidmedia` minimedia.cpp: `configureRpcThreadpool(5, false)` — without it a HAL1
   takePicture() deadlocks minimediaservice against the HAL.
 - Both are in the halium_arm GSI `halium-luneos-16.0-20261008-3`, published in the `halium-luneos-20261005`
-  release. Rebuilding after a linkerconfig-only change takes ~20 s; check that
+  release, and in `20261017-1` (20261008-3 plus droidmedia's buffer and codec fixes), which the a3-2015-halium,
+  goyavewifi and mindphone recipes pin; `android-system-image-legacy-gsi.inc`'s own default is still `20261007-1`. Rebuilding after a linkerconfig-only change takes ~20 s; check that
   `variableloader.cc` was recompiled (it is installed into the runtime APEX, not /system/bin).

@@ -127,8 +127,8 @@ ro.vndk.version                <- absent; VNDK is deprecated from A15
 `luneos-device-config` used to write `ro.board.api_level` straight into gbinder's
 `ApiLevel`, which selects preset 36 (`aidl6`) against a vendor that speaks preset
 35's `aidl5`. It now resolves a dated value to `ro.vendor.build.version.sdk` (35)
-— see device-fajita.md § Android 15 vendors report a *dated* API level, and it
-selected the wrong binder protocol, and hal-userspace.md § Binder and gbinder.
+— see device-fajita.md § Android 15 vendors report a *dated* API level and
+hal-userspace.md § Binder and gbinder.
 
 **Vendor alignment.** The kernel is pinned to the revision /e/OS builds from, so
 the vendor matches on a device running that build. The kit also flashes that exact

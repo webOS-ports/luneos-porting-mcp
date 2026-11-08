@@ -1,6 +1,8 @@
 # Device: goyavewifi (Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi, SM-T113)
 
-Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi SM-T113 (`goyavewifi`, Spreadtrum SC7730S), 32-bit, Tier B on the halium_arm 16.0 GSI through a Samsung `sboot` that ignores the boot-image command line. The container and the graphics HALs run and the UI draws; the rest of the hardware is untested.
+Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi (`goyavewifi`), Spreadtrum SC7730S, 32-bit, Tier B on the halium_arm 16.0 GSI: the UI draws and touch works; the rest is untested.
+
+Samsung's `sboot` ignores the boot-image command line.
 
 Nobody who works on it owns the tablet. A tester flashes one kit per round with Odin and sends logs; every round is a log analysis, a fix and a small update zip (debugging.md § Remote bring-up through a tester).
 
@@ -50,14 +52,14 @@ LineageOS 16.0 (Android 9, VNDK 28) built from the sc8830-Bringup trees in a Hal
 Device-tree edits the 16.0 userspace needed (all in the shared Halium tree, so keep them as patches):
 
 - `fstab.sc8830`: drop `encryptable=footer` from `/data`; Android 16's libfstab rejects FDE and vold then loads no fstab at all.
-- `init.sc8830.rc`: remove the `persdata` wait/mount (the device does not exist; the `wait` stalls init), and `stop media.swcodec` (it aborts every 5 s with "gralloc-mapper is missing").
+- `init.sc8830.rc`: remove the `persdata` wait/mount (the device does not exist; the `wait` stalls init), and `stop media.swcodec` (it aborts every 5 s with "gralloc-mapper is missing"). The recipe now pins GSI `20261017-1`, which has the sphal linkerconfig change (gsi-building.md § GSI-side fixes for legacy vendors); whether the stop is still needed under it is untested.
 - `hidl.mk`: add `android.hardware.graphics.{allocator@2.0,composer@2.1}-service`; the vendor had only the `-impl` libraries.
 
 Converter-side: `libft2.so` (gsi-building.md § Before deriving, item 5), reached here as gralloc -> libdither -> libandroid_runtime -> libpdfium -> libft2; and shims for the framework copies the vendor brings (libgui, libmedia, libandroid_runtime and what they pull in), whose missing bionic symbols surfaced one per round until the scan was made version-aware.
 
 ## Yocto
 
-Layer `meta-smartphone/meta-samsung`, `MACHINE=goyavewifi`; status file `meta-samsung/conf/machine/goyavewifi-STATUS.md`, the round-by-round log findings. Kernel `linux-samsung-goyavewifi`, Android side `android-system-image-goyavewifi`, adaptation `goyavewifi-deviceinfo` (luneos-device-config). The Android-side changes of 14-19 Oct are on meta-smartphone `herrie/20261019` (shr-distribution/meta-smartphone#200, open as of 20 Oct 2026).
+Layer `meta-smartphone/meta-samsung`, `MACHINE=goyavewifi`; status file `meta-samsung/conf/machine/goyavewifi-STATUS.md`, the round-by-round log findings. Kernel `linux-samsung-goyavewifi`, Android side `android-system-image-goyavewifi`, adaptation `goyavewifi-deviceinfo` (luneos-device-config). The Android-side changes of 14-19 Oct are on meta-smartphone `herrie/20261019` (shr-distribution/meta-smartphone#200, merged 22 Oct 2026).
 
 ## Install
 
@@ -71,7 +73,7 @@ Odin the LineageOS recovery, format `/data`, `adb sideload` the `luneos-dev-pack
 
 **Stubbed services.** `stubbed-services.d/<codename>` (pre-start.d/50-stub-services): `lmkd` (Android 16's links libmemevents, whose static constructor needs BPF; `critical`, restarted every 5 s with a crash dump), `gpsd` (no GPS; exits 1), the memtrack HAL (exits 1, cause not found).
 
-**Wi-Fi and Bluetooth stay on the host.** `vendor.wifi_hal_legacy` and `vendor.bluetooth-1-0` are skipped (`deviceinfo_android_skip_services`), as on the SM-T520 and the A3 (2015).
+**Wi-Fi and Bluetooth stay on the host.** `vendor.wifi_hal_legacy` and `vendor.bluetooth-1-0` are skipped (`deviceinfo_android_skip_services`), as on the SM-T520 (`n2awifi`). The A3 (2015) skips `vendor.wifi_hal_legacy` and `hciattach` only; its Bluetooth HAL runs.
 
 ## Open issues
 

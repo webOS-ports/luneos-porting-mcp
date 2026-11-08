@@ -18,7 +18,7 @@ assumed.**
 |---|---|---|
 | v0 | ≤ Android 8 | |
 | v1 | Android 9 | |
-| v2 | Android 10/11 | adds a `dtb` field (an AOSP dt_table, not a bare FDT) |
+| v2 | Android 10/11 | adds a `dtb` field (an AOSP dt_table or a bare FDT, per bootloader) |
 | v3/v4 | GKI (Android 12+) | v4 adds `boot_signature` for GKI certification; no dtb section exists |
 
 - A11/A12: generic ramdisk in `boot`.
@@ -126,9 +126,14 @@ device-mindphone.md.
 
 - Take every header field (base, offsets, page size, cmdline, `os_version`,
   `os_patch_level`) from the stock image, and check the boot partition size.
-- The v2 `dtb` field is **not a bare FDT** — it is an AOSP **dt_table** (magic
-  `0xd7b7ab1e`), the same format as `dtbo.img`. Reuse the stock one verbatim, or wrap a
-  self-built dtb with `mkdtboimg.py create`.
+  **Unresolved:** whether a lower `os_version` than stock is ever refused. mp01, q25 and
+  radon keep the stock value as a rule ("never lower"); titanpocket's lk boots an older
+  patch level than stock.
+- The v2 `dtb` field holds whatever the bootloader parses: an AOSP **dt_table** (magic
+  `0xd7b7ab1e`, the `dtbo.img` format) on the MediaTek lk of mindphone, titanpocket and
+  sm-t220 (which does not parse a bare FDT), a **bare FDT** on radon's lk and on Qualcomm
+  ABL (surya, sunfish). Read the stock image's magic; reuse a stock dt_table verbatim, or
+  wrap a self-built dtb with `mkdtboimg.py create`.
 
 ```
 mkbootimg --header_version 2 --pagesize <stock> \
@@ -160,13 +165,23 @@ AVB footer, there is nothing to disable. (Found on athena; see device-athena.md.
 ### The `skip_initramfs` trap
 
 Many Android 8–10 vendor kernels honour `skip_initramfs` and bypass the packed ramdisk
-entirely; see debugging.md § Stage 1 for the fix.
+entirely: a repacked boot.img flashes fine and your init never runs (no gadget, no logs,
+stock-looking behaviour). The fix is in the kernel: grep `init/initramfs.c` for
+`skip_initramfs`; if the tree offers `CONFIG_INITRAMFS_IGNORE_SKIP_FLAG` (LineageOS trees,
+e.g. Sony's sdm660 `common.config` sets it), enable it, otherwise revert the commit that
+added the option.
+
+The LuneOS initramfs reads the flag too: its `init.sh` boots Android recovery when
+`/proc/cmdline` lacks `skip_initramfs` **and** `/recovery/init` exists, so a ramdisk that
+carries an Android recovery boots into it on a bootloader that does not pass the flag.
 
 ---
 
 ## Class 2 — A12-launch GKI (ramdisk in `boot`)
 
-No `init_boot`. Stock `boot` is header v4 with the kernel only (ramdisk size 0);
+No `init_boot`. Stock `boot` is header v4; whether it carries the generic ramdisk depends
+on the build: bluejay's has the kernel only (ramdisk size 0), the MediaTek MT6789 ones
+(q25, mp01) carry a non-zero generic ramdisk (device-q25.md § Boot image).
 `vendor_boot` is v4 with its ramdisk fragments (typically a PLATFORM fragment with
 first-stage init and a DLKM fragment with the early modules under `lib/modules`) and the
 dtb; separate `dtbo.img`, real `super`, a `vendor_dlkm` partition. Example: bluejay
@@ -198,7 +213,8 @@ Consequence: **two images instead of one** — `boot` gets our GKI kernel with n
 `init` wins and `lib/modules` (from vendor_kernel_boot) is there to modprobe.
 
 **Watch the init_boot size** — the partition can be small (8 MB on panther); lz4 instead
-of gzip is the escape hatch if the ramdisk grows. The debug image is self-contained
+of gzip is the escape hatch if the ramdisk grows, but it must be **legacy** lz4 and match
+the vendor ramdisk's compression (debugging.md § 1.10 Ramdisk compression must match). The debug image is self-contained
 (kernel + ramdisk + `enable_adb`), so it works regardless of what the bootloader does
 with `init_boot` during `fastboot boot`.
 
@@ -278,8 +294,15 @@ fallback, warn to kmsg if neither yields a size.
 
 ### Debug images
 
-Same image + cmdline `enable_adb` → init panics into the initramfs debug shell. On
-Pixels, `fastboot boot boot-<dev>-luneos-debug.img` runs it without flashing — that is
+Same image + cmdline `enable_adb` → init panics into the initramfs debug shell. Where
+the bootloader keeps the header cmdline, the debug image carries `enable_adb` there
+(`ANDROID_BOOTIMG_DEBUG_CMDLINE`, `gki_bootimg.bbclass`); where it drops or mangles it
+(kernel-porting.md § The kernel command line), the debug image is a kernel rebuilt with
+`enable_adb` in `CONFIG_CMDLINE` (`LUNEOS_ENABLE_ADB=1`: sargo, sunfish, radon).
+**Unresolved:** bluejay's file says the Pixel bootloader drops unrecognised header
+arguments, yet the bluejay/panther debug images rely on header `enable_adb`; whether that
+works under `fastboot boot` on Tensor is not recorded. On Pixels,
+`fastboot boot boot-<dev>-luneos-debug.img` runs it without flashing — that is
 the push/rescue channel. If boot fails on any halium device, the initramfs drops to the
 same shell behind a USB gadget named "Failed to boot"; with the default
 `USB_FUNCTIONS=rndis` that is telnet on `192.168.2.15`, adb only where the machine adds

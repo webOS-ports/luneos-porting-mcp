@@ -11,23 +11,23 @@ adb reboot bootloader        # or the device's key combo
 ./install.sh                 # vbmeta (verification off) → boot [→ init_boot] → userdata → reboot
 ```
 
-- `fastboot flash vbmeta` verification-disabled (a self-built boot image never verifies against a stock vbmeta that chains `boot`; see below).
+- `fastboot flash vbmeta` verification-disabled **when the stock vbmeta chains `boot`** (a self-built boot image never verifies against it). Some bootloaders need none: sargo's unlocked ABL reports but does not enforce, and athena's ROM has no vbmeta to disable (boot-images.md § AVB: does the stock vbmeta cover `boot`?).
 - `fastboot flash boot` — and on A13-launch devices also `fastboot flash init_boot` (kernel and ramdisk live in separate partitions there).
 - `fastboot flash userdata userdata-luneos.img` — an ext4 image holding `rootfs.img` + `android-rootfs.img`.
 - `userdata` must end up **unencrypted** (FBE is on by default from Android 10); flashing the prebuilt ext4 image satisfies this.
-- Everything else stays stock. Reverting = reflash stock boot/vbmeta and wipe the files.
+- Everything else stays stock on a port that runs over the phone's own vendor. Ports that replace the stock vendor with a LineageOS or /e/OS build (athena, bramble, sunfish, surya, fajita) also flash `vendor` through fastbootd; see the device file. Reverting = reflash stock boot/vbmeta (and vendor) and wipe the files.
 
 ## vbmeta: flags 2 vs flags 3
 
 ```
-avbtool make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta-disabled.img
+avbtool make_vbmeta_image --flags 3 --padding_size 4096 --output vbmeta-disabled.img
 ```
 
-sets flags 2, VERIFICATION_DISABLED only. Flags 2 boots: the mindphone kit ships its
-stock vbmeta with the flags word set to 2 (sm-t220 likewise). `fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img` is
-**not** equivalent: it sets flags 3 (HASHTREE_DISABLED | VERIFICATION_DISABLED), as the
-radon and surya vbmeta images do. Prefer flags 3 (`--flags 3`, or the two fastboot
-switches) for new kits. An empty unsigned AVB image (256-byte header, `algorithm_type 0`,
+sets flags 3 (HASHTREE_DISABLED | VERIFICATION_DISABLED), the value to use for new kits.
+`--flags 2` sets VERIFICATION_DISABLED only, and also boots: the mindphone kit ships its
+stock vbmeta with the flags word set to 2 (sm-t220 likewise).
+`fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img` also sets flags
+3, as the radon and surya vbmeta images have. An empty unsigned AVB image (256-byte header, `algorithm_type 0`,
 zero-padded to 4096) is trivially regenerable, so a kit can ship its own rather than
 redistributing a vendor's. Whether a device needs a vbmeta at all, and how to read the
 stock one: boot-images.md § AVB: does the stock vbmeta cover `boot`?
@@ -89,7 +89,9 @@ fastboot flash userdata userdata-luneos.img
 fastboot reboot
 ```
 
-Flash **both** boot slots to keep A/B consistent.
+Flash **both** boot slots to keep A/B consistent. **Unresolved:** this is not the
+practice everywhere: sargo flashes the active slot only (an inactive-slot flash is a silent
+no-op there), and q25 and mp01 keep Android on slot A and LuneOS on slot B on purpose.
 
 ## Other install routes
 

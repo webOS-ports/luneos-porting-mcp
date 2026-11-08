@@ -39,7 +39,8 @@ allocator v2 + a stable-C mapper; the A16 GSI's libui speaks gralloc5 natively a
 **libhybris delegates to libui since PR #509 (Jan 2023)** — the payoff of
 "android-headers track the GSI, not the vendor".
 
-**Rule:** on Halium the vendor's API level picks the GSI, and the vendor manifest picks
+**Rule:** every port runs the 16.0 GSI; the vendor's API level picks the VNDK snapshot
+inside it (gsi-building.md § VNDK snapshot matrix), and the vendor manifest picks
 which HAL transport each subsystem needs — never infer either from the Android version the
 device runs. From A15, `ro.board.api_level` is a YYYYMM date; the SDK number is
 `ro.vendor.build.version.sdk` (see "Before blaming AIDL" below).
@@ -117,12 +118,17 @@ installs that file. Expect it on any 64-bit device whose GPU driver keeps an SVM
 `start-android-hals.sh` implements the derivations in architecture.md § The adaptation
 tier model (HAL services, `wait_for_prop` gates, `chown`/`chmod` replay, waiting for
 `IComposer`). The diagnostics behind the first two derivations — init blocked by a `wait_for_prop` gate, and the
-quoted-property trap that wedged every HIDL `getService` — are in debugging.md § 2.1 and § 2.2.
+quoted-property trap that wedged every HIDL `getService` — are in debugging.md § 2.1 Init "stuck" vs "curtailed" and § 2.2 The quoted-property trap.
 
 **Skip lists come from the device's own adaptation.** `start-android-hals.sh` once sourced
 every adaptation's deviceinfo on the rootfs, so the one that sorted last (n2awifi) supplied
 everybody's `deviceinfo_android_skip_services`. It now sources the one `luneos-adaptation`
 (luneos-device-config) names, after the container's properties are readable.
+
+**The health HAL:** stub it only where no vendor daemon needs `IHealth`. sargo and
+mindphone stub it (on sargo `healthd` armed a 60 s alarm that woke the SoC every minute);
+sunfish cannot, because its `gnss_service` polls for `IHealth` once a second when it is
+missing (device-sunfish.md § Subsystem notes).
 
 ### udev rules from the container's own ueventd files — the next derivation to adopt
 
@@ -143,7 +149,7 @@ cat /var/lib/lxc/android/rootfs/ueventd*.rc \
 
 Every ueventd node line becomes a udev rule, so node ownership/permissions match what the
 vendor HALs expect without a per-device list. Candidate for `luneos-device-config`
-generation, replacing the one-off `72-mindphone-gpu.rules`-style files.
+generation, replacing one-off per-machine files such as mindphone's `70-mindphone.rules`.
 
 ## Binder and gbinder
 
@@ -332,10 +338,13 @@ The generic recipe **`meta-android/recipes-core/mtk-connectivity`** covers the w
 MediaTek family: three condition-gated systemd units + two helpers, shipped into every
 halium rootfs via `android-system RDEPENDS += mtk-connectivity`, inert on non-MTK:
 
-- `mtk-connectivity-modules.service` → `mtk-load-modules.sh`: force-modprobe the
-  connectivity subset of the vendor's `modules.load`
-  (grep `wmt|wlan|conn|bt_drv|gps|fmradio`) — no hardcoded list, adapts per chip
-  generation.
+- `mtk-connectivity-modules.service` → `mtk-load-modules.sh`: force-load the
+  connectivity modules in an order derived from the vendor, no hardcoded list. WMT era
+  (mt6739, Android 11): the family is in `modules.load`, loaded in that order. connac era
+  (mt6789, Android 12 GKI): only `connadp` and `c2k_usb_f_via_gps` are in `modules.load`;
+  the drivers are `insmod`ed by the vendor rc files (`wmt_drv` + `connfem` `on boot`, the
+  rest behind `vendor.connsys.driver.ready=yes`, property-templated file names), so the
+  script reads those rc files and the vendor properties (device-q25.md).
 - `mtk-connectivity-wifi.service`: retry `echo 1 > /dev/wmtWifi` until `wlan0` exists
   (the container's wmt daemons must patch the CONSYS firmware first).
 - `mtk-connectivity-bt.service`: seeds the BT address and node ownership and starts the
@@ -344,9 +353,10 @@ halium rootfs via `android-system RDEPENDS += mtk-connectivity`, inert on non-MT
 The container needs the MTK connectivity `/dev` nodes exposed: `wmt_loader` could not open
 `/dev/wmtdetect` until they were.
 
-**Gate the units on the character devices, not on `.ko` files.** `CONFIG_MTK_COMBO=y`
+**Gate the units on the character devices as well as on `.ko` files.** `CONFIG_MTK_COMBO=y`
 (radon) compiles the combo driver in, so no `wmt_drv.ko` and no `/sys/module/wlan*` ever
-exist and `.ko`-gated units silently never run. Use
+exist and `.ko`-only units silently never run. The units OR together `.ko` globs (in
+`vendor` and `vendor_dlkm`, e.g. `bt_drv*.ko` for the Q25's `bt_drv_connac1x.ko`) and
 `ConditionPathExists=|/dev/stpbt`, `|/dev/conninfra_dev`, `|/dev/wmtWifi` (general rule:
 debugging.md, "Never gate a unit on `/sys/module/<driver>`"). In built-in mode the driver
 also waits for `CONNINFRA_IOCTL_DO_MODULE_INIT` before any sub-driver comes up.
@@ -410,7 +420,7 @@ fine on the MP01 — so test, do not predict. Set it with a machine drop-in
 **MediaTek MT6789 audio:** the sound card only registers once `mtk-btcvsd`
 (component `mtk-btcvsd-snd`) is loaded — without it `mt6789-mt6366` defers
 forever (`snd_soc_register_card fail -517`); find such components with the deferred-card
-method in debugging.md § Audio (Stage 4). The DL paths run at 48 kHz
+method in debugging.md § Stage 4 — Subsystems (Audio). The DL paths run at 48 kHz
 (`mtk_afe_fe_hw_params() ... rate 48000`); at pulseaudio's default 44.1 kHz the HAL
 resamples and playback sounds slightly off → `deviceinfo_audio_sample_rate="48000"`.
 `libsndcardparser.so not found` from the vendor `libtinycompress.so` is harmless noise.
@@ -521,12 +531,12 @@ vhci `hci0` for BlueZ.
   The `btmon` method that finds these is in debugging.md § Bluetooth.
 - **`BLUEBINDER_LOCAL_FEATURES_MASK 0x0` in bluebinder's log is its own unset setting
   echoed back**, not a reply from the controller.
-- **BlueZ on a different adapter than bluebinder's proxy.** If something claims `hci0`
-  first, bluebinder takes index 1, 2 or 3 and BlueZ binds the wrong adapter: Bluetooth
-  scans but will not connect (`bluebinder: Own hci index: 1`; `audiod: a2dpAdapterName =
-  hci1, adapterName = hci0` is an early tell). Compare `hciconfig -a` with bluebinder's
-  reported index. With `CONFIG_BT_HCIVHCI=y` as the only BT transport, `hci0` cannot be
-  real hardware (found on athena; see device-athena.md).
+- **bluebinder's "Own hci index" is an rfkill index, not the hci number.** bluebinder
+  records the `idx` of the new `RFKILL_TYPE_BLUETOOTH` switch its vhci creates
+  (`bluebinder.c`, `own_hci_index = event.idx`), and rfkill indices grow with every vhci
+  registration, so "Own hci index: 1" (or 2, 3 …) says nothing about which `hciN` BlueZ
+  uses. Compare `hciconfig -a` with `rfkill list` instead. With `CONFIG_BT_HCIVHCI=y` as
+  the only BT transport, `hci0` *is* bluebinder's proxy.
 - **rfkill soft-block that comes back:** `systemd-rfkill` restores saved state from
   `/var/lib/systemd/rfkill/` on every boot, so a state saved while blocked re-blocks after
   any manual `rfkill unblock` (`Failed to set mode: Blocked through rfkill (0x12)`).

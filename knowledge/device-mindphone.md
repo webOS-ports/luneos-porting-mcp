@@ -115,8 +115,9 @@ mkbootimg --header_version 2 --pagesize 2048 \
 Android 11 vendor, VNDK 30, 32-bit → the 32-bit `halium_arm` GSI. Build: gsi-building.md §
 Building a 32-bit halium_arm GSI (the v30 VNDK port and the `apex_vndk` block that was
 silently missing). Current pin in `android-system-image-mindphone.bb`:
-`halium-luneos-16.0-20261007-1-halium_arm` (carries `com.android.vndk.v27` to `v34`; the
-build `android-system-image-legacy-gsi.inc` also names), pinned separately because the
+`halium-luneos-16.0-20261017-1-halium_arm` (20261007-1, which carries `com.android.vndk.v27`
+to `v34`, plus the sphal linkerconfig change and droidmedia fixes; gsi-building.md § GSI-side
+fixes for legacy vendors), pinned separately because the
 arm64 releases do not always publish a `halium_arm` asset. It travels inside `rootfs.img` as
 `android-rootfs.img` (`VIRTUAL-RUNTIME_android-system-image = "android-system-image-mindphone"`),
 not beside it. `android-headers-halium` is 16.0%. The hardware results in Status were
@@ -138,7 +139,7 @@ wrong on every count.
 | `bluebinder/mindphone` | LE command-bitmap fix (below) |
 | `stubbed-services-mindphone` | health HAL, `storaged`, `sdcard`, `stp_dump3` |
 | `mindset-deviceinfo` | `deviceinfo_display_dpi="190"`, `device_pixel_ratio="1.0"`, `video_call="false"`, `hybris_prefer_vndk="1"` |
-| `nyx-conf/mindphone/nyx.conf` (meta-luneos) | keys pinned to `/dev/input/event1`; touch, battery, charger derived |
+| nyx | one shared `nyx.conf`, written per device by luneos-device-config's `30-nyx-conf` generator; key pins live in the adaptation (meta-luneos `2aa63a5ad`, 20 Oct 2026, replaced the per-machine `nyx-conf/mindphone/nyx.conf`) |
 
 Nyx module selection comes from the `halium` default in `nyx-modules-machines.inc`
 (nyx-modules.md § Module selection); there is no per-machine nyx file. `NYXMOD_OW_HAPTICS`

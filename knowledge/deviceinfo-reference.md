@@ -67,14 +67,14 @@ Sources:
 | `deviceinfo_init_boot_partition_size` | e.g. `8388608` (8 MB — panther's real constraint) |
 | `deviceinfo_vendor_boot_partition_size` | vendor_boot size (sample uses `$((100*$((2**20))))`) |
 | `deviceinfo_bootimg_has_vendor_kernel_boot_partition` | `"true"` on devices with a separate `vendor_kernel_boot` (panther-style) |
-| `deviceinfo_ramdisk_compression` | `gzip` or `lz4` — the size escape hatch when init_boot headroom runs out |
+| `deviceinfo_ramdisk_compression` | `gzip` or `lz4` — the size escape hatch when init_boot headroom runs out; must match the vendor ramdisk's compression, and lz4 must be the legacy format (debugging.md § 1.10 Ramdisk compression must match) |
 
 ## dtb / dtbo handling
 
 | Variable | Meaning |
 |---|---|
 | `deviceinfo_bootimg_prebuilt_dtb` / `deviceinfo_bootimg_dt` | prebuilt dtb file to embed |
-| `deviceinfo_dtb_has_dt_table` | `"true"` → the dtb slot wants an AOSP dt_table, so the raw FDT is wrapped via `mkdtboimg.py create` (exactly the mindphone v2 finding — the v2 dtb field is a dt_table, not a bare FDT) |
+| `deviceinfo_dtb_has_dt_table` | `"true"` → the dtb slot wants an AOSP dt_table, so the raw FDT is wrapped via `mkdtboimg.py create` (mindphone, titanpocket, sm-t220; radon's lk and Qualcomm ABL take a bare FDT) |
 | `deviceinfo_dtb_id` / `_rev` / `_custom0`–`_custom3` | dt_table entry metadata |
 | `deviceinfo_prebuilt_dtbo` | prebuilt `dtbo.img` to flash |
 | `deviceinfo_dtbo` | `"true"` → build dtbo from the kernel tree |
@@ -104,7 +104,7 @@ Sources:
 ## How the header version drives image assembly (HGABT behavior)
 
 - **v0/v1** — legacy offsets, optional `--dt` blob appended.
-- **v2** — adds the dtb section + `dtb_offset` (the mindphone recipe; dtb is a dt_table).
+- **v2** — adds the dtb section + `dtb_offset` (the mindphone recipe; its lk wants a dt_table).
 - **v3/v4** — split images: `boot` = kernel(-only), generic ramdisk either in `boot`
   (A11/A12 launch) or in `init_boot` when `bootimg_has_init_boot_partition=true`
   (A13+ launch); vendor ramdisk fragments + dtb live in `vendor_boot`.
@@ -179,9 +179,9 @@ empty by `luneos-device-config` first.
 | `deviceinfo_bluebinder_ext_features_page_2_mask` | `BLUEBINDER_LOCAL_EXT_FEATURES_PAGE_2_MASK`: bits bluebinder clears from Read Local Extended Features page 2 (byte 0 = top byte) |
 | `deviceinfo_bluebinder_local_commands_set` | `BLUEBINDER_LOCAL_COMMANDS_SET`, `<octet>:<hex>,...` added to Read Local Supported Commands |
 
-Devices built as their own `MACHINE` with their own rootfs (tissot, mido,
-mindphone) can use a machine package instead; devices on the shared
-`halium-arm64` rootfs (MP01) must use these keys, because a machine package never
+Devices whose machine builds its own rootfs (the 32-bit ports, e.g. mindphone) can use
+a machine package instead; devices on the shared `halium-arm64` rootfs (MP01,
+tissot-halium, mido-halium; hal-userspace.md § Binder and gbinder) must use these keys, because a machine package never
 reaches that rootfs.
 
 ## When the compositor starts but ignores the touchscreen

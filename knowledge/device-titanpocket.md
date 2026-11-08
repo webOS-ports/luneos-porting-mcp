@@ -140,8 +140,8 @@ stock:
 ## Vendor and GSI
 
 Stock Android 11 vendor (VNDK 30) → the generic Halium 16 GSI
-`halium-luneos-16.0-20260910-1-halium_arm64`, the same file sargo, athena, q25 and radon run;
-it carries `com.android.vndk.v30`, so no VNDK work was needed. Composer is HIDL
+(`halium-luneos-16.0-20260910-1-halium_arm64` when first brought up; every machine now
+takes the release pinned in meta-android's `halium-luneos-gsi-16.inc`); it carries `com.android.vndk.v30`, so no VNDK work was needed. Composer is HIDL
 (`android.hardware.graphics.composer@2.1-service`). The phone keeps its own `vendor`, `super`,
 `dtbo`, modem and firmware.
 

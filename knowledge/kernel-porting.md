@@ -132,9 +132,8 @@ Two routes produce the same kernel:
   `meta-android/recipes-kernel/linux-halium-gki/linux-halium-gki_6.1.bb` builds
   ACK android14-6.1 with the LuneOS fragment using Google's prebuilt clang 17
   (**r487747c**, the clang the KMI was frozen with) and plain kbuild — no Bazel,
-  and **not** OE's cross toolchain, which has never been validated against this
-  KMI; a silent CRC drift would only show up on the device as vendor modules that
-  do not load. `luneos-bootimg-gki` (with `meta-android/classes/gki_bootimg.bbclass`)
+  and not OE's cross toolchain: the compiler does not move CRCs, but clang-only
+  options do (kmi-crc-matching.md § Step 4). `luneos-bootimg-gki` (with `meta-android/classes/gki_bootimg.bbclass`)
   consumes it by default via `GKI_KERNEL_PROVIDER ?= "linux-halium-gki"`; setting
   `GKI_KERNEL_IMAGE` overrides that with an out-of-tree Image, which
   `do_deploy[file-checksums]` hashes so a new kernel really does rebuild the boot
@@ -202,20 +201,20 @@ and it ignores the poison list entirely (kmi-crc-matching.md § Step −1).
 Before flashing anything on a Pixel, check anti-rollback: installing.md §
 Anti-rollback.
 
-### The vendor_dlkm module set is never loaded on Halium
+### The vendor_dlkm module set: the vendor's init must see it
 
-A GKI-era vendor ships kernel modules in **two** sets, and Halium only ever loads
-the first:
+A GKI-era vendor ships kernel modules in **two** sets:
 
-| Set | Lives in | Loaded by | On Halium |
-|---|---|---|---|
-| vendor_boot ramdisk | `/lib/modules` in the vendor_boot ramdisk | the initramfs, early, to reach storage | **yes** |
-| `vendor_dlkm` | the `vendor_dlkm` logical partition | Android's init, later | **no** |
+| Set | Lives in | Loaded by |
+|---|---|---|
+| vendor_boot ramdisk | `/lib/modules` in the vendor_boot ramdisk | the initramfs, early, to reach storage |
+| `vendor_dlkm` | the `vendor_dlkm` logical partition | the vendor's own loader in the container's init (MediaTek: `insmod_sh`) |
 
-Halium curtails the container's init on a `wait_for_prop` gate long before it
-reaches the second set, and the initramfs cannot load it either (it is a logical
-partition inside `super`, needing dm-linear that the initramfs has no tooling
-for). On the MP01 that is **164 modules — more than the 159 the initramfs loads.**
+The initramfs cannot load the second set (it is a logical partition inside `super`),
+so it depends on the container seeing `/vendor_dlkm`. When it does not, the vendor's
+loader silently loads nothing; mechanism and fix: hal-userspace.md § Vendor kernel
+modules. On the MP01 the stock set is 345 modules, 180 of them in the vendor_boot
+ramdisk (device-mp01.md).
 
 The symptoms do not look like "missing kernel modules":
 
@@ -234,26 +233,26 @@ The symptoms do not look like "missing kernel modules":
 **Check for it on any new Tier A port, before blaming anything else:**
 
 ```
-# how big is the set nobody loads?
+# how big is the second set?
 wc -l < <vendor-modules>/dlkm/modules/modules.load
 # is a driver you are missing in it rather than in the early set?
 grep -iE 'touch|efuse|nvmem' <vendor-modules>/dlkm/modules/modules.load
 # on the device
 dmesg | grep -- -517
+ls /vendor/lib/modules/modules.load    # inside the container
 ```
 
-**Fix:** load them from `mount-android.sh`, after `vendor_dlkm` is mounted and
-before the container's init starts (meta-android, `load_vendor_dlkm_modules`).
-It looks for `modules.load` under each mount point the partition can land on
-(`/vendor_dlkm`, `$ANDROID_ROOT/vendor_dlkm`) and is a no-op on devices without
-it. `modules.load` is a **list, not a dependency order** — the same trap as in
-the initramfs — so make repeated passes and stop when a pass loads nothing new.
+`mount-android.sh` (meta-android, `load_vendor_dlkm_modules`) defaults to
+`VENDOR_DLKM_MODULES=none` and leaves loading to the vendor. `=all` or an explicit
+list loads from the host for bring-up or a vendor without its own loader;
+`modules.load` is a **list, not a dependency order**, so the host path expands each
+module through `modules.dep`. Our own builds of vendor modules go in
+`/usr/lib/modules/vendor_dlkm-override/` under the vendor's file name: they are
+loaded first, and the vendor's `modprobe -a` skips a module that is already loaded.
 
 **Who is affected:** any Android 12+ / GKI device with a `vendor_dlkm`
-partition — MP01, where it was found; bluejay's factory image has one too, and
-panther has not been flashed yet. **Not** affected: pre-dynamic-partition
-devices, which have only one module set (mindphone: MT6739, Android 11, 4.14, no
-super/vendor_boot; sargo).
+partition (MP01, Q25, bluejay). **Not** affected: pre-dynamic-partition devices,
+which have only one module set (mindphone, sargo).
 
 ---
 
@@ -295,7 +294,10 @@ gcc-4.9 fallback, and its rule of thumb is that 4.4+ kernels should compile with
 clang. An era-matched compiler sidesteps most of the -Werror/new-keyword breakage
 a modern host toolchain provokes. On Qualcomm trees, build with the toolchain
 family the tree's own `build.config.common` names: GCC miscompiles the
-register-pinned SCM call (kmi-crc-matching.md § Step 4).
+register-pinned SCM call (kmi-crc-matching.md § Step 4). **Unresolved:** whether that
+holds for every Qualcomm tree. The evidence is sunfish's msm-4.14 `scm.c`; athena (CAF
+4.19, hardware-verified) and a3-2015-halium build with OE's GCC 15, as do surya, fajita
+and vince (not yet run on hardware).
 
 ### The appended-DTB glob trap (CAF arm64 trees)
 
@@ -413,7 +415,10 @@ A Tier B kernel recipe (e.g. `MACHINE=mindphone bitbake linux-greentouch-mindpho
 builds the kernel and the boot image in one, under `tmp/deploy/images/<machine>/`.
 Verify the image against stock by unpacking and diffing the header fields (see
 boot-images.md). Kernel changes belong on a shr-distribution kernel branch rather
-than living as layer patches.
+than living as layer patches. The exception is a tree the project does not fork, kept as
+recipe patches (vince: a third-party repository). **Unresolved:** mindphone, surya and
+fajita also carry recipe patches on trees that could be forked; whether to move them is
+not decided.
 
 ### Recurring vendor-kernel patch classes (from the other distros' Tier B experience)
 
@@ -430,8 +435,9 @@ catalogues recurring *code* patches for vendor kernels:
 - **Module "magic mismatch ignore" patches** to load vendor-partition kernel
   modules — their cousin of `CONFIG_MODULE_FORCE_LOAD=y`.
 - **synx driver PID overflow** on msm-4.19+ kernels.
-- **`skip_initramfs` revert** on A8–A10 kernels — without it a repacked boot.img
-  never runs your init at all; see boot-images.md for the full trap.
+- **`skip_initramfs` revert** (or `CONFIG_INITRAMFS_IGNORE_SKIP_FLAG`) on A8–A10
+  kernels — without it a repacked boot.img never runs your init at all
+  (boot-images.md § The `skip_initramfs` trap).
 
 ### `pidfd_open()` without `waitid(P_PIDFD)`: GLib reaps nothing (SM-T220, athena, mindphone)
 
@@ -537,11 +543,19 @@ Found on a 3.10 **arm64** kernel (Nexus 5X, msm8992; device-bullhead.md):
 
 ## The kernel command line
 
-- **Bootloaders mangle it.** sargo's bootloader drops arguments it does not
-  recognise (measured with a `zz.marker=1` canary; device-sargo.md), and
-  MediaTek's G99 lk drops the first 20 characters of the boot image command line
-  (device-q25.md). Anything LuneOS needs goes in `CONFIG_CMDLINE`, not the boot
-  image header.
+- **What a bootloader does with the boot-image header cmdline is per bootloader**;
+  measure it (a canary such as `zz.marker=1`, then read `/proc/cmdline`):
+
+  | Bootloader | Header cmdline | Devices |
+  |---|---|---|
+  | Pixel ABL (SDM670, SM7150) | unrecognised arguments dropped | sargo, sunfish |
+  | MediaTek lk, MT6789 (G99) | first 20 characters lost (pad the front) | q25, mp01 |
+  | MediaTek lk, MT6877 / MT6771 | passed through intact | radon, titanpocket |
+  | Samsung `sboot` (SC7730S) | dropped entirely; only `CONFIG_CMDLINE` arrives | goyavewifi |
+  | Samsung SBL + lk2nd (MSM8916) | passed on, plus 775 B of its own (overflows a 1024-byte `COMMAND_LINE_SIZE`) | a3-2015-halium |
+
+  Where the header is unreliable, put what LuneOS needs (`enable_adb` included) in
+  `CONFIG_CMDLINE`; where it passes through, the header is the cheaper place.
 - **Set `CMDLINE` in any recipe that requires meta-oe's `linux.inc`.** It
   unconditionally writes `CONFIG_CMDLINE="${CMDLINE} ${CMDLINE_DEBUG}"`, so with
   `CMDLINE` unset the vendor's built-in string (`root=`, `vmalloc=`, …) is silently
@@ -630,13 +644,15 @@ and `debug.config`, plus `5.10-android12.config`/`5.10-android13.config` deltas.
 Each item marked (KMI-check) must go through `kmi-crc-check.py` before use on a
 Tier A kernel; the rest are behavioral.
 
-- **`CONFIG_ANDROID_PARANOID_NETWORK` must stay ON** — disabling it for normal
+- **`CONFIG_ANDROID_PARANOID_NETWORK` stays ON** — disabling it for normal
   Linux networking breaks rild on hybris-12.1+ bases. SFOS wraps the capability
   checks in `#ifdef CONFIG_ANDROID_PARANOID_NETWORK` instead of removing the
   option (SFOS hadk-faq). Vendor daemons rely on it too: Qualcomm's
   `rmt_storage` drops to group `net_raw` and fails the IPC router's bind check
   without it, and the modem resets the phone (found on the Galaxy A3 (2015); see
-  device-a3-2015-halium.md).
+  device-a3-2015-halium.md). **Unresolved:** a3-2015-halium and bullhead keep it off
+  (copied from sm-t520) and instead patch `ipc_router_security.c` to accept group
+  `net_raw`; vince keeps it on. Which is the policy for new legacy ports is not decided.
 - **`CONFIG_BT_HCIVHCI=y` is bluebinder's kernel prerequisite** — bluebinder
   feeds the Android BT HAL into a virtual HCI (SFOS hadk-hot). The android14-6.1
   fragment carries it as `=m` (the Kleaf route in `build-bootimg.sh` adds
@@ -659,7 +675,10 @@ Tier A kernel; the rest are behavioral.
   `netconsole=6665@172.16.42.2/usb0,6666@172.16.42.1/` into `CONFIG_CMDLINE`
   for true pre-userspace logging — possible only because it also sets
   `CONFIG_USB_ETH=y` (built-in `g_ether` creates `usb0` at kernel boot); see the
-  cmdline rule above for configfs-gadget kernels.
+  cmdline rule above for configfs-gadget kernels. **Unresolved:** whether a built-in
+  NETCONSOLE is safe for early boot: on radon it was added together with
+  `FRAMEBUFFER_CONSOLE` and the pair broke the boot (debugging.md § Method); which of
+  the two did it was not isolated.
 - **pstore/ramoops needs config to exist**: `CONFIG_PSTORE=y`,
   `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_RAM=y`,
   `CONFIG_PSTORE_RAM_ANNOTATION_APPEND=y` (Droidian `debug.config`). Our
@@ -680,7 +699,7 @@ Tier A kernel; the rest are behavioral.
   `stack_depot_disable=on kasan.stacktrace=off kvm-arm.mode=protected
   cgroup_disable=pressure cgroup.memory=nokmem selinux=0 droidian.lvm.prefer
   console=tty0` — notably `cgroup_disable=pressure`; `console=tty0` also doubles
-  as a boot-hang fix (see boot-images.md/debugging.md). Do not copy its
+  as a boot-hang fix (debugging.md § 1.5 Cmdline-level fixes). Do not copy its
   `selinux=0` (§ selinux=0).
 
 ### Vendor floor for the oldest GSI generation

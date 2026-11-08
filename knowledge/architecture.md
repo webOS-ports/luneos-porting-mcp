@@ -21,8 +21,8 @@ The trick is not really "GSI" in the Android sense — it is **Project Treble**:
 
 | Artifact | Count | Device-specific? |
 |---|---|---|
-| LuneOS rootfs (`rootfs.img`) | **1** for all arm64 devices | no |
-| Halium GSI (`system.img` → `/android`) | **1 in use**: 16.0, as `halium_arm64` (aarch64) and `halium_arm` (armv7). 9.0/11.0/13.0/14.0 are built and published but no current port uses them | no — the GSI carries a VNDK snapshot per vendor API level |
+| LuneOS rootfs (`rootfs.img`) | **1** for all arm64 devices (`MACHINE=halium-arm64`); the 32-bit ports build theirs per machine | arm64: no |
+| Halium GSI (`system.img` → `/android`) | **1 in use**: 16.0, as `halium_arm64` (aarch64) and `halium_arm` (armv7). 9.0/11.0/13.0/14.0 are built and published; only sargo has also run on 14.0 | no — the GSI carries a VNDK snapshot per vendor API level |
 | Boot image (kernel + LuneOS initramfs) | **~4 GKI KMIs** + one per legacy device | GKI: no. Legacy: yes |
 | Device adaptation (udev, audio, modem, quirks) | ~15 tiny files per device | yes, but *data*, not a build |
 
@@ -82,9 +82,9 @@ Nothing is flashed to `system`/`vendor`. `rootfs.img` and `system.img` live as f
 Storage/install model consequences:
 
 - Do **not** flash the GSI to `system`. Keep `rootfs.img` + `system.img` as files in `userdata`. Halium's initrd already supports this (`systempart=`, `rootfs.img`, `system.img`, `halium-rootfs/`, writable-image dev mode, A/B `androidboot.slot_suffix` handling).
-- Stock Android stays installed, no `super` resizing, no `fastbootd` dance, reversible by wiping the files.
+- Stock Android stays installed, no `super` resizing, reversible by wiping the files. Ports that replace the stock vendor (a LineageOS or /e/OS build) flash `vendor` through fastbootd once (installing.md § The general model).
 - `userdata` must be formatted **unencrypted** (FBE is on by default from Android 10).
-- `vbmeta` must be flashed verification-disabled (flags 2 vs 3: see installing.md).
+- `vbmeta` is flashed verification-disabled where the stock one chains `boot` (installing.md § vbmeta: flags 2 vs flags 3).
 
 **Future work — encrypted userdata without giving up this model:** Ubuntu Touch 24.04 runs
 a working FBE setup on the same storage layout — root stays unencrypted, `fscrypt` encrypts
@@ -147,26 +147,27 @@ The per-directory replace/merge distinction and the marker-file idea are worth a
 roots — `/usr/lib/droid-vendor-overlay/` and `/usr/lib/droid-system-overlay/`, each
 mirroring the partition's directory structure — whose contents shadow individual files of
 the mounted stock partitions without modifying them (used in practice to ship a patched
-`vndservicemanager` binary and tweaked vendor rc files). LuneOS currently has **no**
-mechanism to non-destructively shadow a *vendor* file; this is the known solution shape
-when one is needed. (Droidian, https://docs.droidian.org/porting-guide/debugging-tips/)
+`vndservicemanager` binary and tweaked vendor rc files). LuneOS ships such files through
+`/odm` (device-bringup-yocto.md § Shipping fixes through /odm) or bind-mounts a patched
+file over the vendor's (device-sm-t220.md). (Droidian,
+https://docs.droidian.org/porting-guide/debugging-tips/)
 
 **Unknown devices must still boot:** if no `deviceinfo` matches, Tier 0 alone must produce a usable UI — default density from `ro.sf.lcd_density`, geometry from the compositor. That is the difference between "supports 30 devices" and "runs on pretty much every Android device".
 
 ## Devices
 
-One row per port; status as recorded in each `device-<codename>.md` (October 2026), which
-holds the detail, sources and open issues.
+One row per port; status as recorded in each `device-<codename>.md` (dated in its Status
+section), which holds the detail, sources and open issues.
 
 | Device | Product | SoC | Tier | Kernel | Vendor | GSI | Status |
 |---|---|---|---|---|---|---|---|
-| `sargo` | Google Pixel 3a | Qualcomm SDM670 | B | 4.9.124 (linux-google-sargo) | Android 12.1, VNDK 32 | 16.0 (and 14.0) arm64 | full UI; the GSI pilot and reference device |
+| `sargo` | Google Pixel 3a | Qualcomm SDM670 | B | 4.9.124 (linux-google-sargo) | Android 12.1, VNDK 32 | 16.0 (and 14.0) arm64 | full UI, audio, BT, modem, sensors, camera; Wi-Fi not recorded; the GSI pilot |
 | `bluejay` | Google Pixel 6a | Google Tensor gs101 | A | ACK android14-6.1 (linux-halium-gki_6.1) | Android 16 bp4a | 16.0 arm64 | kernel and initramfs boot on hardware; UI on Mali open |
 | `panther` | Google Pixel 7 | Google Tensor G2 gs201 | A | bluejay's kernel binary | Android 16 bp4a | 16.0 arm64 | host-side verified (204/204 modules); never flashed |
-| `sunfish` | Google Pixel 4a | Qualcomm SM7150-AB (730G) | B | 4.14.357 LineageOS, own vendor-module build | LineageOS 23.2 (SDK 36) | 16.0 arm64 | boots to UI; camera and fingerprint broken |
+| `sunfish` | Google Pixel 4a | Qualcomm SM7150-AB (730G) | B | 4.14.357 LineageOS, own vendor-module build | LineageOS 23.2 (SDK 36) | 16.0 arm64 | boots to UI; modem partly; Wi-Fi, audio, sensors, BT, NFC unknown; camera, fingerprint broken |
 | `bramble` | Google Pixel 4a 5G | Qualcomm SM7250 (765G) | B | 4.19.325 LineageOS redbull | LineageOS 23.2 | 16.0 arm64 | built and verified host-side; never booted |
 | `mindphone` | GreenTouch MindPhone | MediaTek MT6739 | B, 32-bit | 4.14.186 vendor tree | Android 11, VNDK 30 | 16.0 arm | UI, Wi-Fi, BT, dual-SIM, audio and T9 work |
-| `q25` | Zinwa Q25 / Q25 Pro | MediaTek MT6789 (G99) | A (mgk; device tree, not ACK) | 5.10.198 LineageOS xelex | Android 12, VNDK 31 | 16.0 arm64 | runs on hardware; keyboard and audio measured |
+| `q25` | Zinwa Q25 / Q25 Pro | MediaTek MT6789 (G99) | A (mgk; device tree, not ACK) | 5.10.198 LineageOS xelex | Android 12, VNDK 31 | 16.0 arm64 | runs on hardware; keyboard works; audio partly (loudspeaker dead in hardware); radios not recorded |
 | `mp01` | Minimal Phone MP01 | MediaTek MT6789 (G99) | A (mgk) | 5.10.233 vendor source | Android 12, VNDK 31 | 16.0 arm64 | boots to UI (E Ink); battery %, fingerprint, portrait web apps open |
 | `brax3` | BraX3 | MediaTek MT6835 (Dimensity 6300) | A (mgk android13-5.15; device tree, not ACK) | 5.15.209 Brax BaseOS | Android 16 (LineageOS 23.2: BaseOS / iodéOS) | 16.0 arm64 | kernel KMI-clean and boot images built; never flashed |
 | `radon` | FuriLabs FuriPhone FLX1s | MediaTek MT6877 | B | 4.19.325 FuriLabs | Android 12L, VNDK 32 | 16.0 arm64 | UI, audio, Wi-Fi, camera work; BT and modem not recorded |
@@ -174,11 +175,11 @@ holds the detail, sources and open issues.
 | `sm-t220` | Samsung Galaxy Tab A7 Lite Wi-Fi | MediaTek MT8768T | B | 4.19.191 Samsung | Android 12, VNDK 31 | 16.0 arm64 | boots; audio, media, display, touch, Wi-Fi, camera work |
 | `a3-2015-halium` | Samsung Galaxy A3 (2015) | Qualcomm MSM8916 | B, 32-bit | 3.10.108 | LineageOS 18.1, VNDK 30 | 16.0 arm | UI, modem, Wi-Fi, BT, audio, camera work |
 | `goyavewifi` | Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi (SM-T113) | Spreadtrum SC7730S | B, 32-bit | 3.10.103 community sc8830 | LineageOS 16.0, VNDK 28 | 16.0 arm | UI draws, touch works (tester, 16 Oct); rest untested |
-| `bullhead` | LG Nexus 5X | Qualcomm MSM8992 | B | 3.10.108 LineageOS (arm64) | LineageOS 21, no VNDK | 16.0 arm64 | UI, Wi-Fi, sensors, NFC work; camera HAL streams; BT and headphone jack in progress |
+| `bullhead-halium` | LG Nexus 5X | Qualcomm MSM8992 | B | 3.10.108 LineageOS (arm64) | LineageOS 21, no VNDK | 16.0 arm64 | UI, Wi-Fi, sensors, NFC work; camera HAL streams; modem links; BT and headphone jack in progress |
 | `athena` | BlackBerry KEY2 | Qualcomm SDM660 | B | 4.19.325 | LineageOS 22 (A15) | 16.0 arm64 | lock screen; display, touch, QWERTY, Wi-Fi, audio work; BT, NFC, sensors, camera broken |
 | `fajita` | OnePlus 6T | Qualcomm SDM845 | B | 4.9.337 LineageOS | LineageOS 22.2 (A15) | 16.0 arm64 | builds, verified host-side; never run on hardware |
 | `surya` | Xiaomi POCO X3 NFC | Qualcomm SM7150-AC (732G) | B | 4.14.356 LineageOS | /e/OS A15 | 16.0 arm64 | one on-device logcat (container up, sensors broken); otherwise untested |
-| `vince` | Xiaomi Redmi 5 Plus | Qualcomm MSM8953 | B | 4.9.251 third-party LineageOS tree | LineageOS 18.1, VNDK 30 | 16.0 arm64 | builds, verified host-side; never booted |
+| `vince-halium` | Xiaomi Redmi 5 Plus | Qualcomm MSM8953 | B | 4.9.251 third-party LineageOS tree | LineageOS 18.1, VNDK 30 | 16.0 arm64 | builds, verified host-side; never booted |
 
 ## The Halium container handshake
 
@@ -197,7 +198,7 @@ such a gate, not curtailed by design — see debugging.md § Stage 2.
 
 **Halium upstream.** `github.com/halium/android` branches: `halium-9.0` through `-16.0`. Generic GSI target: `halium/android_device_halium_halium_arm64` (product `halium_arm64` → `system.img`). `hybris-patches`, `libhybris`, `droidmedia`, `initramfs-tools-halium` all active mid-2026. Halium is alive and already generic.
 
-**Sailfish OS.** Per-device HADK builds, but its userspace libraries (`libgbinder`, `pulseaudio-modules-droid`, `ofono-binder-plugin`, `droidmedia`, `gst-droid`, `geoclue-providers-hybris`) are the ones that track new Android releases — the stack LuneOS has largely migrated to (present in `meta-luneos`: libgbinder, ofono-binder-plugin, pulseaudio-modules-droid + -hidl, bluebinder, sensorfw, qt6-qpa-hwcomposer-plugin, nyx-modules-hybris, libsuspend, mtp-server, waydroid recipes; still to add: droidmedia + gst-droid, geoclue-providers-hybris, parse-android-dynparts packaging, mechanicd evaluation).
+**Sailfish OS.** Per-device HADK builds, but its userspace libraries (`libgbinder`, `pulseaudio-modules-droid`, `ofono-binder-plugin`, `droidmedia`, `gst-droid`, `geoclue-providers-hybris`) are the ones that track new Android releases — the stack LuneOS has largely migrated to (present in `meta-luneos`: libgbinder, ofono-binder-plugin, pulseaudio-modules-droid + -hidl, bluebinder, sensorfw, qt6-qpa-hwcomposer-plugin, nyx-modules-hybris, libsuspend, mtp-server, waydroid recipes; droidmedia + gst-droid, parse-android-dynparts (meta-android); still to add: geoclue-providers-hybris, mechanicd evaluation).
 
 ## Glossary
 

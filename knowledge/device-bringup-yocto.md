@@ -144,10 +144,11 @@ Files that make it work:
 
 **The kernel is built in-tree, but not with the OE toolchain.** `linux-halium-gki_6.1.bb`
 builds ACK android14-6.1 with plain kbuild and Google's prebuilt clang 17 (r487747c), the
-compiler the KMI was frozen with: rebuilding ACK with OE's cross toolchain would move the
-exported-symbol CRCs under `CONFIG_MODVERSIONS` and the stock vendor modules would stop
-loading — which is the whole Tier A property (stock `vendor_boot`/`vendor_dlkm` modules
-keep loading against our kernel). `gki_bootimg.bbclass` takes the kernel from
+compiler the KMI was frozen with. CRCs come from preprocessed source plus config, not
+from the compiler (kmi-crc-matching.md § Step 4), but clang-only options
+(`LTO_CLANG`, `CFI_CLANG`, `SHADOW_CALL_STACK`) switch off under GCC and change the
+kernel, so the KMI's own clang is what keeps the stock `vendor_boot`/`vendor_dlkm`
+modules loading. `gki_bootimg.bbclass` takes the kernel from
 `GKI_KERNEL_PROVIDER ?= "linux-halium-gki"` by default; setting `GKI_KERNEL_IMAGE`
 overrides it with an out-of-tree Image (e.g. one built by `build-bootimg.sh` in
 github.com/Herrie82/luneos-bootimg-bluejay). `PREFERRED_PROVIDER_virtual/kernel =

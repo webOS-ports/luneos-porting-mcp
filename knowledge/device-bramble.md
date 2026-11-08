@@ -60,7 +60,8 @@ and the stock factory images.
   Clang, no kernel.bbclass), so it does not provide `virtual/kernel`
   (`linux-dummy`). Set `GKI_CLANG_DIR:bramble`.
 - **Config delta:** deliberately smaller than sunfish's — it leaves out `FANOTIFY`
-  and `NET_L3_MASTER_DEV` (bluejay's KMI-poison list, kept as caution). Measured: the
+  and `NET_L3_MASTER_DEV` (bluejay's KMI-poison list, left out as caution only: a poison list does not transfer
+  between KMIs, kmi-crc-matching.md § Poison options). Measured: the
   whole delta
   scores 0 of 218 stock modules failing, the same as the stock-config baseline, so
   nothing in it poisons this KMI. `CONFIG_MODULE_FORCE_LOAD=y` is a bisecting

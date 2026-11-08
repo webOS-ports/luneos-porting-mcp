@@ -77,7 +77,7 @@ Both header corrections needed `bitbake -f -c deploy` (device-bringup-yocto.md �
 
 ## Vendor and GSI
 
-Target: the **LineageOS 22.2 vendor** (Android 15, SDK 35, `ro.board.api_level=202404`), so `PREFERRED_VERSION_android-headers-halium = "16.0%"` and the Halium 16 GSI with no VNDK snapshot (architecture.md § Glossary, VNDK). Read from the vendor's own build.prop, not reasoned from `BOARD_VNDK_VERSION := current`. A stock OxygenOS 11 phone is vendor API 30 and wants the Halium 11 GSI. The installer picks the GSI at install time; only `android-headers-halium` is pinned in the build. `VENDOR_SECURITY_PATCH := 2021-11-01` in `BoardConfigCommon.mk` is the OxygenOS 11 blob vintage, not an API level.
+Target: the **LineageOS 22.2 vendor** (Android 15, SDK 35, `ro.board.api_level=202404`), so `PREFERRED_VERSION_android-headers-halium = "16.0%"` and the Halium 16 GSI with no VNDK snapshot (architecture.md § Glossary, VNDK). Read from the vendor's own build.prop, not reasoned from `BOARD_VNDK_VERSION := current`. A stock OxygenOS 11 phone is vendor API 30, which the 16.0 GSI serves through its VNDK 30 snapshot (gsi-building.md § VNDK snapshot matrix); the GSI comes in through the machine's `android-system-image-<device>` recipe. `VENDOR_SECURITY_PATCH := 2021-11-01` in `BoardConfigCommon.mk` is the OxygenOS 11 blob vintage, not an API level.
 
 Shipped because of the matched pair: `vendor.img` from the same `lineage-22.2-20260922` build as the kernel SRCREV, extracted from the OTA `payload.bin` with `payload_extract.py` (sha256-verified against the manifest). No module coupling here, but the HAL-to-kernel-interface coupling exists and pinning both halves is cheap.
 

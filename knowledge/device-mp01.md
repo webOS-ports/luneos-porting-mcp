@@ -89,8 +89,10 @@ All from the vendor's own SP Flash Tool package (`Z10_20251226_user_smr6.zip`, b
   events kworker waits on cgroup_mutex in `cgroup_bpf_release()`; PID 1 then blocks
   in `proc_cgroup_show` (kernel-porting.md § The kernel command line).
 - **Own module in the initramfs:** the patched `mediatek-drm.ko` (stripped; 37 MB
-  unstripped against the vendor's 5.8 MB) is installed at `lib/modules/` and wins
-  over the vendor's copy in the concatenated ramdisk; `load_kernel_modules()` then
+  unstripped against the vendor's 5.8 MB) is installed at the vendor's own path,
+  `lib/modules/`, so the later cpio entry replaces the vendor's copy in the concatenated
+  ramdisk (a module packaged under `/usr/lib/modules` needs `stage_our_kernel_modules()`
+  instead: kmi-crc-matching.md § Building and shipping your own modules); `load_kernel_modules()` then
   loads it in the vendor's order. `/override/modules` cannot be used: it runs before
   the vendor set and `mediatek-drm` imports 487 symbols from vendor modules.
 

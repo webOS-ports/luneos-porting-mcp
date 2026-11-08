@@ -107,15 +107,17 @@ write an empty `.scmversion` before configure, or `scripts/setlocalversion`
 appends a `+` (found on the Q25; see device-q25.md):
 
 ```
-sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 233/' Makefile
-CONFIG_LOCALVERSION="-android12-9-gdeb4d30d3489"
+CONFIG_LOCALVERSION="-android12-9-gfcab0aff02db"     # vermagic.cfg, the Q25's value
 # CONFIG_LOCALVERSION_AUTO is not set
-: > .scmversion          # patching the Makefile dirties the tree -> "+"
+: > .scmversion          # in do_configure:prepend; else setlocalversion appends "+"
 ```
 
 Deploy `include/config/kernel.release` so the string is checkable before flashing.
-Faking the sublevel is defensible **only** because the ABI is separately verified
-(0 of N stock modules failing the CRC check).
+When the tree's own sublevel differs from the vendor's, faking `SUBLEVEL` in the
+Makefile (which dirties the tree, hence the empty `.scmversion`) is defensible **only**
+because the ABI is separately verified (0 of N stock modules failing the CRC check);
+the MP01 tried it on a 5.10.198 tree and moved to the vendor's genuine 5.10.233 source
+instead (device-mp01.md § Kernel).
 
 ---
 
@@ -342,9 +344,9 @@ grep -rn "select X" $S --include=Kconfig\* | while IFS=: read f ln rest; do
 done | sort -u
 ```
 
-On sunfish that walked `DEBUG_FS ← TRACING ← GENERIC_TRACER ← IPC_LOGGING` —
-and `IPC_LOGGING` is in the vendor's defconfig too, meaning **the vendor had
-DEBUG_FS on as well and the whole hunt was misdirected.** Which leads to the
+On sunfish (against the /e/OS 13 vendor) that walked `DEBUG_FS ← TRACING ←
+GENERIC_TRACER ← IPC_LOGGING` — and `IPC_LOGGING` is in that vendor's defconfig too,
+meaning **that vendor had DEBUG_FS on as well and the whole hunt was misdirected.** Which leads to the
 most important don't in this file:
 
 > **DON'T disable a feature without checking whether the vendor's modules
@@ -354,13 +356,15 @@ most important don't in this file:
 > for m in mods/*.ko; do strings "$m" | grep -qE '^debugfs_(create|remove)' && echo "$m"; done
 > ```
 >
-> 11 of sunfish's 42 modules import `debugfs_*`. A module cannot import what
-> the kernel does not export, so DEBUG_FS was *provably* on in the vendor
-> kernel, and turning it off would have reproduced the `Unknown symbol` class
+> 11 of the /e/OS 13 vendor's 42 sunfish modules import `debugfs_*`. A module
+> cannot import what the kernel does not export, so DEBUG_FS was *provably* on in
+> that vendor kernel (LineageOS 23.2's, with 41 modules, ships `DEBUG_FS=n`; § Step 1), and turning it off would have reproduced the `Unknown symbol` class
 > of failure — the unfixable one.
 
-**`CONFIG_LOCALVERSION` in a fragment does not survive.** `kernel.bbclass` owns
-it. To add the `-g<sha>` half of a vermagic, use OE's knob, which exports
+**`CONFIG_LOCALVERSION` in a fragment does not survive a `kernel.bbclass` recipe**
+(sunfish, through `linux.inc`), which owns it. Recipes that run plain kbuild without
+`kernel.bbclass` (q25, mp01, bramble: `inherit deploy`) set it in a `vermagic.cfg`
+fragment instead. To add the `-g<sha>` half of a vermagic, use OE's knob, which exports
 `LOCALVERSION` for `scripts/setlocalversion` to append:
 
 ```bitbake

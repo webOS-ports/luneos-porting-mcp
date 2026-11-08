@@ -1,6 +1,6 @@
 # Device: bullhead-halium (LG Nexus 5X, MSM8992)
 
-LG Nexus 5X (`bullhead-halium`), 64-bit MSM8992 on a 3.10 kernel, Tier B on the halium_arm64 16.0 GSI with a vendor derived from LineageOS 21: UI, Wi-Fi, sensors, camera HAL, NFC work; Bluetooth and the headphone jack in progress.
+LG Nexus 5X (`bullhead-halium`), MSM8992, 3.10 arm64 kernel, Tier B on the 16.0 GSI over a LineageOS 21 vendor: UI, Wi-Fi, sensors, NFC work; BT in progress.
 
 The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (device-bringup-yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (hal-userspace.md § Adreno 4xx on a 3.10 kgsl).
 

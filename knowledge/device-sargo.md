@@ -25,7 +25,7 @@ The device the GSI/GKI architecture was proven on. One generic rootfs (`MACHINE=
 | Fact | Value | Source |
 |---|---|---|
 | SoC | Qualcomm SDM670 (Adreno) — the best-trodden libhybris path | |
-| Launched / last OTA | Android 9; official updates through Android 12 (final OTA May 2022) → can present vendor API 28, 29, 30, 31 on one device | |
+| Launched / last OTA | Android 9; official updates through Android 12 (final OTA May 2022) → can present vendor API 28 to 32 on one device | |
 | Kernel | 4.9.124 (pre-GKI, Tier B for good), `lineageos_bonito_defconfig` | `linux-google-sargo_git.bb` |
 | A/B | yes (`androidboot.slot_suffix`); no recovery partition | |
 | Dynamic partitions | **retrofit, from Android 10** (`PRODUCT_RETROFIT_DYNAMIC_PARTITIONS := true` in AOSP device/google/bonito `android-10.0.0_r1`): `BOARD_SUPER_PARTITION_METADATA_DEVICE := system`, block devices `system vendor`, no partition named `super` | AOSP device/google/bonito |
@@ -158,8 +158,8 @@ quotes, so it never hit the quoted-property bug (debugging.md § 2.2).
 ### RIL slots
 
 `Missing path for slot slot2` showed that the plugin enumerates slots from the HAL, not from
-`ril_subscription.conf`; the committed `ofono-conf/sargo/*` files are Tier 2 debt to be
-replaced by derivation.
+`ril_subscription.conf`. sargo's `ofono-conf/sargo/*` overrides were retired (meta-luneos
+`08e1010a7`); luneos-device-config's `40-ofono-binder` generator derives the slots.
 
 ### The RTC cannot be written
 
@@ -249,16 +249,15 @@ bar is focused (address bar 115 → 323 device px at zoom 2.4).
 
 - `luneos-speechd`'s uncorked stream; maliit/webapp-mgr abort on Wayland loss.
 - Suspend never observed in the idle triage; do not rely on wake-from-suspend yet.
-- `ofono-conf/sargo/*` to be replaced by slot derivation.
 - The layer's `lineageos_bonito_defconfig` still sets `CONFIG_SYSVIPC=y`; LuneOS does not
   need it — drop it from the layer.
 
 ## Device-specific traps
 
-- **What sargo can test:** the vendor API 28→31 ladder on one device, A/B, retrofit
+- **What sargo can test:** the vendor API 28→32 ladder on one device (12.1 is VNDK 32), A/B, retrofit
   dynamic partitions, FBE/AVB/APEX (from an A10 vendor up), the generic-rootfs claim,
   Halium 14/16 GSIs over a 12.1 vendor.
-- **What it cannot:** GKI Tier A, the `init_boot` path, anything above vendor API 31
+- **What it cannot:** GKI Tier A, the `init_boot` path, anything above vendor API 32
   as a vendor (AIDL composer, gralloc5 vendors, VNDK-less A15+ vendors). Check
   `getprop ro.vndk.version` on LineageOS 22 before assuming it cannot go higher.
 - Keep a second sargo as a known-good reference.

@@ -17,7 +17,7 @@ Hardware-verified on a BBF100-8 unless marked otherwise.
 | Wi-Fi | works | with our `wlan.ko` injected into `rootfs.img` |
 | Audio | works | system sounds crackled on the FAST output; `pcm_output` now routed through `deep_buffer` (build-verified only) |
 | Android container | works | |
-| Bluetooth | broken | rfkill soft-block + BlueZ on the wrong `hci` (§ Subsystem notes) |
+| Bluetooth | broken | rfkill soft-block restored every boot (§ Subsystem notes) |
 | Fingerprint | broken | `biomd` is HIDL-only; the vendor HAL is AIDL-only |
 | NFC | broken | `nfcd` `registerForNotifications` fails; retest at the correct gbinder `ApiLevel` |
 | Sensors | broken | no `sensors@2.0/@2.1` and no AIDL name in that boot; retest at the correct `ApiLevel` |
@@ -183,7 +183,7 @@ Pinned by name in the `athena` adaptation (deviceinfo-reference.md § When the c
 
 **Wi-Fi.** `wlan.ko` from in-tree qcacld-3.0, injected into `rootfs.img` (§ Kernel). `connmand: Unknown option WpaSupplicantConfigFile` is a dead key in LuneOS's own `main.conf` (deviceinfo-reference.md § Dead configuration keys fail quietly).
 
-**Bluetooth.** Two defects, both general (hal-userspace.md § Bluetooth):
+**Bluetooth.** The defect is the rfkill soft-block (hal-userspace.md § Bluetooth):
 
 ```
 bluebinder: Own hci index: 1
@@ -192,7 +192,7 @@ bluez adapter list: hci0 only, "powered":false
 audiod: a2dpAdapterName = hci1, adapterName = hci0
 ```
 
-Across one journal bluebinder took index 1 nine times, index 2 five times and index 3 once — never 0 — so BlueZ binds something else's `hci0`. And `systemd-rfkill` restores a saved soft-block every boot.
+`systemd-rfkill` restores a saved soft-block every boot. bluebinder's "Own hci index" (1, 2 or 3 across one journal) is the rfkill index of its vhci, not an hci number; with `BT_HCIVHCI` the only transport, BlueZ's `hci0` is bluebinder's. Where audiod's `a2dpAdapterName = hci1` comes from is not established.
 
 **Audio.** The HAL's FAST primary output runs 192-frame periods in a 384-frame (8 ms) buffer and underruns when the UI is busy (boot chime, volume keys crackle). `athena.conf` sets `WEBOS_PCM_OUTPUT_MASTER` so `pcm_output` uses `sink.deep_buffer` (1920-frame periods, 80 ms): UI sounds trade latency for no underruns.
 
@@ -212,7 +212,7 @@ Reaching the chip-ID switch means the part answered NCI RESET over i2c. Recognis
 
 ## Open issues
 
-- Bluetooth `hci` index and rfkill (above).
+- Bluetooth rfkill soft-block; audiod's `hci1` A2DP adapter name (above).
 - Fingerprint, NFC, sensors: whether they fail for one shared reason is **unverified** —
   that boot ran libgbinder on the API 31 preset against this A15 vendor (hal-userspace.md
   § The build-time setting cannot serve most devices, and once lied). Retest each with

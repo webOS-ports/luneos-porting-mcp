@@ -74,7 +74,7 @@ Built images:
 
 `vendor_boot`, `vendor_kernel_boot`, `dtbo` and `super` stay stock; the init_boot ramdisk is
 merged last, so our `init` wins and `lib/modules` from `vendor_kernel_boot` is there to load.
-**Watch the 8 MB init_boot budget**; lz4 instead of gzip is the escape hatch. The debug image
+**Watch the 8 MB init_boot budget**; legacy lz4 instead of gzip is the escape hatch (boot-images.md § Class 3). The debug image
 is self-contained (kernel + ramdisk + `enable_adb`), so it works whatever the bootloader does
 with `init_boot` during `fastboot boot`. The initramfs is device-agnostic (bluejay's) and
 carries the userdata-resize fix, whose bug was found on panther's kit (boot-images.md § The

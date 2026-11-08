@@ -4,7 +4,7 @@ Stage-by-stage playbook for a LuneOS GSI/GKI port that does not come up, distill
 
 Devices behind it: Pixel 3a (sargo), Pixel 6a (bluejay), Pixel 7 (panther), the MediaTek ports (mindphone, MP01, radon, Titan Pocket, SM-T220), BlackBerry KEY2 (athena) and Galaxy A3 (2015). Every failure mode in the core text was hit on hardware and diagnosed; the fixes named are the ones that shipped. Material from the UBports, Droidian and SFOS porting guides is attributed inline — that is other distros' documented experience, not LuneOS-verified, and SFOS-derived command spellings were extracted from summarized pages, so check the cited source if one fails. Work through the stages in order: each stage's failures are only visible once the previous one is cleared, and several of these bugs hide behind one another. HAL and subsystem detail lives in hal-userspace.md; kernel config and module-loading rules in kernel-porting.md and kmi-crc-matching.md; boot-image construction and the initramfs init patches in boot-images.md.
 
-**The install/boot model these stages assume:** `fastboot flash vbmeta --disable-verity --disable-verification`, our `boot.img` (and `init_boot.img` on A13-launch devices), stock `vendor_boot`/`vendor`/`super` untouched, `rootfs.img` + `android-rootfs.img` (the Halium GSI system image) as files inside an unencrypted ext4 `userdata`. The LuneOS initramfs loop-mounts `rootfs.img` as `/`, and the Android container mounts the GSI at `/android` with the device's real `/vendor` bound in.
+**The install/boot model these stages assume:** `fastboot flash vbmeta --disable-verity --disable-verification` where the stock vbmeta chains `boot`, our `boot.img` (and `init_boot.img` on A13-launch devices), stock `vendor_boot`/`vendor`/`super` untouched, `rootfs.img` + `android-rootfs.img` (the Halium GSI system image) as files inside an unencrypted ext4 `userdata`. The LuneOS initramfs loop-mounts `rootfs.img` as `/`, and the Android container mounts the GSI at `/android` with the device's real `/vendor` bound in.
 
 ## Method
 
@@ -79,7 +79,8 @@ RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
 MediaTek lk passes ramoops on the command line (lk's log in expdb shows `ramoops.mem_address=… ramoops.mem_size=… ramoops.console_size=… ramoops.pmsg_size=…`), runs with `kedump: ddr reserve mode enabled`, and a panic reset is a *warm* reset — so DRAM still holds the dying kernel's log when the preloader comes past on the next loop, and mtkclient's DA can read it:
 
 ```
-mtk da peek 0x54410000 0xe0000 --filename pstore.bin    # address/size from lk's cmdline
+mtk da peek <mem_address> <mem_size> --filename pstore.bin    # from lk's ramoops.* cmdline
+                                                                # (titanpocket: 0x54410000 0xe0000)
 ```
 
 - the kernel needs `CONFIG_PSTORE_RAM=y` (stock MTK defconfigs have it);
@@ -282,7 +283,7 @@ A serial console on a dead UART can hang init's stdio; Droidian appends `console
 
 ### 1.6 Your init never ran: `skip_initramfs`
 
-On many A8–A10 vendor kernels the bootloader passes `skip_initramfs` and the kernel bypasses the packed ramdisk — a repacked boot.img flashes fine and your init never executes (no gadget, no logs, stock-looking behaviour). First suspect when a Tier B device ignores a repacked ramdisk; fix in kernel source (boot-images.md § The `skip_initramfs` trap).
+On many A8–A10 vendor kernels the bootloader passes `skip_initramfs` and the kernel bypasses the packed ramdisk — a repacked boot.img flashes fine and your init never executes (no gadget, no logs, stock-looking behaviour). First suspect when a Tier B device ignores a repacked ramdisk; the kernel fix is in boot-images.md § The `skip_initramfs` trap.
 
 ### 1.7 Recovery as a debug environment (Droidian)
 
@@ -460,7 +461,7 @@ A whole subsystem missing (camera, audio) points at module loading, not the HAL 
 
 - A `wifi-module-load.service` modprobing a module that doesn't exist on this device (copy-paste from another port) restart-loops every 2 s — check whether the driver is built in (`CONFIG_MTK_COMBO=y`).
 - MediaTek WMT combo: force-loaded stock vendor modules, firmware path, `/dev/wmtWifi` power-on — hal-userspace.md § MediaTek connectivity. Force-loading is only safe with stock struct layouts (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe).
-- Module-load errors (Halium, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = signature enforcement — disable `CONFIG_MODULE_SIG*` (Tier B; stock GKI leaves `MODULE_SIG_FORCE` unset). `"Invalid module format"` = version/config mismatch. Vendor modules that never load on a rebuilt GKI kernel although the CRC check passes: `CONFIG_MODULE_SIG_PROTECT` (kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT). Broadcom `bcmdhd` is best `=m` (picks up the MAC as a module). Legacy Qualcomm (pre-2016): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath` (and see hal-userspace.md § WCNSS).
+- Module-load errors (Halium, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = signature enforcement against a module not signed with this kernel's key — for prebuilt vendor modules disable `CONFIG_MODULE_SIG_FORCE` (Tier B; stock GKI leaves it unset); a port that builds all its own modules can keep it with a signing key pinned in the layer, so kernel and modules agree across rebuilds (sargo, fajita, vince). `"Invalid module format"` = version/config mismatch. Vendor modules that never load on a rebuilt GKI kernel although the CRC check passes: `CONFIG_MODULE_SIG_PROTECT` (kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT). Broadcom `bcmdhd` is best `=m` (picks up the MAC as a module). Legacy Qualcomm (pre-2016): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath` (and see hal-userspace.md § WCNSS).
 
 #### Regulatory domain: `country 00` and no 5 GHz
 
@@ -618,13 +619,13 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | A unit never runs on one machine, nothing in the journal | Gated on `/sys/module/...` with a built-in driver | Stage 4 wifi |
 | Wi-Fi works but no 5 GHz networks; `iw reg get` says country 00 | No regulatory.db, or the latched early load | `iw reg reload` (Stage 4) |
 | Ping works, TCP hangs | Path problem (often the router's band bridging) | Stage 4 test matrix |
-| `Required key not found` on modprobe | Module signature enforcement (Tier B) | disable `CONFIG_MODULE_SIG*` |
+| `Required key not found` on modprobe | Module signature enforcement (Tier B) | prebuilt modules: disable `CONFIG_MODULE_SIG_FORCE`; own modules: pin the signing key |
 | Vendor modules never load on a rebuilt GKI kernel though the CRC check passes | `CONFIG_MODULE_SIG_PROTECT` must be off | kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT |
 | MTK modem "exception", RIL dead | Wrong fstab → NV partitions unmounted | Stage 4 modem |
 | SIM never detected (Qualcomm) | `/dev/block/bootdevice/by-name` structure missing | Stage 4 modem |
 | BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | hal-userspace.md § Bluetooth |
 | `hci0` DOWN, "Invalid request code (56)" | Controller rejects a command it advertised | `btmon` (Stage 4) |
-| BT scans but won't connect; BlueZ on a different `hci` than bluebinder | Adapter index mismatch and/or rfkill restored blocked | hal-userspace.md § Bluetooth |
+| BT will not power on, `Blocked through rfkill (0x12)` | rfkill soft-block restored at boot; bluebinder's "Own hci index" is an rfkill index, not a mismatch | hal-userspace.md § Bluetooth |
 | Reset 57 s in, `BUG_ON(!sk)` in `bt_sock_reclassify_lock` | Vendor stubbed `hci_sock_create()` | kernel-porting.md § Vendor trees that stub out `net/bluetooth/hci_sock.c` (Samsung) |
 | Audio pitched / tempo-shifted | pa-droid sample-rate quirk | hal-userspace.md § Audio |
 | pulseaudio SIGSEGV after "cannot locate symbol ... referenced by /vendor/..." | Vendor HAL needs its VNDK | `HYBRIS_PREFER_VNDK` (hal-userspace.md § Audio) |

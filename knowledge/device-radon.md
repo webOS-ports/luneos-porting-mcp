@@ -142,7 +142,7 @@ Two routes.
 ## Open issues
 
 - Bluetooth and modem end to end not recorded on hardware.
-- An earlier boot showed `conninfra_loader` SIGSEGV (fault addr 0x3) inside the GSI's Android 16 `liblog` (`__android_log_print` from `main+752`) — Android 12 vendor code under the Android 16 linker, which no `HYBRIS_*` variable reaches; the proper fix is a vendor linker namespace (`ld.config.txt`) the GSI does not generate. Whether it still occurs after the firmware-path fix is not recorded.
+- An earlier boot showed `conninfra_loader` SIGSEGV (fault addr 0x3) inside the GSI's Android 16 `liblog` (`__android_log_print` from `main+752`) — Android 12 vendor code under the Android 16 linker, which no `HYBRIS_*` variable reaches; the proper fix was taken to be a vendor linker namespace (`ld.config.txt`) the GSI does not generate. **Unresolved:** the 16.0 GSI's linkerconfig does generate `/linkerconfig/*ld.config.txt` for the vendor (hal-userspace.md edits it for legacy vendors), so the cause is not established. Whether it still occurs after the firmware-path fix is not recorded.
 - The FuriOS bootman initramfs is an opaque `CLOSED` binary; replacing it means LVM support in LuneOS' initramfs (`S01-lvm-bootman.sh` reimplements the contract but differs: FuriOS never mounts `userdata` under LVM and keeps everything in the root LV).
 - `radon-modem-image` and `70-radon.rules` not reviewed; `deviceinfo_device_pixel_ratio` unverified.
 

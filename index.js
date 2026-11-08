@@ -358,15 +358,19 @@ const PROMPTS = {
             (a.symptom ? ` Symptom: ${a.symptom}.` : "") +
             "\n\nUse the luneos-mcp knowledge base: read the 'debugging' topic (and the matching " +
             "device-<codename> topic if one exists) and triage stage by stage:\n" +
-            "Stage 0 — kernel: ramoops/pstore console, fastboot boot the -debug image (enable_adb).\n" +
+            "Stage 0 — kernel: ramoops/pstore console (MediaTek: expdb), then the debug boot image " +
+            "(fastboot boot where the bootloader supports it, else flash it).\n" +
             "Stage 1 — initramfs: module load order, module cmdline params, async storage probe, " +
-            "userdata resize, adb shell into the 'Halium initrd' gadget and read /dev/kmsg.\n" +
+            "userdata resize; reach the debug gadget (RNDIS + telnet 192.168.2.15 by default, adb " +
+            "only if USB_FUNCTIONS names it; a dead boot shows as a 'Failed to boot' gadget) and read /dev/kmsg.\n" +
             "Stage 2 — Android container: wait_for_prop gates (incl. the quoted-value trap), " +
             "init log tee/breadcrumbs to /dev/socket/init.log, container logcat (not just journalctl), " +
             "ashmem<boot_id>, vndservicemanager/selinuxfs, binder symlinks.\n" +
             "Stage 3 — display/UI: backlight, DRM probe, panel size, node permissions (EGL_BAD_ALLOC), " +
             "wayland socket / XDG_RUNTIME_DIR.\n" +
             "Stage 4 — subsystems: wifi, modem (fstab selection!), BT, sensors, time.\n" +
+            "Stage 5 — idle health: the port works but burns CPU, flash or battery (restart loops, " +
+            "busy-looping daemons, wakeups).\n" +
             "At each stage state what evidence to collect before changing anything.",
         },
       },

@@ -55,7 +55,7 @@ Header v0 with a QCDT table: dt size in the header word at offset 40, `dtFU.img`
 
 ## Vendor and GSI
 
-LineageOS 18.1 `lineage_a3lte-userdebug` built in a Halium 11 tree and converted by halium-legacy-vendor (VNDK 30), under the plain `halium_arm` 16.0 GSI. Both are published in the `halium-luneos-20261005` release of webOS-ports/halium-images and fetched by `android-system-image-a3-2015-halium`: device tarball `halium-luneos-11.0-20261008-1-a3-2015-halium.tar.bz2`, GSI `halium-luneos-16.0-20261008-3-halium_arm.tar.bz2` (carries the linkerconfig VNDK 30 change and the minimediaservice thread pool; the A3 recipe pins it, the shared `android-system-image-legacy-gsi.inc` still names 20261007-1).
+LineageOS 18.1 `lineage_a3lte-userdebug` built in a Halium 11 tree and converted by halium-legacy-vendor (VNDK 30), under the plain `halium_arm` 16.0 GSI. Both are published in the `halium-luneos-20261005` release of webOS-ports/halium-images and fetched by `android-system-image-a3-2015-halium`: device tarball `halium-luneos-11.0-20261008-1-a3-2015-halium.tar.bz2`, GSI `halium-luneos-16.0-20261017-1-halium_arm.tar.bz2` (20261008-3, which carries the linkerconfig VNDK 30 change and the minimediaservice thread pool, plus droidmedia's buffer and codec fixes; the shared `android-system-image-legacy-gsi.inc` still defaults to 20261007-1).
 
 The converter moves the vendor fstab's apnhlos/modem/hidden mounts to `/vendor/firmware_mnt`, `/vendor/firmware-modem`, `/vendor/hidden`, and turns LineageOS's 124 `/system/etc/firmware` links into `/vendor/firmware` links, where the container's ueventd looks. SELinux labels of libraries added to the device image's `/system/lib` are not set (the build is permissive).
 

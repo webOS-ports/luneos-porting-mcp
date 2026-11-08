@@ -102,8 +102,8 @@ Works on FULL payloads (mindphone's was 717 MB, minor_version=0, 16 partitions).
 dtb, and all header fields (load addresses, offsets, cmdline, os_version).
 Use it to record the stock header recipe and to sanity-check every image you
 build: `./unpack_bootimg.py boot-luneos.img /tmp/x`, then diff the printed
-fields against the stock table. It also identified mindphone's v2 dtb field as
-an AOSP dt_table (magic `0xd7b7ab1e`), not a bare FDT.
+fields against the stock table. It also tells a v2 dtb field that is an AOSP dt_table
+(magic `0xd7b7ab1e`, mindphone) from a bare FDT (radon).
 
 **Location:** unpublished.
 
@@ -132,9 +132,10 @@ The entry point moved between versions: newer trees install a console script
 bootlooping and mtkclient will grab the preloader as it cycles past; if not,
 power fully off and plug in holding **Volume Down** to force BROM.
 
-**Only ever use `mtk r`.** The same tool writes partitions and reflashes the
-preloader, and a bad preloader write is the one genuinely hard-to-recover brick
-on MediaTek.
+**Reading expdb needs only `mtk r`.** The same tool writes partitions and reflashes
+the preloader, and a bad preloader write is the one genuinely hard-to-recover brick
+on MediaTek; when installing with it, follow installing.md § MediaTek BROM/preloader
+(write by name, never `preloader`).
 
 A wrapper script (`dump-expdb.sh`, unpublished) does all of the above, including
 the greps, and takes `--analyse` to re-read an existing dump.
@@ -192,10 +193,10 @@ tested on both factory zips.
 ## mkbootimg / mkdtboimg
 
 AOSP tools used for hand assembly:
-- `mkbootimg` — see boot-images.md for the exact mindphone v2 command with
+- `mkbootimg` — see device-mindphone.md § Boot image for the exact mindphone v2 command with
   base/offsets. For v3/v4 the Yocto writer below replaces it.
 - `mkdtboimg.py create` — wrap a self-built dtb into the dt_table format that
-  MTK lk (and the v2 dtb field) expects.
+  some MTK lk builds expect in the v2 dtb field (boot-images.md § Class 1 — legacy header v2).
 
 The Yocto v3/v4 writer `meta-android/lib/halium/bootimg.py` reproduces AOSP
 `mkbootimg.py` **byte-identically** across all four shipped shapes (kernel-only,
