@@ -115,8 +115,9 @@ mkbootimg --header_version 2 --pagesize 2048 \
 Android 11 vendor, VNDK 30, 32-bit → the 32-bit `halium_arm` GSI. Build: gsi-building.md §
 Building a 32-bit halium_arm GSI (the v30 VNDK port and the `apex_vndk` block that was
 silently missing). Current pin in `android-system-image-mindphone.bb`:
-`halium-luneos-16.0-20261017-1-halium_arm` (20261007-1, which carries `com.android.vndk.v27`
-to `v34`, plus the sphal linkerconfig change and droidmedia fixes; gsi-building.md § GSI-side
+`halium-luneos-16.0-20261107-1-halium_arm` on meta-smartphone `herrie/security-integration-v2`
+(`20261017-1` on `wrynose`); both carry `com.android.vndk.v27` to `v34`, the sphal linkerconfig
+change and droidmedia fixes, 20261107-1 also droidmedia's decoder fixes; gsi-building.md § GSI-side
 fixes for legacy vendors), pinned separately because the
 arm64 releases do not always publish a `halium_arm` asset. It travels inside `rootfs.img` as
 `android-rootfs.img` (`VIRTUAL-RUNTIME_android-system-image = "android-system-image-mindphone"`),

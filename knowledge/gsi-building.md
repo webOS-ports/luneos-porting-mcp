@@ -24,6 +24,10 @@ Published generic GSI releases (`gh release list -R webOS-ports/halium-images`):
 | `halium-luneos-20260830` | 16.0 `halium_arm` |
 | `halium-luneos-20260910` | 16.0 `halium_arm64`, the first carrying VNDK 27–34 |
 | `halium-luneos-20261005` | 16.0 `halium_arm` (`20261005-1/-2`, `20261007-1`, `20261008-3`), 16.0 `halium_arm64` `20261007-1`, plus prebuilt vendor images for legacy devices |
+| `halium-luneos-20261103` | 16.0 `halium_arm64` `20261103-1`: the Widevine bridge's Android half (`wvbridged`, `wvlaunch`, `libwvshim.so`, webOS-ports/luneos-widevine-bridge) and the linkerconfig link that lets the vendor's Widevine HAL load `libwvshim.so`; inert unless the bridge is turned on in LuneOS |
+| `halium-luneos-20261104` | 16.0 `halium_arm` and `halium_arm64` `20261104-1`: droidmedia's decoder fixes (a failing codec wakes the reader waiting for its output; the reader stops before its source is freed; an input frame larger than the codec's buffer is refused; the buffer queue's slots are emptied under its lock) |
+| `halium-luneos-20261107` | 16.0 `halium_arm` `20261107-1`, `halium_arm64` `20261107-2`: droidmedia only |
+| `halium-luneos-20261108` | 16.0 `halium_arm` and `halium_arm64` `20261108-1`, plus `hammerhead-halium-vendor.img`: linkerconfig reads a vendor binary's target SDK from a `.version` file next to it (`enable.target.sdk.version`); CameraClient hands HAL1 recording frames back to the HAL off its callback thread (QCamera2 joins that thread in `stopRecording()` under the device lock, which deadlocked until minimediaservice restarted); `init.halium.rc` preloads `libselinux_stubs.so` for vndservicemanager by soname again. Still VNDK v27–v34 |
 
 The build tooling itself lives in no repository — `halium-images` is release hosting only — so capturing the process as CI is a first-class task.
 
@@ -168,6 +172,8 @@ Why sargo worked on 16 without any of this: its vendor is 12.1 (v32, already shi
 
 Package the built `system.img` as `halium-luneos-<ver>-<date>-N-<product>.tar.bz2`, publish it as a `webOS-ports/halium-images` release, and bump `HALIUM_LUNEOS_GSI16_PV`/`_SHA256` in `halium-luneos-gsi-16.inc` (every machine moves together; a device that must stay behind overrides the weak assignments in its own recipe, as mindphone does for `halium_arm`). The `.inc` does the sparse→ext4 conversion + `/android/{system,vendor,data,...}` symlinks and consumes `${UNPACKDIR}/system.img` in place (`mv` → `simg2img` → `rm`) — note modern trees use `${UNPACKDIR}`, not `${WORKDIR}`. The image installs as `android-rootfs.img` (system-as-root mode of the initramfs).
 
+**Current pins (8 Nov 2026).** `halium-luneos-gsi-16.inc` defaults to `20261108-1` on meta-smartphone's `herrie/security-integration-v2` branch (github.com/Herrie82/meta-smartphone); `wrynose` still has `20261017-1` until that branch is merged. Recipes that pin their own on that branch: a3-2015-halium and hammerhead-halium `20261108-1` (`halium_arm`), mindphone `20261107-1` (`halium_arm`), goyavewifi, vince-halium and tenderloin `20261017-1`, bullhead-halium and `android-system-image-legacy-gsi.inc`'s own default `20261007-1`. A legacy vendor image derived against one of these comes out the same against the next (checked on hammerhead against 20261107-1 and 20261108-1), so it is not rebuilt with each bump.
+
 Selecting between a GSI and an old device build per machine: yocto.md § android-system-image recipes.
 
 There is no standalone GSI artifact the installer picks per device; each machine gets the GSI through an `android-system-image-<device>` recipe in the image. With the 16.0 GSI carrying VNDK 27–34, one GSI per architecture would cover every current vendor.
@@ -295,6 +301,6 @@ gets is not the one the image was made against.
 - `vendor/halium/droidmedia` minimedia.cpp: `configureRpcThreadpool(5, false)` — without it a HAL1
   takePicture() deadlocks minimediaservice against the HAL.
 - Both are in the halium_arm GSI `halium-luneos-16.0-20261008-3`, published in the `halium-luneos-20261005`
-  release, and in `20261017-1` (20261008-3 plus droidmedia's buffer and codec fixes), which the a3-2015-halium,
-  goyavewifi and mindphone recipes pin; `android-system-image-legacy-gsi.inc`'s own default is still `20261007-1`. Rebuilding after a linkerconfig-only change takes ~20 s; check that
+  release, and in every later `halium_arm` GSI (`20261017-1` adds droidmedia's buffer and codec fixes; the recipes'
+  pins are under § Packaging and wiring into Yocto). Rebuilding after a linkerconfig-only change takes ~20 s; check that
   `variableloader.cc` was recompiled (it is installed into the runtime APEX, not /system/bin).
