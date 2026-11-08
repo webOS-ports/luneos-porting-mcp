@@ -2,7 +2,7 @@
 
 LG Nexus 5X (`bullhead-halium`), MSM8992, 3.10 arm64 kernel, Tier B on the 16.0 GSI over a LineageOS 21 vendor: UI, Wi-Fi, sensors, NFC work; BT in progress.
 
-The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (hal-userspace.md § Adreno 4xx on a 3.10 kgsl).
+The first LineageOS 21 vendor (no VNDK) in the legacy set, and the first arm64 3.10 kernel. Brought up remotely, one test kit per round, with nobody here owning the phone. Almost everything that failed was generic and is filed under the general topics: what a LineageOS vendor's old Android did for it that the GSI does not (gsi-building.md § Before deriving), shipping fixes without a new vendor image (yocto.md § Shipping fixes through /odm), the 3.10 arm64 kernel gaps (kernel-porting.md § Legacy 3.x kernels) and Chromium against a 32-bit-address GPU (soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl).
 
 ## Status (as of 11 Oct 2026)
 
@@ -67,13 +67,13 @@ TWRP route: `fastboot boot` the official TWRP 3.7.0 image (RAM only, never flash
 
 ## Subsystem notes
 
-**WebAppMgr and the browser** crashed on every start: Chromium's PartitionAlloc reserved the low 4 GB, and the Adreno 418's kgsl can only map below 3 GB (hal-userspace.md § Adreno 4xx on a 3.10 kgsl). Found with the kgsl diagnostic and `/proc/<pid>/maps` captures of WebAppMgr; fixed by the webruntime opt-out file.
+**WebAppMgr and the browser** crashed on every start: Chromium's PartitionAlloc reserved the low 4 GB, and the Adreno 418's kgsl can only map below 3 GB (soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl). Found with the kgsl diagnostic and `/proc/<pid>/maps` captures of WebAppMgr; fixed by the webruntime opt-out file.
 
 **Wi-Fi.** qcacld-2.0 waits for `sta` in `/sys/module/wlan/parameters/fwpath` (`wlan-dynamic-start`, gated on the `cnss` platform driver), then the PMF fix.
 
 **Sensors.** Three layers: the vendor's `flash-nanohub-fw` had no `user` (Android 16 init dropped it, the hub was never flashed, `nanohub_kthread: err_cnt` every second); the vendor has no sensors service; and the manifest says passthrough. All in hal-userspace.md § Sensors.
 
-**Camera.** Daemon and provider need LineageOS 21's own system libraries and shims (hal-userspace.md § A LineageOS 21 vendor without VNDK); the HAL then streams. The LuneOS side got the media APEX mounts and the apexcodecs link in round 10; whether the preview shows is still to be reported.
+**Camera.** Daemon and provider need LineageOS 21's own system libraries and shims (soc-qualcomm.md § A LineageOS 21 vendor without VNDK); the HAL then streams. The LuneOS side got the media APEX mounts and the apexcodecs link in round 10; whether the preview shows is still to be reported.
 
 **Bluetooth.** Service added and binderized; then `wcnss_filter`, force-started by start-android-hals, ate the controller's replies on the UART (hal-userspace.md § Bluetooth). An rc override did not stop the script (round 11); `deviceinfo_android_skip_services` in round 12.
 

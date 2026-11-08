@@ -156,8 +156,8 @@ legacy-v2 sequence). Kit: `boot-mindphone-luneos.img`, `boot-mindphone-luneos-de
 `vbmeta-disabled.img` (stock vbmeta with flags 2), `userdata-luneos.img` (3.0 GB ext4 holding
 `rootfs.img`, built by `userdataimg.bbclass`), `install.sh` (`--debug` flashes the debug
 image). Fastboot mode: `adb reboot bootloader` or Vol-Down + Power; `fastboot flashing unlock`
-needs the OEM-unlock toggle. Flash both boot slots. MediaTek lk here has no `fastboot boot`, so
-the debug image is flashed, not RAM-booted.
+needs the OEM-unlock toggle. Flash both boot slots. lk here has no `fastboot boot`, so the debug
+image is flashed, not RAM-booted (soc-mediatek.md § Boot chain: preloader and lk).
 
 Revert: stock `boot.img` and `vbmeta.img`, then `fastboot -w`. If the phone stops enumerating,
 mtkclient over the preloader recovers it — write `boot` and `userdata` only, never `preloader`.
@@ -170,8 +170,7 @@ mtkclient over the preloader recovers it — write `boot` and `userdata` only, n
   4.14/arm32, binderfs symlinks, a DRM probe guard, the fb0 `modes` panel fallback, and a
   backlight kick.
 - **Wi-Fi**: force-loaded stock WMT modules, firmware path, `echo 1 > /dev/wmtWifi` retry —
-  generalised into `meta-android/recipes-core/mtk-connectivity` (hal-userspace.md § MediaTek
-  connectivity).
+  generalised into `meta-android/recipes-core/mtk-connectivity` (soc-mediatek.md § Connectivity combo).
 - **Modem**: `mount-android.sh` picked `fstab.enableswap` over `fstab.mt6739`, leaving the NV
   partitions unmounted (`md1.status` "exception"). After the fix: `md1.status=ready`,
   `vendor.ril-daemon-mtk` running, IRadio@1.0 em1/em2 registered, ofono `/ril_0` + `/ril_1`

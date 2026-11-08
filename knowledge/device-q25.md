@@ -186,8 +186,8 @@ ThinLTO image with the patched keyboard driver.
 
 Android 12 vendor, VNDK 31 → the generic Halium 16 `halium_arm64` GSI
 (`halium-luneos-16.0-20260910-1` carries `com.android.vndk.v31`); no VNDK-snapshot
-work. MediaTek A12 vendor keys in the adaptation, carried over from the MP01 and also
-found in radon's: `deviceinfo_force_hwc2="1"` (`ro.hardware.hwcomposer=mtk_common`),
+work. MediaTek A12 vendor keys in the adaptation (soc-mediatek.md § Userspace and vendor
+keys), carried over from the MP01 and also found in radon's: `deviceinfo_force_hwc2="1"` (`ro.hardware.hwcomposer=mtk_common`),
 `deviceinfo_hybris_prefer_vndk="1"` (verified here: the Q25's own
 `/vendor/lib64/libnvram.so` imports `android::base::Basename(const std::string&)`,
 which the 16 GSI's libbase no longer exports — without it pulseaudio crashes),
@@ -245,12 +245,11 @@ Kit (`q25_20260930.zip`, 1.22 GiB):
 | `vbmeta.img` | Zinwa's stock vbmeta |
 | `install.sh`, `make-userdata.sh`, `README.md`, `SHA256SUMS` | |
 
-- **No `fastboot boot` anywhere:** MediaTek's lk frequently does not implement it,
-  so the debug image is flashed and the rootfs goes in as a prefilled `userdata`
-  image (`fastboot flash userdata`, the route the Droidian port proves here).
-- `install.sh` checks the lock state first (a locked MediaTek lk refuses critical
-  partitions individually with "No support by lock control") and reports partition
-  sizes (the scatter's 3 GiB `userdata` is nominal).
+- **No `fastboot boot`** (soc-mediatek.md § Boot chain: preloader and lk): the debug
+  image is flashed and the rootfs goes in as a prefilled `userdata` image
+  (`fastboot flash userdata`, the route the Droidian port proves here).
+- `install.sh` checks the lock state first and reports partition sizes (the
+  scatter's 3 GiB `userdata` is nominal; soc-mediatek.md § Boot chain: preloader and lk).
 - A/B: Android keeps slot A, LuneOS takes slot B; switch with `fastboot
   --set-active=other reboot`. Slot B first needs the stock firmware (everything but
   `logo`, `super` and `boot_b`; the Q25 wiki has the list), then:
@@ -340,7 +339,7 @@ The mindphone-era `mtk-connectivity` approach transfers (mirror the vendor `.ko`
 load host-side, poke `/dev/wmtWifi`, fix `/dev/stpbt`; BT MAC from
 `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr`; the `/data/nvram` symlink; the
 `fstab.<ro.hardware>` selection fix). Two things had to change for connac1x, both
-found from the Q25's vendor partition (hal-userspace.md § MediaTek connectivity):
+found from the Q25's vendor partition (soc-mediatek.md § Connectivity combo):
 
 - `modules.load` lists only `connadp.ko` and `c2k_usb_f_via_gps.ko` of the family;
   the real drivers are `insmod`ed by the vendor rc — `wmt_drv.ko` and `connfem.ko`

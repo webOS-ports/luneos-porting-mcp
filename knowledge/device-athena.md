@@ -45,7 +45,7 @@ Hardware-verified on a BBF100-8 unless marked otherwise.
 
 Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2-athena`: 4.19.325 with an in-kernel Athena device tree (`sdm660-bbry-athena.dtsi`, camera dtsi, the BBRY input drivers), the tree the LineageOS 23.2 device tree selects (`TARGET_KERNEL_VERSION := 4.19`). Forked as `shr-distribution/linux` `key2/4.19`; recipe `linux-blackberry-athena_git.bb`, SRCREV `bc5d2089f85ea822e1311dfb581a80c514197074` (carries the `waitid(P_PIDFD)` backport, kernel-porting.md § `pidfd_open()` without `waitid(P_PIDFD)`). Released ROMs run both generations: /e/OS is a **4.4** build (`4.4.302-Key2`, clang 19), LineageOS 22 ships **4.19.325**. `android_kernel_blackberry_sdm660` (4.4) is the fallback.
 
-**Toolchain.** The tree had only ever been built with clang; GCC 15 + GNU Make 4.4 needed the fixes in kernel-porting.md § Building a 4.19 CAF tree with a modern GCC and Make. Seven findings were real bugs in code LineageOS ships, fixed at source:
+**Toolchain.** The tree had only ever been built with clang; GCC 15 + GNU Make 4.4 needed the fixes in soc-qualcomm.md § Building a 4.19 CAF tree with a modern GCC and Make. Seven findings were real bugs in code LineageOS ships, fixed at source:
 
 | Fix | Bug |
 |---|---|
@@ -59,9 +59,9 @@ Upstream `tim-ecoder/android_kernel_blackberry_sdm660-4p19`, branch `lineage23.2
 
 **Config delta (`luneos.cfg`), device-specific parts:**
 
-- `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="vendor/qcom/sdm660-internal-codec-mtp-athena"` with `CONFIG_IMG_GZ_DTB=y`. tim-ecoder's boot Makefile ignored that knob and appended every dtb (kernel-porting.md § The appended-DTB glob trap); the built image now carries one.
+- `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="vendor/qcom/sdm660-internal-codec-mtp-athena"` with `CONFIG_IMG_GZ_DTB=y`. tim-ecoder's boot Makefile ignored that knob and appended every dtb (soc-qualcomm.md § The appended-DTB glob trap); the built image now carries one.
 - `# CONFIG_IKHEADERS is not set`, `# CONFIG_KALLSYMS_ALL is not set`, `# CONFIG_FB_MSM_MDSS_XLOG_DEBUG is not set`, no ISO9660/UDF: size levers for the window (§ Boot image). `IKCONFIG` stays, so mer-kernel-check can run on `/proc/config.gz`.
-- `# CONFIG_ARM64_USE_LSE_ATOMICS is not set`, to match the reference ROMs; it fixed nothing (kernel-porting.md § LSE atomics on ARMv8.0 SoCs). The same tree logs `can't patch jump_label` (`kernel/jump_label.c:385 __jump_label_update`) on every boot, working or not.
+- `# CONFIG_ARM64_USE_LSE_ATOMICS is not set`, to match the reference ROMs; it fixed nothing (soc-qualcomm.md § LSE atomics on ARMv8.0 SoCs). The same tree logs `can't patch jump_label` (`kernel/jump_label.c:385 __jump_label_update`) on every boot, working or not.
 - `CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE` does not exist on this tree: it carries a backported 5.x LSM framework (kernel-porting.md § Fragment traps).
 - `NETCONSOLE`/`NETCONSOLE_DYNAMIC` are on; safe here only because no prebuilt vendor network module loads (`wlan.ko` is ours). `FRAMEBUFFER_CONSOLE` is on and does nothing (§ Subsystem notes). `CONFIG_USB_CONFIGFS_ACM` is not in the defconfig, so the ACM console never appears; the gadget is RNDIS-only.
 - **No pstore at all**: `CONFIG_PSTORE=n` in all four kernels inspected and no ramoops DT node. With no UART and no fbcon, a failure before the initramfs is mute. A ramoops node + `PSTORE_RAM` is the fix, but needs a carefully chosen reserved-memory region.
@@ -102,7 +102,7 @@ ramdisk 0x01000000   tags 0x00000100   second 0x00000000
 BOARD_KERNEL_IMAGE_NAME = Image.gz-dtb        (appended dtb, no dtbo.img)
 ```
 
-v0 with an appended dtb is boot-images.md § Header v0 with an appended device tree; `abootimg` needs `-c pagesize=4096` here. The UBports Halium port for the Xiaomi Mi A2 (`jasmine_sprout`, also SDM660) uses an identical offset set:
+v0 with an appended dtb is soc-qualcomm.md § Header v0/v1 and appended device trees; `abootimg` needs `-c pagesize=4096` here. The UBports Halium port for the Xiaomi Mi A2 (`jasmine_sprout`, also SDM660) uses an identical offset set:
 
 ```
 deviceinfo_flash_pagesize="4096"        deviceinfo_flash_offset_base="0x00000000"

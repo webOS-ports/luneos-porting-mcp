@@ -62,55 +62,9 @@ On a kernel panic the console log survives the reboot in pstore (`/sys/fs/pstore
 
 **A reset at the same second of every boot is a subsystem crash, not power.** A modem that lost its EFS (rmt_storage) with restart level SYSTEM reset the SoC ~10 s after "Brought out of reset". Read the battery before suspecting it: a RAM-booted initramfs holding a telnet shell showed 99 % (found on a3-2015-halium; see device-a3-2015-halium.md).
 
-### MediaTek: `expdb` when there is no pstore and no gadget
+### MediaTek: expdb, DRAM ramoops and the hardware watchdog
 
-MediaTek kernels frequently ship **no pstore console**, and if the USB controller is a vendor module (1.8) there is no debug gadget either — a failing device can be completely mute, nothing on `lsusb` but the preloader flashing past on each reset. `expdb` is the way in: a partition holding preloader/lk logs, AP watchdog status and the kernel's `RAM_CONSOLE` (kmsg from before the reset), readable over the preloader connection that still enumerates (mtkclient usage: tools.md). On the MP01 it showed our init running and the debug shell coming up, then:
-
-```
-RAM_CONSOLE detect abnormal boot wdt_status:0x6, aee_exp_type:1
-```
-
-**Read `wdt_status`.** Non-zero means the hardware watchdog reset the SoC rather than the kernel panicking — a different problem (next section).
-
-**expdb can come back empty where it matters.** lk may log `kedump add: SYS_PSTORE_RAW ... kedump mini done` on every reset while the kedump region reads back as zeros; lk's own log then shows only `lk boot reason = 4` (`androidboot.bootreason=kernel_panic`, `exp_type 0x2` = kernel exception) — *that* it panicked, not *why* (found on titanpocket; see device-titanpocket.md). Read DRAM instead.
-
-### MediaTek: read ramoops straight out of DRAM over the preloader
-
-MediaTek lk passes ramoops on the command line (lk's log in expdb shows `ramoops.mem_address=… ramoops.mem_size=… ramoops.console_size=… ramoops.pmsg_size=…`), runs with `kedump: ddr reserve mode enabled`, and a panic reset is a *warm* reset — so DRAM still holds the dying kernel's log when the preloader comes past on the next loop, and mtkclient's DA can read it:
-
-```
-mtk da peek <mem_address> <mem_size> --filename pstore.bin    # from lk's ramoops.* cmdline
-                                                                # (titanpocket: 0x54410000 0xe0000)
-```
-
-- the kernel needs `CONFIG_PSTORE_RAM=y` (stock MTK defconfigs have it);
-- **catch the preloader while it is bootlooping.** Holding Power to switch off, or the Volume-Down BROM route from a powered-off phone, loses DRAM. Read DRAM first; do expdb and other partitions in a second session;
-- the region is a set of `persistent_ram_buffer` zones, each starting with `DBGC` (0x43474244 LE), then `u32 start`, `u32 size` and a ring buffer. `start == size` means the zone never wrapped; otherwise `size` is the capacity and the oldest byte is at `start`. Look for the console zone and the pmsg zone (Android userspace logging); most others are empty dmesg-dump slots;
-- `loglevel=` does not hide the panic: oops and panic lines are emitted at emergency level.
-
-On the Titan Pocket this gave the whole answer after five flash rounds of initramfs instrumentation had shown nothing: a force-loaded `wlan_drv_gen3` crashing on a struct-layout mismatch 22 s into boot, with pmsg showing the container already up (see device-titanpocket.md; the rule is kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe). A staging-kit `dump-expdb.sh` that does DRAM first, then `mtk r expdb,cache`, and decodes everything is the convenient shape.
-
-### MediaTek: the hardware watchdog
-
-The preloader arms a **hardware watchdog** before handing off; stock Android's init feeds it, ours does not. `CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y` makes the kernel watchdog core pet it until userspace takes over — but only once the driver is loaded, and on MediaTek `mtk_wdt.ko` is a vendor module. Until modules load nothing feeds it, and the SoC resets after ~20–30 s — happily killing a working debug shell (1.9).
-
-Later in boot the same watchdog shows up as a reset every ~90–120 s with **no panic and no oops**:
-
-```
-mtk-wdt 10007000.watchdog: Watchdog enabled (timeout=31 sec, nowayout=0)
-[wdtk] kick watchdog
-[wdtk] kick watchdog        <- then silence, and the journal simply ends
-```
-
-Tells: `wdt_status` non-zero in expdb; a suspiciously regular reset interval; `kick watchdog` intervals against the declared timeout. The journal's last timestamp is the last flush, not the reset.
-
-**Disable it for a debug session** with the standard magic close, first thing every boot (it lasts one boot; verified on MT6789, where uptime went from resetting at ~90–104 s to climbing past 180 s):
-
-```sh
-printf 'V' > /dev/watchdog
-```
-
-This is MediaTek-specific in practice: on the Qualcomm and Tensor ports the watchdog driver (`msm_watchdog`/`qcom_wdt`) is built in. Check `CONFIG_<vendor>_WATCHDOG` in the stock config before assuming.
+MediaTek kernels often have no pstore console and, with USB as a vendor module, no gadget either. Read `expdb` and DRAM over the preloader, and feed or stop the preloader's hardware watchdog: soc-mediatek.md § Debugging a mute device.
 
 ### Recording the initramfs to a spare partition: `initrd_log_fail`
 
@@ -460,8 +414,8 @@ A whole subsystem missing (camera, audio) points at module loading, not the HAL 
 ### Wifi
 
 - A `wifi-module-load.service` modprobing a module that doesn't exist on this device (copy-paste from another port) restart-loops every 2 s — check whether the driver is built in (`CONFIG_MTK_COMBO=y`).
-- MediaTek WMT combo: force-loaded stock vendor modules, firmware path, `/dev/wmtWifi` power-on — hal-userspace.md § MediaTek connectivity. Force-loading is only safe with stock struct layouts (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe).
-- Module-load errors (Halium, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = signature enforcement against a module not signed with this kernel's key — for prebuilt vendor modules disable `CONFIG_MODULE_SIG_FORCE` (Tier B; stock GKI leaves it unset); a port that builds all its own modules can keep it with a signing key pinned in the layer, so kernel and modules agree across rebuilds (sargo, fajita, vince). `"Invalid module format"` = version/config mismatch. Vendor modules that never load on a rebuilt GKI kernel although the CRC check passes: `CONFIG_MODULE_SIG_PROTECT` (kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT). Broadcom `bcmdhd` is best `=m` (picks up the MAC as a module). Legacy Qualcomm (pre-2016): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath` (and see hal-userspace.md § WCNSS).
+- MediaTek WMT combo: force-loaded stock vendor modules, firmware path, `/dev/wmtWifi` power-on — soc-mediatek.md § Connectivity combo. Force-loading is only safe with stock struct layouts (kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe).
+- Module-load errors (Halium, <https://docs.halium.org/en/latest/porting/debug-build/wifi.html>): `"Required key not found"` = signature enforcement against a module not signed with this kernel's key — for prebuilt vendor modules disable `CONFIG_MODULE_SIG_FORCE` (Tier B; stock GKI leaves it unset); a port that builds all its own modules can keep it with a signing key pinned in the layer, so kernel and modules agree across rebuilds (sargo, fajita, vince). `"Invalid module format"` = version/config mismatch. Vendor modules that never load on a rebuilt GKI kernel although the CRC check passes: `CONFIG_MODULE_SIG_PROTECT` (kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT). Broadcom `bcmdhd` is best `=m` (picks up the MAC as a module). Legacy Qualcomm (pre-2016): `echo 1 > /dev/wcnss_wlan`, `echo sta > /sys/module/wlan/parameters/fwpath` (and see soc-qualcomm.md § WCNSS).
 
 #### Regulatory domain: `country 00` and no 5 GHz
 
@@ -564,9 +518,9 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | Hangs at bootloader splash, no console/gadget/pstore | A debug aid in your config broke early boot (fbcon, built-in netconsole) | Method: diff `.config` vs stock |
 | Device resets, nothing visible | Kernel panic | pstore/ramoops (Stage 0) |
 | Reset at the same second of every boot | A subsystem crash with restart level SYSTEM (e.g. modem lost EFS) | dmesg before the reset; battery reading |
-| MediaTek: silent reset ~20–30 s in, `wdt_status` non-zero in expdb | Hardware watchdog unfed (mtk_wdt is a module) | Stage 0 watchdog; 1.9 |
+| MediaTek: silent reset ~20–30 s in, `wdt_status` non-zero in expdb | Hardware watchdog unfed (mtk_wdt is a module) | soc-mediatek.md § The hardware watchdog; 1.9 |
 | MediaTek: reset every ~90–120 s, no panic, journal just ends | 31 s SoC watchdog | `kick watchdog` intervals; `printf 'V' > /dev/watchdog` |
-| MediaTek: reboots ~20–30 s in, lk says `boot reason = 4` / `kernel_panic`, expdb has no kernel log | Panic after userspace started; often a force-loaded vendor module on a struct-layout mismatch | ramoops out of DRAM with `mtk da peek`; kmi-crc-matching.md § Struct layouts |
+| MediaTek: reboots ~20–30 s in, lk says `boot reason = 4` / `kernel_panic`, expdb has no kernel log | Panic after userspace started; often a force-loaded vendor module on a struct-layout mismatch | soc-mediatek.md § Read ramoops straight out of DRAM (`mtk da peek`); kmi-crc-matching.md § Struct layouts |
 | Faillog image booted, partition holds no record | Died before the logger, or after switch_root | `initrd_log_part=`; read DRAM |
 | No USB gadget at all after flash | Kernel/initramfs never ran | unpack the flashed image; 1.6 `skip_initramfs` on A8–A10 Tier B |
 | Repacked image flashes fine, our init never executes | `skip_initramfs` honoured by the vendor kernel | 1.6 |
@@ -615,7 +569,7 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | AIDL HAL "missing" on an A15+ vendor | `ApiLevel` from a dated `ro.board.api_level`, or a HIDL-only daemon | hal-userspace.md |
 | Audio, camera or other subsystems dead; modules not loaded (GKI) | Container's `/vendor_dlkm` is an empty bind | module list check (Stage 4); hal-userspace.md § Vendor kernel modules |
 | Wifi service restart-looping | modprobing a nonexistent module | is the driver built in? |
-| No wifi on MTK; `wmt_loader` errors | WMT modules not loaded, nodes not exposed, power-on not retried | hal-userspace.md § MediaTek connectivity |
+| No wifi on MTK; `wmt_loader` errors | WMT modules not loaded, nodes not exposed, power-on not retried | soc-mediatek.md § Connectivity combo |
 | A unit never runs on one machine, nothing in the journal | Gated on `/sys/module/...` with a built-in driver | Stage 4 wifi |
 | Wi-Fi works but no 5 GHz networks; `iw reg get` says country 00 | No regulatory.db, or the latched early load | `iw reg reload` (Stage 4) |
 | Ping works, TCP hangs | Path problem (often the router's band bridging) | Stage 4 test matrix |
@@ -652,9 +606,9 @@ Look up what gates that command in `hci_core.c` (`hci_init*_req`) and mask the b
 | `No user specified for service 'X', so it would have been root` | Old vendor rc; Android 16 init drops the service | add `user` in an override |
 | Bluetooth: `BluetoothHci::close()` → `__throw_bad_function_call` abort loop, bluebinder times out | initialize never finished; on Qualcomm UART parts a force-started `wcnss_filter` | hal-userspace.md § Bluetooth |
 | `droid-extevdev.c: Unable to open device /dev/input/eventN … Permission denied`; headphones ignored | `pulse` not in group `input` | hal-userspace.md § Audio |
-| `kgsl_get_unmapped_area … failed error -12`; WebAppMgr's GPU thread crashes on every start | Chromium's low-4GB reservation vs a 32-bit-address Adreno | hal-userspace.md § Adreno 4xx on a 3.10 kgsl |
+| `kgsl_get_unmapped_area … failed error -12`; WebAppMgr's GPU thread crashes on every start | Chromium's low-4GB reservation vs a 32-bit-address Adreno | soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl |
 | Wi-Fi scans, every connect fails after 5 s with `result:70 and Status:9` (qcacld) | MFP optional vs `WIPHY_FLAG_SUPPORTS_FW_ROAM` | kernel-porting.md § Legacy 3.x kernels |
-| `init: Service 'lmkd' … received SIGABRT` every 5 s on a 3.x kernel | libmemevents needs BPF | hal-userspace.md § A LineageOS 21 vendor without VNDK |
+| `init: Service 'lmkd' … received SIGABRT` every 5 s on a 3.x kernel | libmemevents needs BPF | soc-qualcomm.md § A LineageOS 21 vendor without VNDK |
 
 ## Tooling appendix
 

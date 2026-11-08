@@ -161,10 +161,7 @@ differences:
    (`has-slot:vbmeta_system` is empty; flashing it gives `partition does not
    exist`). Harmless: `--disable-verity --disable-verification` on the top-level
    vbmeta disables the chain.
-2. **Lock-state check first.** A locked MediaTek lk does not report itself locked;
-   it refuses critical partitions individually with `FAILED (remote: 'No support by
-   lock control')`. If `flashing get_unlock_ability` is `false`, the unlock is
-   refused too — that switch only exists inside booted Android.
+2. **Lock-state check first** (soc-mediatek.md § Boot chain: preloader and lk).
 3. **Partition-size check** before flashing userdata (the scatter's 3 GiB is
    nominal).
 4. **No `fastboot -w`** (fails on the host: `make_f2fs failed`), on top of the Q25's
@@ -177,11 +174,9 @@ Device specifics:
   select with **Vol Down**. BROM: hold **Volume Down** through a forced restart
   (confirmed on hardware); a device in a reset loop also presents the preloader on
   every cycle for mtkclient.
-- It does not power off with a long press while USB is connected (MediaTek
-  auto-boots on USB power).
-- `fastboot getvar current-slot` right after `--set-active` can report the old
-  slot; flash `boot_b`/`vbmeta_b` explicitly. A slot that failed to boot is marked
-  `slot-unbootable` and lk silently falls back; `--set-active` does not clear it.
+- It does not power off with a long press while USB is connected, and `current-slot`
+  can misreport right after `--set-active`, so flash `boot_b`/`vbmeta_b` explicitly
+  (soc-mediatek.md § Boot chain: preloader and lk).
 - `vendor_dlkm` is inside `super`, not a fastboot partition. For LuneOS only
   `boot_b`, `vbmeta_b` and `userdata` are flashed.
 - Full recovery that worked: flash stock boot/vendor_boot/dtbo/vbmeta to the slot,
@@ -272,8 +267,7 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
 - **Fingerprint:** `mp01.conf` declares it (owner confirmed the reader works), while
   `stubbed-services-mp01` stubs both HALs for suspend; whichever is out of date has
   to be fixed. Needs a working TEE supplicant.
-- **WiFi power-on race** with `wmt_launcher` (hal-userspace.md § MediaTek
-  connectivity).
+- **WiFi power-on race** with `wmt_launcher` (soc-mediatek.md § Connectivity combo).
 - **Web apps cropped in portrait** (548x600 of a 600x657 card). Compositor side
   measured consistent (buffer, destination, source and item all 600x657); Chromium
   reports `screen` as unrotated 800x600 `landscape-primary`. Look at the web
@@ -287,7 +281,7 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
 ## Device-specific traps
 
 - **`expdb` is the way in** (`dump-expdb.sh` in the port's tool directory wraps
-  mtkclient; debugging.md § MediaTek: `expdb` when there is no pstore and no
+  mtkclient; soc-mediatek.md § `expdb` when there is no pstore and no
   gadget). It settled what three rounds of guessing had not:
 
   ```
@@ -303,7 +297,7 @@ anything visibly broken. `libsndcardparser.so not found` from the vendor
 - **Watchdog:** `mtk-wdt` with a 31 s timeout resets the device every ~90-120 s with
   no panic in the journal; `printf 'V' > /dev/watchdog` disables it for that boot
   (verified: uptime past 180 s). Check `/proc/uptime` in the same command as any
-  measurement (debugging.md § MediaTek: the hardware watchdog).
+  measurement (soc-mediatek.md § The hardware watchdog).
 - **USB IDs:** `0e8d:201c` is fastboot, `0e8d:2000` the preloader (its own
   `/dev/ttyACM0` spews `READY` — not our console); ours is **`18d1:d001`** ("Halium
   initrd / Failed to boot"). The gadget came up as ECM + ACM, not adb (debugging.md

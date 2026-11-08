@@ -276,7 +276,7 @@ three recipes before goyavewifi spent rounds finding it again.
    the first boot: `for f in vendor/lib/*.so; do readelf -d $f | grep -q 'NEEDED.*libft2' && echo $f; done`
    lists who wants it (the result is `libhwui.so`, `libpdfium.so`, or both).
    The same fix as the framework-symbol shims in item 3 usually goes with it for the same libraries
-   (`HALIUM_LEGACY_SHIM_TARGETS`, hal-userspace.md § Display: three gaps).
+   (`HALIUM_LEGACY_SHIM_TARGETS`, soc-qualcomm.md § Display: three gaps).
 
 For 3 and 4 the fix belongs to the daemon that needs it: putting LineageOS's system libbinder into
 `/vendor/lib*` would replace it for every vendor process. Give that daemon a private directory and

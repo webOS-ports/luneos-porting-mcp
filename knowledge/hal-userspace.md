@@ -98,21 +98,6 @@ every other A12+ GSI.
   G68 in Aug 2026 but has no G78 model entry yet — "small mesa patch + GPU DT plumbing"
   away, unaccelerated today.
 
-### Adreno 4xx on a 3.10 kgsl: Chromium's low-4GB reservation
-
-The 3.10 kgsl of the Adreno 4xx (Nexus 5X, msm8992) can only place a CPU-mapped GPU buffer below
-`KGSL_SVM_UPPER_BOUND` (0xc0000000 - 16 MB): the GPU addresses 32 bits. Chromium 151's PartitionAlloc
-reserves the whole first 4 GB + 1 MB of every 64-bit Linux process as an inaccessible "zero segment"
-(`enable_user_space_zero_segment`, on by default; V8's sandbox reserves the same range itself when
-PartitionAlloc has not). So every GPU mapping in WebAppMgr and the browser fails, EGL never
-initialises and the in-process GPU thread crashes on every start, while the compositor (no Chromium)
-draws fine. Tells: `kgsl_get_unmapped_area| pid N ... failed error -12` in dmesg, and
-`00010000-100100000 ---p ... [anon:partition_alloc]` as the first line of WebAppMgr's
-`/proc/<pid>/maps`. meta-luneos patch `0002-Halium-let-a-device-opt-out-of-the-low-4GB-reservation`
-skips both reservations when `/etc/webruntime/no-low-4gb-reservation` exists; a machine that needs it
-installs that file. Expect it on any 64-bit device whose GPU driver keeps an SVM range below 4 GB
-(older kgsl for 32-bit-address Adreno parts); newer kgsl puts 64-bit processes' SVM above 4 GB.
-
 ## Derive, don't ship: the start-android-hals mechanism
 
 `start-android-hals.sh` implements the derivations in architecture.md § The adaptation
@@ -318,65 +303,8 @@ needed, and default `VENDOR_DLKM_MODULES=none`. With the vendor loader working,
 Check inside the container: `ls /vendor/lib/modules/modules.load`.
 
 Known hazards of the full list, still worth watching on a new device: the
-connsys family (§ MediaTek connectivity) and `ccci_md_all`, which once wedged PID 1 on the MP01
+connsys family (soc-mediatek.md § Connectivity combo) and `ccci_md_all`, which once wedged PID 1 on the MP01
 (it did not with the vendor's own order).
-
-## MediaTek connectivity (WMT/connac combo)
-
-The MTK WMT combo driver (wifi/BT/GPS/FM core) is not in the GPL kernel drop — only
-built-in adapter shims. The real drivers are stock vendor modules
-(`/vendor/lib/modules`: `wmt_drv`, `wmt_chrdev_wifi`, `wlan_drv_gen2`, `bt_drv`,
-`gps_drv`) whose CRCs disagree with a reconfigured kernel (`module_layout`), so the kernel
-fragment sets `CONFIG_MODULE_FORCE_LOAD=y` and they are force-loaded. That worked on
-mindphone, and is only safe while every struct those modules touch keeps the stock layout
-(kmi-crc-matching.md § Force-loading prebuilt modules, and when it is safe; the Titan Pocket counter-example is in device-titanpocket.md).
-Set `firmware_class.path` to `/android/vendor/firmware` before loading, and stage the
-modules in a private tree under `/run`, **not** `/lib/modules/$(uname -r)` — udev coldplug
-autoloads from there and bootloops the device on the next boot.
-
-The generic recipe **`meta-android/recipes-core/mtk-connectivity`** covers the whole
-MediaTek family: three condition-gated systemd units + two helpers, shipped into every
-halium rootfs via `android-system RDEPENDS += mtk-connectivity`, inert on non-MTK:
-
-- `mtk-connectivity-modules.service` → `mtk-load-modules.sh`: force-load the
-  connectivity modules in an order derived from the vendor, no hardcoded list. WMT era
-  (mt6739, Android 11): the family is in `modules.load`, loaded in that order. connac era
-  (mt6789, Android 12 GKI): only `connadp` and `c2k_usb_f_via_gps` are in `modules.load`;
-  the drivers are `insmod`ed by the vendor rc files (`wmt_drv` + `connfem` `on boot`, the
-  rest behind `vendor.connsys.driver.ready=yes`, property-templated file names), so the
-  script reads those rc files and the vendor properties (device-q25.md).
-- `mtk-connectivity-wifi.service`: retry `echo 1 > /dev/wmtWifi` until `wlan0` exists
-  (the container's wmt daemons must patch the CONSYS firmware first).
-- `mtk-connectivity-bt.service`: seeds the BT address and node ownership and starts the
-  BT HAL (e.g. `android.hardware.bluetooth@1.0-service`, driven via bluebinder; § Bluetooth).
-
-The container needs the MTK connectivity `/dev` nodes exposed: `wmt_loader` could not open
-`/dev/wmtdetect` until they were.
-
-**Gate the units on the character devices as well as on `.ko` files.** `CONFIG_MTK_COMBO=y`
-(radon) compiles the combo driver in, so no `wmt_drv.ko` and no `/sys/module/wlan*` ever
-exist and `.ko`-only units silently never run. The units OR together `.ko` globs (in
-`vendor` and `vendor_dlkm`, e.g. `bt_drv*.ko` for the Q25's `bt_drv_connac1x.ko`) and
-`ConditionPathExists=|/dev/stpbt`, `|/dev/conninfra_dev`, `|/dev/wmtWifi` (general rule:
-debugging.md, "Never gate a unit on `/sys/module/<driver>`"). In built-in mode the driver
-also waits for `CONNINFRA_IOCTL_DO_MODULE_INIT` before any sub-driver comes up.
-
-**GKI-era MediaTek (MT6789):**
-
-- **The modules live in `vendor_dlkm`, not `vendor`.** All three units' conditions
-  only checked `/android/vendor/lib/modules`, so on the MP01 every unit was skipped
-  with "no trigger condition checks were met". They now also check
-  `/android/vendor_dlkm/lib/modules` (`meta-smartphone` `9d68df46`).
-- **Load order matters: WiFi and BT modules loaded together in the wrong order
-  corrupt the DMASHDL queues the two share** (`RST_FW_DL_FAIL` every ~6 s, forever).
-  Follow the vendor's two-stage `init.*.rc` order (`wmt_drv` + `connfem` on boot,
-  the rest on `vendor.connsys.driver.ready=yes`), never a generic dependency loader.
-- **WiFi power-on races `wmt_launcher`.** `wlan_drv` powers the chip as soon as
-  it loads; if `wmt_launcher` has not yet set up the host interface, power-on fails
-  with `wmt_core_stp_init: no hif info!` (`-8`) and asserts a whole-chip reset.
-  When the reset recovers, BT/WiFi/GPS all come up afterwards and WiFi works;
-  when it does not, no `wlan0`. Proper fix (open): power WiFi only after
-  `wmt_launcher`'s `WMT_open`.
 
 ## Audio
 
@@ -417,16 +345,7 @@ from the APEX, which lacks `get_trace_enabled_tags()` that the GSI's
 fine on the MP01 — so test, do not predict. Set it with a machine drop-in
 (own-rootfs machines) or `deviceinfo_hybris_prefer_vndk` (shared rootfs).
 
-**MediaTek MT6789 audio:** the sound card only registers once `mtk-btcvsd`
-(component `mtk-btcvsd-snd`) is loaded — without it `mt6789-mt6366` defers
-forever (`snd_soc_register_card fail -517`); find such components with the deferred-card
-method in debugging.md § Stage 4 — Subsystems (Audio). The DL paths run at 48 kHz
-(`mtk_afe_fe_hw_params() ... rate 48000`); at pulseaudio's default 44.1 kHz the HAL
-resamples and playback sounds slightly off → `deviceinfo_audio_sample_rate="48000"`.
-`libsndcardparser.so not found` from the vendor `libtinycompress.so` is harmless noise.
-The DT may describe second-source amplifier parts that are not fitted (`chip id check
-fail`); see device-mp01.md. Pulseaudio's unit restarts five times within a second on a
-crash and then gives up, taking `audiod` with it.
+**MediaTek MT6789 audio** (the `mtk-btcvsd` card dependency, 48 kHz): soc-mediatek.md § Audio.
 
 `module-droid-hidl` execs `/usr/libexec/audiosystem-passthrough/audiosystem-passthrough`,
 so the *runtime* dependency on the package that ships it must exist, not only a build-time
@@ -509,12 +428,10 @@ by-partlabel paths, Qualcomm `bootdevice/by-name` structure) are in debugging.md
 LuneOS reaches the controller through **bluebinder**, which proxies the vendor BT HAL into a
 vhci `hci0` for BlueZ.
 
-- **Node ownership:** the vendor's ueventd.rc says `/dev/stpbt` is `bluetooth:bluetooth`;
-  the container's ueventd made it `system:system`, so the HAL could not open it. Chown it
-  inside the container, then start the BT HAL (after android-system).
-- **BT address on MediaTek:** `bluebinder_post.sh` knows no MTK source; the MAC is the
-  first 6 bytes of `/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr`, written once to
-  `/var/lib/bluetooth/board-address` (`mtk-bt-address.sh`).
+- **Node ownership and the BT address** come from the vendor: the vendor's ueventd decides
+  who owns the BT node, and `bluebinder_post.sh` reads the address from a vendor file. The
+  MediaTek case (`/dev/stpbt`, the nvdata `BT_Addr` file): soc-mediatek.md § Connectivity
+  combo.
 - **BT HAL name is per vendor.** Do not hardcode `bluetooth-1-0`; the MP01 has
   `bluetooth-1-1`. `mtk-bt-bringup.sh` reads it from the vendor rc
   (`service <name> .../android.hardware.bluetooth@*`).
@@ -540,7 +457,7 @@ vhci `hci0` for BlueZ.
 - **rfkill soft-block that comes back:** `systemd-rfkill` restores saved state from
   `/var/lib/systemd/rfkill/` on every boot, so a state saved while blocked re-blocks after
   any manual `rfkill unblock` (`Failed to set mode: Blocked through rfkill (0x12)`).
-- **Samsung EFS address:** see § Legacy Qualcomm vendors below.
+- **Samsung EFS address:** see soc-qualcomm.md § Samsung EFS and the Bluetooth address.
 - **A vendor with no BT service at all.** A LineageOS vendor whose manifest declares
   `android.hardware.bluetooth@1.0` passthrough loaded the HAL in its Bluetooth app; ship the AOSP
   default `android.hardware.bluetooth@1.0-service` and declare it hwbinder (gsi-building.md
@@ -576,30 +493,7 @@ does not force-start, and leave out the rc's `interface` line so a lookup cannot
 check the flasher's rc itself: the Nexus 5X's has no `user`, which Android 16 init rejects, so the hub
 was never flashed and the kernel logged `nanohub_kthread: err_cnt` every second.
 
-## Legacy Qualcomm vendors on the 16.0 GSI
-
-Found on a3-2015-halium (a LineageOS 18.1, VNDK 30, MSM8916 vendor converted by
-halium-legacy-vendor; see device-a3-2015-halium.md). Each item is generic to legacy
-Qualcomm vendors.
-
-### Display: three gaps, each hiding the next
-
-1. The composer HAL links framework copies (libhwui, libmedia) that the converter puts in /vendor/lib;
-   libhwui needs **libft2.so**, which the GSI's LLNDK list names but the container's vendor linker does
-   not hand over. Converter revision 32 brings it along by itself; before that it took
-   `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`. The rule, the other route to it (libpdfium) and the
-   silent symptom are in gsi-building.md § Before deriving, item 5.
-2. Those copies want full-libbinder/libmedia symbols (`android::MetaDataBase::writeToParcel`):
-   `HALIUM_LEGACY_SHIM_TARGETS` (halium-legacy-shim).
-3. **gralloc in sphal** (`gralloc.msm89xx.so` -> libqdutils -> libui, libbinder, both VNDK-core) cannot
-   load, media.swcodec aborts "gralloc-mapper is missing", and everything behind the Codec2 store
-   (droidmedia, gst-droid, the compositor) waits for ever. Fixed GSI-side in
-   `system/linkerconfig/generator/variableloader.cc` for VNDK 28 and 30 (branch luneos/sphal-vndk-legacy).
-   A quick way to prove it on a running device: append `:libui.so:libbinder.so` to the
-   `namespace.sphal.link.vndk.shared_libs` lines of the container's generated /linkerconfig/*ld.config.txt
-   (tmpfs) and restart media.swcodec.
-
-### Text relocations: the Android 16 linker refuses them
+## Text relocations: the Android 16 linker refuses them
 
 Vendor libraries with `TEXTREL` (`readelf -d lib.so | grep TEXTREL`) do not load in a process whose target
 SDK is 23 or later. On the A3 only three had them, all camera: libmmcamera_faceproc.so (dlopen()ed by
@@ -610,73 +504,9 @@ preload it into the affected services with an rc `override` + `setenv LD_PRELOAD
 wrapper). `android-system-image-legacy-a9-shim.inc` ships just that shim. Scan a new vendor once:
 `for f in vendor/lib/*.so vendor/lib/hw/*.so; do readelf -d $f | grep -q TEXTREL && echo $f; done`.
 
-### Camera HAL1: provider service, and a deadlock in minimediaservice
+## SoC-specific userspace
 
-- A LineageOS vendor may declare `android.hardware.camera.provider@2.4` **passthrough** only, for its own
-  cameraserver to load in-process. The GSI needs the service: build
-  `android.hardware.camera.provider@2.4-service` in the vendor's own Android tree (matching VNDK), ship it
-  in the device tarball, and list the provider in `HALIUM_LEGACY_BINDERIZED_HALS`.
-- **takePicture() deadlock:** minimediaservice (droidmedia) serves the HAL's ICameraDeviceCallback with
-  libhidl's default of one HwBinder thread. The QCamera2 HAL's capture thread holds its API lock and calls
-  `unregisterMemory()` back while that thread is in the shutter notification, calling `disableMsgType()`
-  into the HAL. Fix in droidmedia minimedia.cpp: `hardware::configureRpcThreadpool(5, false)`, as
-  cameraserver does. Diagnose with `debuggerd -b <container pid>` on the provider and on minimediaservice.
-- Camera service "rejected (too many other clients connecting)" after such a hang: restart
-  `vendor.camera-provider-2-4`, `qcamerasvr` and `camera_service` (ctl.restart) instead of rebooting.
-
-### WCNSS (pronto): Wi-Fi and Bluetooth share one chip
-
-- Built-in prima starts on `echo sta > /sys/module/wlan/parameters/fwpath`, only once the WCNSS control
-  channel is up: wait until `/sys/devices/soc.0/a000000.qcom,wcnss-wlan/wcnss_version` stops reading
-  `INVALID` (before that the write fails with ENODEV after ~12 s, and repeating it does not help).
-- start-android-hals force-starts disabled services; the vendor's **hciattach** (init.qcom.bt.sh) among
-  them powers WCNSS through the Bluetooth path before wcnss_service has triggered it: "regulator get of
-  riva_vddmx failed (-19)", "Failed to execute wcnss_wlan_power", and then neither WLAN nor BT works. Put
-  it in `deviceinfo_android_skip_services`; the BT HAL starts it itself later.
-- With EFS mounted, wcnss_service hands the firmware the real MAC (/efs/wifi/.mac.info).
-
-### Samsung EFS and the Bluetooth address
-
-- `/efs` may have no fstab line at all (LineageOS a3lte). Ship a vendor `/etc/fstab.efs`; mount-android.sh
-  reads every /vendor/etc/fstab* and mounts it at /android/efs. Read-only is enough.
-- The BT HAL aborts in initialize() with "Open: No Bluetooth Address!" without `ro.bt.bdaddr_path` (a
-  system.prop property: `HALIUM_LEGACY_SYSTEM_PROP_PREFIXES += "ro.bt. ..."`) or when it cannot read the
-  file (radio:net_bt_stack 0640): give the HAL group 3008 in an rc override. **By number**: the 16.0 init
-  no longer knows `net_bt_stack` ("Unable to decode GID"), and the whole override is then dropped.
-- bluebinder_post.sh reads that property's path on the host; bluebinder patch 0004 (meta-luneos) falls
-  back to /android<path>.
-
-### A LineageOS 21 vendor without VNDK (bullhead, msm8992)
-
-Found on bullhead (device-bullhead.md): a LineageOS 21 vendor built with `RELEASE_DEPRECATE_VNDK`
-(no `ro.vndk.version`, its own libbinder/libhidlbase, LLNDK only from the GSI) under the arm64 16.0
-GSI. The derive-time checks are in gsi-building.md § Before deriving; the per-subsystem results:
-
-- **Camera.** `mm-qcamera-daemon` (32-bit) needs `libicu.so` through `libharfbuzz_ng.so`, and the
-  provider's `camera.msm8992.so` → `libgui.so` needs the system libbinder (`PermissionCache`). Both
-  services got a private directory of LineageOS 21's own `/system/lib` libraries (libbinder,
-  libstagefright_foundation, libprocessgroup, libsqlite), its i18n APEX's ICU libraries and the GSI's
-  `libdl_android.so`, through `setenv LD_LIBRARY_PATH`, plus the daemon's LineageOS shims
-  (`liboemcamera.so|libshim_sensor.so`, `mm-qcamera-daemon|libc_mutexdestroy_shim.so`) through
-  `LD_PRELOAD`. The HAL then streamed (4032x3024, AF, face detection). On the host side libdroidmedia
-  needs the media APEXes mounted (`/etc/android-host-apexes`) and
-  `libcom.android.media.swcodec.apexcodecs.so` linked from `/odm/lib64` (from `/odm/lib` on 32-bit),
-  as on hammerhead; without them `library "libcom.android.media.swcodec.apexcodecs.so" not found`.
-- **RIL, ATFWD-daemon, cnd.** LineageOS shims (`libril-qc-qmi-1.so|libaudioclient_shim.so`,
-  `ATFWD-daemon|libshim_dpmframework.so`, `libcne.so|libshim_dpmframework.so`). The audioclient shim
-  pulls the vendor's libaudioclient and libmediautils, which want `checkCallingPermission` from the
-  system libbinder: rild needs LineageOS's 64-bit system libbinder in a private directory too. The
-  vendor's `cnd` has no `user` and is rejected by Android 16 init.
-- **lmkd on a 3.x kernel** aborts in a static constructor of `libmemevents` (BPF memory events) before
-  `main`, every time, and init restarts it every 5 s (`init.svc_debug.no_fatal.lmkd` only stops the
-  reboot). LuneOS runs no framework for it to serve: stop it from
-  `on property:init.svc.lmkd=restarting` (an `/odm` override of this system service is refused).
-- **Wi-Fi, qcacld-2.0 built in.** Like prima it waits for `sta` in
-  `/sys/module/wlan/parameters/fwpath`, which Android's Wi-Fi HAL writes; `wlan-dynamic-start`
-  (meta-luneos) writes it when there is no `/dev/wlan` and the `cnss` platform driver is bound. Scans
-  then work but every connect to a PMF-capable AP fails after 5 s (`connection failed with <bssid>
-  result:70 and Status:9` = `eCSR_ROAM_RESULT_SCAN_FOR_SSID_FAILURE`, `CTRL-EVENT-ASSOC-REJECT`):
-  kernel-porting.md § Legacy 3.x kernels has the cause and the one-line fix.
+What only one SoC family needs lives in its own topic: the MediaTek connectivity combo, the A12 vendor keys, `stp_dump` and MT6789 audio in soc-mediatek.md; legacy Qualcomm vendors (display gaps, HAL1 camera, WCNSS, Samsung EFS, a LineageOS 21 vendor without VNDK) and the Adreno 4xx low-4GB reservation in soc-qualcomm.md.
 
 ## webOS media server (umediaserver) on Halium: three independent ways to play nothing
 

@@ -309,7 +309,8 @@ const PROMPTS = {
             `I want to port LuneOS to a new device${a.codename ? ` (codename: ${a.codename})` : ""}.` +
             (a.details ? ` Known details: ${a.details}.` : "") +
             "\n\nUse the luneos-mcp knowledge base. Read these topics first: architecture, " +
-            "kernel-porting, boot-images, yocto, nyx-modules, gsi-building, installing. " +
+            "kernel-porting, boot-images, yocto, nyx-modules, gsi-building, installing, and soc-mediatek or " +
+            "soc-qualcomm when the device is on one of those SoC families. " +
             "Then guide me through, in order:\n" +
             "1. Classify the device: Tier A (GKI, Android 12+/kernel 5.10+) or Tier B (legacy vendor kernel); " +
             "A12-launch vs A13-launch boot layout (init_boot or not); 32-bit vs 64-bit; anti-rollback state.\n" +
@@ -359,7 +360,8 @@ const PROMPTS = {
             (a.symptom ? ` Symptom: ${a.symptom}.` : "") +
             "\n\nUse the luneos-mcp knowledge base: read the 'debugging' topic (and the matching " +
             "device-<codename> topic if one exists) and triage stage by stage:\n" +
-            "Stage 0 — kernel: ramoops/pstore console (MediaTek: expdb), then the debug boot image " +
+            "Stage 0 — kernel: ramoops/pstore console (MediaTek: expdb and DRAM over the preloader, " +
+            "soc-mediatek), then the debug boot image " +
             "(fastboot boot where the bootloader supports it, else flash it).\n" +
             "Stage 1 — initramfs: module load order, module cmdline params, async storage probe, " +
             "userdata resize; reach the debug gadget (RNDIS + telnet 192.168.2.15 by default, adb " +

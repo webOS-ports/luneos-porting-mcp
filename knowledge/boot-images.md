@@ -97,24 +97,7 @@ value `KERNEL_BOOTIMAGE_INITRAMFS_OFFSET`.
 
 ## Header v0 with an appended device tree (Qualcomm aboot)
 
-Pre-Android-10 Qualcomm devices carry the device tree **concatenated onto the
-compressed kernel** (`BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb`) rather than in a
-header section. There is no `dtb` field in a v0 header and often no `dtbo.img`.
-aboot scans the blobs after the gzip stream and selects one by matching
-`qcom,msm-id` (SoC id) and `qcom,board-id` (platform/subtype) against what the
-hardware reports — so the set must contain the board, and only needs to contain
-the board.
-
-To read them back out of an image, decompress the gzip member and scan the
-remainder for the FDT magic `d00dfeed`; `dtc -I dtb -O dts` then shows the
-`model` / `msm-id` / `board-id` of each. Comparing that list against a working
-image for the same device is the fastest way to confirm a board match.
-
-`abootimg` is what builds v0 here, and it **defaults to 2048-byte pages and takes
-no notice of `ANDROID_BOOTIMG_PAGESIZE`** — a 4096-byte-page v0 device needs
-`ANDROID_BOOTIMG_EXTRA_ABOOTIMG_ARGS = "-c pagesize=4096"` or the sections land at
-the wrong offsets. (Verified: `abootimg -c pagesize=4096` does produce a correct v0
-header.) Only `android_bootimg_v2()` reads the pagesize variable.
+Pre-Android-10 Qualcomm devices append the device trees to the compressed kernel; aboot picks one by `qcom,msm-id`/`qcom,board-id`. Reading them back, the `abootimg` page-size trap and QCDT: soc-qualcomm.md § Header v0/v1 and appended device trees.
 
 ## Class 1 — legacy header v2 (no vendor_boot)
 
@@ -155,7 +138,8 @@ Read the stock `vbmeta.img` (`avbtool info_image`) before flashing. If it is sig
 verification enforced (`flags 0`) and its descriptors chain `boot` — the stock boot.img
 then carries its own vbmeta in an `AVBf` footer — a self-built boot image will **not**
 verify; with the bootloader unlocked, flash a verification-disabled vbmeta (flags 2 vs
-3: see installing.md). MTK lk in unlocked/orange state then boots the unsigned image. An
+3: see installing.md). MediaTek lk in orange state then boots the unsigned image (soc-mediatek.md § Boot chain:
+preloader and lk). An
 unsigned hash footer is optional once verification is off.
 
 The opposite case exists too: check whether the community ROM that already boots on the

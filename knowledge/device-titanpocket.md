@@ -175,11 +175,11 @@ Fastboot (bootloader must be unlocked). Kit: `boot-titanpocket-luneos.img`,
   flashes vbmeta → boot → userdata (wiped) → reboot.
 - `flash-boot.sh --normal|--debug` (default: faillog) updates vbmeta + boot only, keeping
   userdata.
-- No `fastboot boot`: MediaTek lk frequently lacks it, so the debug image is flashed.
+- No `fastboot boot` (soc-mediatek.md § Boot chain: preloader and lk), so the debug image is flashed.
 - Revert: `fastboot flash vbmeta vbmeta-stock.img`, `fastboot flash boot boot-stock.img`,
   `fastboot -w` (both from the 2024-05-14 ROM; an older firmware should use its own). If the
   phone does not enumerate, SP Flash Tool or mtkclient over the preloader: write `vbmeta`,
-  `boot` and `userdata` only, never `preloader` (installing.md § MediaTek BROM/preloader).
+  `boot` and `userdata` only, never `preloader` (soc-mediatek.md § Install over BROM/preloader).
 
 ## Subsystem notes
 
@@ -222,7 +222,7 @@ gave up for the boot. biomd now waits up to 30 s.
 **Debugging a bootloop.** Nothing enumerates on USB when it bootloops, there is no pstore
 console to read afterwards, and expdb's kedump region came back as zeros (twice) while lk's
 own log showed `lk boot reason = 4` (`kernel_panic`, `exp_type 0x2`). What worked (method:
-debugging.md § MediaTek: read ramoops straight out of DRAM over the preloader):
+soc-mediatek.md § Read ramoops straight out of DRAM over the preloader):
 
 - `mtk da peek 0x54410000 0xe0000 --filename pstore.bin`, catching the preloader **while it
   bootloops** (holding Power or the Volume-Down BROM route from power-off loses DRAM). The

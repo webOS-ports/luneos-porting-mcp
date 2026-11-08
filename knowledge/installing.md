@@ -97,41 +97,11 @@ no-op there), and q25 and mp01 keep Android on slot A and LuneOS on slot B on pu
 
 ### MediaTek BROM/preloader: SP Flash Tool / mtkclient, no fastboot
 
-Some MediaTek devices are flashed over the BROM/preloader link only — SP Flash Tool on
-Windows, `mtkclient` on Linux — with no fastboot step and no `fastboot getvar` to
-interrogate the device. Rules (found on radon, the FuriPhone FLX1s; see
-device-radon.md):
-
-- Write partitions **by name** (`mtk w <name> <file>`), never by offset (`wo`/`wf`): a
-  wrong offset overwrites what follows, and on these SoCs that can include the
-  preloader — the one genuinely hard-to-recover MediaTek brick.
-- Partition sizes come from `mtk printgpt`; the active slot lives in `misc` and is
-  unknowable from the host, so write both slots; unlock state is not exposed.
-- **Read the vendor's own flash package before deciding a device needs no vbmeta** —
-  a kernel package's "no vbmeta" setting says nothing about what the flash package
-  writes.
-- **Scatter-file sizes for the LAST partition are nominal** (`userdata` declared 3 GiB on
-  MT6877 and MT6789 against far larger real partitions); treat a reported `userdata` at or
-  below the nominal figure as suspect and ask, rather than refusing.
-- **MTK lk does not verify the boot header's SHA-1 `id` field**; do not chase an `id`
-  mismatch on a MediaTek device.
-- `expdb` is the debugging channel when USB never comes up, readable over the same link
-  (debugging.md § Stage 0); save a baseline from a healthy phone first.
-- When no factory image is published, back up `boot_a`/`boot_b` before flashing; that
-  is the only cheap way back.
+Some MediaTek devices are flashed only over the BROM/preloader link. The rules (write by name, never `preloader`, nominal scatter sizes, back up `boot_a`/`boot_b`): soc-mediatek.md § Install over BROM/preloader.
 
 ### lk2nd (old Qualcomm devices with a Samsung or other locked SBL)
 
-- lk2nd lives in the first 512 KiB of the boot partition and boots the real boot image
-  from 0x80000. `fastboot flash boot` inside lk2nd writes behind it; `fastboot boot`
-  RAM-boots and passes the previous bootloader's arguments on (including
-  `androidboot.mode=charger`).
-- **Never dd a boot image to the start of the partition** — it overwrites lk2nd. Keep a
-  copy of lk2nd's 512 KiB; restore over Samsung Download mode with
-  `heimdall flash --BOOT <lk2nd 512 KiB + boot.img>`.
-
-Device detail (charger-mode boots on the Samsung SBL, the postinst that did overwrite
-lk2nd): device-a3-2015-halium.md.
+lk2nd sits in the first 512 KiB of `boot`; never dd a boot image over it. Rules and recovery: soc-qualcomm.md § lk2nd.
 
 ### Samsung Download mode (Odin, TWRP)
 

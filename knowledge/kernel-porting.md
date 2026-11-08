@@ -292,80 +292,7 @@ Before a long patch series, **match the toolchain to the Android generation**
 (Droidian docs): Droidian packages clang for Android 6.0/9.0/10.0/12.0/14.0 with a
 gcc-4.9 fallback, and its rule of thumb is that 4.4+ kernels should compile with
 clang. An era-matched compiler sidesteps most of the -Werror/new-keyword breakage
-a modern host toolchain provokes. On Qualcomm trees, build with the toolchain
-family the tree's own `build.config.common` names: GCC miscompiles the
-register-pinned SCM call (kmi-crc-matching.md § Step 4). **Unresolved:** whether that
-holds for every Qualcomm tree. The evidence is sunfish's msm-4.14 `scm.c`; athena (CAF
-4.19, hardware-verified) and a3-2015-halium build with OE's GCC 15, as do surya, fajita
-and vince (not yet run on hardware).
-
-### The appended-DTB glob trap (CAF arm64 trees)
-
-`CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES` exists so a product can append only
-the device trees it needs. In a correct tree `arch/arm64/boot/Makefile` honours it:
-
-```make
-DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES))
-ifneq ($(DTB_NAMES),)
-DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
-DTB_OBJS := $(addprefix $(obj)/dts/,$(DTB_LIST))      # <- the branch that matters
-else
-DTB_OBJS := $(shell find -L $(obj)/dts/ -name \*.dtb)
-endif
-```
-
-**Some vendor forks resolve `DTB_LIST` and then never use it**, leaving
-`Image.gz-dtb` depending on the bare `find` — so the trim knob is decorative and
-every board's dtb is appended. On an SDM660 tree that is 27 blobs / ~8 MB, of which
-one is wanted, and it is enough on its own to blow the kernel/ramdisk window
-(boot-images.md). Check for the `ifneq ($(DTB_NAMES),)` branch before trusting the
-config; UBports' `android_kernel_xiaomi_sdm660` has it, tim-ecoder's
-`sdm660-4p19` did not.
-
-Enabling the parent `CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE` also rewrites
-`KBUILD_IMAGE` to `$(KBUILD_IMAGE)-dtb` and surfaces a Kconfig *choice*; pin
-`CONFIG_IMG_GZ_DTB=y` rather than relying on first-entry-wins. Name the dtb by its
-path under `$(obj)/dts/` — e.g. `"vendor/qcom/sdm660-internal-codec-mtp-athena"`.
-
-### Building a 4.19 CAF tree with a modern GCC and Make
-
-Two traps that are not about the kernel at all (found on athena; see
-device-athena.md):
-
-- **GNU Make 4.4** (what OE ships as `make-native`) fails every `techpack/audio`
-  subdirectory with `scripts/Makefile.lib:408: *** prerequisites cannot be defined
-  in recipes`. Two causes: directives inside `ifeq` blocks indented with **TABs**
-  (Make 4.4 reads those as recipe lines), and a bare `export` after each
-  `include <soc>auto.conf` — Make 4.4 changed export semantics, and exporting
-  kbuild's multi-line command macros wholesale makes the sub-make re-parse them as
-  makefile text. Replace the bare `export` with the explicit
-  `export $(shell sed 's/=.*//' <the conf just included>)`.
-- **`CONFIG_CC_WERROR=y` + GCC 12+** turns long-standing vendor patterns into ~90
-  build failures. Keep `-Werror` and demote only the benign classes via
-  `$(call cc-option,-Wno-error=<x>)`: `format`, `format-extra-args`, `address`,
-  `unused-variable`, `maybe-uninitialized`, `unused-result`, `enum-int-mismatch`,
-  `attributes`, `parentheses`, `bool-operation`, `duplicate-decl-specifier`,
-  `misleading-indentation`, plus `missing-attributes` and `array-parameter` once
-  you build modules (qcacld-3.0). Vendor Makefiles carrying **clang-only**
-  `-Wno-error=` spellings (`vla-extension`, `typedef-redefinition`,
-  `non-literal-null-conversion`, `fortify-source`) must be wrapped in `cc-option`:
-  GCC rejects an unknown `-Wno-error=` outright rather than ignoring it.
-
-GCC's stricter analysis is worth the trouble — on athena it found seven genuine
-bugs in shipping code, including a `memset` clearing a quarter of its buffer and an
-overflowable `copy_from_user` bound check. Fix those at source; silence only the noise.
-
-### LSE atomics on ARMv8.0 SoCs: keep them off
-
-`CONFIG_ARM64_USE_LSE_ATOMICS` builds ARMv8.1 atomics alongside the LL/SC ones and
-picks at runtime with a static key; on an ARMv8.0 SoC (SDM660: Cortex-A73/A53) it
-is dead weight. Turn it off to match the reference ROMs: a 4.19 tree marks clang's
-assembler `CONFIG_BROKEN_GAS_INST`, so LineageOS and UBports never enable LSE,
-while a Yocto build with binutils passes that test and gets a code-generation
-difference no shipped ROM has. On such a tree a `can't patch jump_label` warning
-on every boot means a static key keeps whatever value it had, so do not assume a
-runtime CPU-feature switch is inert just because the hardware lacks the feature
-(found on athena; see device-athena.md).
+a modern host toolchain provokes. Qualcomm trees: which toolchain (GCC miscompiled sunfish's SCM call) is in soc-qualcomm.md § Kernel.
 
 ### Framebuffer console as a Tier B debug channel — often does NOT work
 
@@ -537,7 +464,7 @@ Found on a 3.10 **arm64** kernel (Nexus 5X, msm8992; device-bullhead.md):
   and Halium bullhead kernels have the same code; Sailfish's connman 1.40 sets the same
   `ieee80211w=1`. NetworkManager's and Batocera's global `Pmf` route does not help here: it only drops
   PMF for drivers without BIP, and qcacld advertises `AES_CMAC`.
-- **Adreno 4xx kgsl SVM below 3 GB** breaks Chromium: hal-userspace.md § Adreno 4xx on a 3.10 kgsl.
+- **Adreno 4xx kgsl SVM below 3 GB** breaks Chromium: soc-qualcomm.md § Adreno 4xx on a 3.10 kgsl.
 
 ---
 
@@ -560,11 +487,7 @@ Found on a 3.10 **arm64** kernel (Nexus 5X, msm8992; device-bullhead.md):
   unconditionally writes `CONFIG_CMDLINE="${CMDLINE} ${CMDLINE_DEBUG}"`, so with
   `CMDLINE` unset the vendor's built-in string (`root=`, `vmalloc=`, …) is silently
   replaced (found on radon; see device-radon.md).
-- **`cgroup_disable=net_prio`** breaks a boot- and shutdown-time deadlock wherever
-  LXC + connman run on a MediaTek `ccmni` modem: `net_prio`'s `cgrp_css_online()`
-  takes rtnl under cgroup_mutex while connmand holds rtnl waiting on an events
-  work item whose kworkers wait on cgroup_mutex (measured on the MP01; see
-  device-mp01.md).
+- **`cgroup_disable=net_prio`** on MediaTek `ccmni` modems: soc-mediatek.md § Kernel.
 - **Never put `netconsole=` on the cmdline of a configfs-gadget kernel**: a
   target whose device does not exist at init makes `init_netconsole()` unwind
   entirely, taking the dynamic configfs interface down with it (verified in the

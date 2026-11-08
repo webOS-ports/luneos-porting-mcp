@@ -58,11 +58,13 @@ Topics (auto-discovered from `knowledge/*.md`):
 | `kernel-porting` | the kernel method: config delta, fragment traps, Tier A ACK builds, Tier B vendor trees, the command line |
 | `kmi-crc-matching` | whether a vendor `.ko` loads into your kernel: vermagic, CRCs, poison options per KMI, struct layouts, force-loading, shipping your own modules |
 | `boot-images` | header layouts, the kernel/ramdisk window, per-layout repack recipes, initramfs init patches, AVB, debug images |
-| `installing` | flash kits, vbmeta flags, flash steps per layout, SP Flash Tool / lk2nd / Odin routes, anti-rollback |
+| `installing` | flash kits, vbmeta flags, flash steps per layout, other install routes (Odin; MediaTek and lk2nd point to the SoC topics), anti-rollback |
 | `gsi-building` | building Halium GSIs (arm64 and 32-bit arm), published releases, VNDK snapshot matrix |
 | `yocto` | meta-smartphone layers, machine confs, GKI boot-image recipes, bitbake traps, mount-android/LXC |
 | `nyx-modules` | nyx module selection and runtime-derived nyx.conf, time ownership |
-| `hal-userspace` | libhybris/libgbinder stack by subsystem: graphics, gbinder ApiLevel, MTK connectivity, audio, modem, BT, sensors |
+| `hal-userspace` | libhybris/libgbinder stack by subsystem: graphics, gbinder ApiLevel, vendor modules, audio, modem, BT, sensors |
+| `soc-mediatek` | what every MediaTek port shares: preloader/lk, BROM install, expdb and the watchdog, mgk kernels, the connectivity combo, A12 vendor keys |
+| `soc-qualcomm` | what every Qualcomm port shares: aboot/ABL, appended device trees, lk2nd, CAF/LineageOS kernels, legacy vendors (WCNSS, HAL1 camera, EFS) |
 | `debugging` | staged "device doesn't come up" playbook, debug channels, symptom → cause table |
 | `tools` | kmi-crc-check, symvers-drift, module-order, mer-kernel-check, mtkclient, … |
 | `deviceinfo-reference` | the UBports/HGABT `deviceinfo` variables our Tier 1 format reuses |

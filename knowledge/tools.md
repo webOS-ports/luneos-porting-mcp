@@ -111,12 +111,10 @@ fields against the stock table. It also tells a v2 dtb field that is an AOSP dt_
 
 <https://github.com/bkerler/mtkclient>
 
-The MediaTek answer to "the device resets and there is no console, no adb and no
-pstore". MediaTek SoCs keep an **exception database** in a partition called
-`expdb`: preloader/lk logs, the AP watchdog status, and the kernel's last
-`RAM_CONSOLE` — i.e. the kmsg from *before* the reset. It is readable over the
-preloader/BROM USB connection, which still enumerates on a device that boots
-nothing at all.
+Reads MediaTek's `expdb` partition (preloader/lk logs, watchdog status, the kmsg from
+before the reset) over the preloader/BROM USB connection, which still enumerates on a
+device that boots nothing. What to look for, and reading ramoops straight out of DRAM:
+soc-mediatek.md § Debugging a mute device.
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
@@ -134,7 +132,7 @@ power fully off and plug in holding **Volume Down** to force BROM.
 
 **Reading expdb needs only `mtk r`.** The same tool writes partitions and reflashes
 the preloader, and a bad preloader write is the one genuinely hard-to-recover brick
-on MediaTek; when installing with it, follow installing.md § MediaTek BROM/preloader
+on MediaTek; when installing with it, follow soc-mediatek.md § Install over BROM/preloader
 (write by name, never `preloader`).
 
 A wrapper script (`dump-expdb.sh`, unpublished) does all of the above, including
