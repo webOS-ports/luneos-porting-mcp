@@ -492,6 +492,47 @@ check each on any pre-4.x Tier B port.
 - **No `CONFIG_BT_HCIVHCI` / `CONFIG_RFKILL`** in an old defconfig: bluebinder
   exits "No such device".
 
+Found on a 3.10 Spreadtrum kernel (SM-T113, sc8830; device-goyavewifi.md), one remote test round each:
+
+- **Syscalls the GSI's bionic issues:** `seccomp` (383) and `getrandom` (384) unwired, so the
+  container's init exits 127; `memfd_create` with sealing.
+- **The 64-bit binder ABI.** `ANDROID_BINDER_IPC_32BIT` promptless and on gives `Binder driver
+  protocol(7) does not match user space protocol(8)`; make it selectable and off, and backport
+  `get_user()` of 8-byte types (ARM 8091/2).
+- **Ambient capabilities:** init warns, and apexd-bootstrap fails on the loop devices (EACCES).
+- **`O_TMPFILE` (3.11):** `tombstoned` exits 1 on `openat(".", O_TMPFILE) = -EISDIR`; it needs the
+  backport series plus ext3/ext4 `->tmpfile()`.
+
+**Audit the whole list before the first boot, not one gap per log.** Those four cost four rounds and
+were all in sibling trees already. One pass finds them: list every syscall number the GSI's arm32
+`libc.so` issues (`mov r7,#N ... svc`) and diff it against the target's and the nearest working port's
+`arch/arm/kernel/calls.S`; then make a feature matrix over the sibling kernel trees (O_TMPFILE, ambient
+capabilities, memfd, binder ABI, `PR_SET_VMA`, binder scatter-gather...). Copy each feature from the
+sibling with the same base version rather than re-porting it from an older tree.
+
+Found on a 3.10 **arm64** kernel (Nexus 5X, msm8992; device-bullhead.md):
+
+- **arm64 glibc assumes 4.9.** The arm64 Halium glibc is built with `OLDEST_KERNEL` 4.9, so
+  `fexecve`, `renameat2` and `mlock2` have no fallback on an older kernel; bullhead needed
+  `execveat` and `renameat2` in the kernel. Check this on every pre-4.9 arm64 port.
+- **cpuset with `nr_cpus=`.** Limiting CPUs on the command line left the root cpuset's
+  `cpus_requested` at all possible CPUs, and LXC could not create its cgroups (`EINVAL`): the container
+  never started. Clamp `cpus_requested` to the possible CPUs.
+- **Unimplemented syscalls.** glibc and systemd probe `statx`, `rseq`, `clone3`, … on every boot; a
+  3.10 arm64 kernel printed a register dump for each and filled most of the journal. Drop that print.
+- **qcacld-2.0 and PMF.** connman sets `ieee80211w=1` (MFP optional) on every PSK network, so
+  wpa_supplicant puts MFPC in its RSN IE; it upgrades to MFP *required* for an AP with MFPC only when
+  the driver does not select the BSS itself. qcacld sets `WIPHY_FLAG_SUPPORTS_FW_ROAM` whenever
+  FastRoam/ESE/11r are on in `WCNSS_qcom_cfg.ini` (nl80211 then reports `ROAM_SUPPORT`), and a 3.10
+  nl80211 has no `MFP_OPTIONAL`. The driver sees an MFP-capable IE with MFP not enabled and
+  `csrIsPMFCapabilitiesInRSNMatch()` drops every AP that advertises MFPC: scans list the networks,
+  each connect fails after 5 s with `result:70 and Status:9`. Stop setting the flag in
+  `wlan_hdd_cfg80211.c` (it only informs user space; firmware roaming does not need it). The UBports
+  and Halium bullhead kernels have the same code; Sailfish's connman 1.40 sets the same
+  `ieee80211w=1`. NetworkManager's and Batocera's global `Pmf` route does not help here: it only drops
+  PMF for drivers without BIP, and qcacld advertises `AES_CMAC`.
+- **Adreno 4xx kgsl SVM below 3 GB** breaks Chromium: hal-userspace.md § Adreno 4xx on a 3.10 kgsl.
+
 ---
 
 ## The kernel command line

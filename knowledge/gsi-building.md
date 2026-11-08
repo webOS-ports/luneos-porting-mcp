@@ -206,6 +206,80 @@ hwbinder rather than passthrough (composer and allocator by default), and `/syst
 tuning to carry into the vendor's build.prop. The machine conf chooses the Android it boots
 with `<DEVICE>_ANDROID_SYSTEM` (`"gsi"` or `"device"`).
 
+### Before deriving: read what the old Android did for its vendor
+
+The class closes over `DT_NEEDED` **by name**, from the vendor, the VNDK/LLNDK and the old
+`/system/lib`. Four things it does not find on its own; each cost a test round on bullhead
+(LineageOS 21 vendor, device-bullhead.md). Check them on every LineageOS-derived vendor before the
+first derive (item 5 is a fifth that every legacy vendor with framework copies needs, found on four
+devices). Read the sibling ports' recipes before any of it: every `HALIUM_LEGACY_*` line in another
+`android-system-image-*.bb` is a trap someone already paid for, and the libft2.so one (item 5) was in
+three recipes before goyavewifi spent rounds finding it again.
+
+1. **LineageOS's linker shims.** LineageOS builds `TARGET_LD_SHIM_LIBS` into its own linker, which
+   loads a shim next to the library that needs it; the GSI's linker does not. Read the map out of the
+   device image's linker (in the runtime APEX from LineageOS 17 on, `/system/bin/linker64` before):
+   ```sh
+   debugfs -R 'dump /system/apex/com.android.runtime.apex rt.apex' system.img
+   unzip -o rt.apex apex_payload.img
+   debugfs -R 'dump /bin/linker64 linker64' apex_payload.img     # and /bin/linker for 32-bit
+   strings -n 6 linker64 | grep '\.so|'
+   ```
+   It prints `<library>|<shim>:<library>|<shim>:…`. Each pair goes into `HALIUM_LEGACY_LD_SHIMS`
+   (file names). Both ends must be in the vendor image, so shims that live in `/system/lib*` (bullhead:
+   `libaudioclient_shim.so`, `libshim_sensor.so`, `libshim_drm.so`) also go into
+   `HALIUM_LEGACY_EXTRA_LIBS`. Without them the blobs fail to link: `cannot locate symbol
+   "strdup8to16"` (ATFWD-daemon, libcne), `"android::AudioSystem::setErrorCallback"` (the RIL).
+2. **Passthrough HALs that LuneOS reaches over hwbinder.** `grep -B1 -A2 passthrough
+   vendor/etc/vintf/manifest.xml`. A LineageOS vendor often declares sensors, Bluetooth, the camera
+   provider, vibrator, … passthrough and ships no service: its system_server, Bluetooth app or
+   cameraserver loaded them in-process. sensorfw, bluebinder and droidmedia only talk hwbinder. For
+   each one a LuneOS consumer needs, ship a service binary (AOSP
+   `hardware/interfaces/<hal>/<version>/default`, built for the vendor's VNDK level, or one from
+   another of our builds), an rc, and list the HAL in `HALIUM_LEGACY_BINDERIZED_HALS`. Without the
+   manifest change the service starts and exits at once: "Service … must be in VINTF manifest in
+   order to register/get".
+3. **Symbols, not just names.** A vendor built without VNDK (LineageOS 21, `RELEASE_DEPRECATE_VNDK`)
+   carries its own `libbinder.so`, `libutils.so`, … and the GSI's linkerconfig gives it the LLNDK only.
+   A blob linked against the **system** variant of such a library then fails on a symbol although the
+   name resolves: the camera HAL's `libgui.so` and the RIL's `libmediautils.so` want
+   `PermissionCache`/`checkCallingPermission`, which only the system build of libbinder has. Walk each
+   daemon's whole load tree and check every undefined symbol (tools.md § fullres.py), not only
+   `DT_NEEDED`.
+4. **Libraries that moved into an APEX.** From LineageOS 17 on ICU (`libicu.so`, `libicuuc.so`,
+   `libicui18n.so`, `libandroidicu.so`) lives in the i18n APEX, not `/system/lib`, so the closure
+   finds nothing for a blob that needs it (bullhead: `libharfbuzz_ng.so` under `mm-qcamera-daemon`,
+   `library "libicu.so" not found`). Take them from the old image's `com.android.i18n` APEX payload.
+5. **`libft2.so`: named by the LLNDK list, not handed to the vendor.** The class counts every name on
+   the GSI's LLNDK list as provided, and `libft2.so` is on it, but the vendor's linker namespace in
+   the container does not give it to a vendor library, so a name-based closure (and fullres.py with
+   the LLNDK directory in its path) says "all resolved" while the load fails. It is reached through the
+   framework copies a legacy vendor drags into `/vendor/lib`: `libhwui.so` (a3-2015, sm-t520,
+   tenderloin) or `libpdfium.so` (goyavewifi: `gralloc.sc8830.so` -> `libdither.so` ->
+   `libandroid_runtime.so` -> `libpdfium.so`). The symptom is a HAL service that exits with status 1
+   at every start and writes **nothing** to the kernel log or the journal; only the container's logcat
+   has it (debugging.md § 2.4):
+   ```
+   vndksupport: Could not load /vendor/lib/hw/gralloc.sc8830.so from default namespace: dlopen failed:
+     library "libft2.so" not found: needed by /vendor/lib/libpdfium.so
+   AllocatorHal: failed to get gralloc module
+   ComposerHal: failed to open hwcomposer device
+   ```
+   Since halium-legacy-vendor revision 32 (meta-smartphone 3f6bd336, in shr-distribution/meta-smartphone#200,
+   open as of 20 Oct 2026) the converter does this itself: `libft2.so` is no longer counted as
+   provided, so anything that needs it pulls the old `/system/lib` copy (~600 KB) and `HALIUM_LEGACY_EXTRA_LIBS`
+   need not name it. On an older converter the rule is: **if the vendor image has `lib/libhwui.so` or
+   `lib/libpdfium.so`, set `HALIUM_LEGACY_EXTRA_LIBS = "libft2.so"`**. Check it before
+   the first boot: `for f in vendor/lib/*.so; do readelf -d $f | grep -q 'NEEDED.*libft2' && echo $f; done`
+   lists who wants it (the result is `libhwui.so`, `libpdfium.so`, or both).
+   The same fix as the framework-symbol shims in item 3 usually goes with it for the same libraries
+   (`HALIUM_LEGACY_SHIM_TARGETS`, hal-userspace.md § Display: three gaps).
+
+For 3 and 4 the fix belongs to the daemon that needs it: putting LineageOS's system libbinder into
+`/vendor/lib*` would replace it for every vendor process. Give that daemon a private directory and
+`setenv LD_LIBRARY_PATH` in an rc `override` (device-bringup-yocto.md § Shipping fixes through
+/odm).
+
 A converted image can be published next to the GSI as `<machine>-vendor.img` in the same
 `halium-images` release; a recipe that sets `HALIUM_LEGACY_VENDOR_SHA256` then fetches it as is
 instead of deriving it (sm-t520 does). Such a device must use the GSI unmodified, or the GSI it
