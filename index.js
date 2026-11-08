@@ -61,6 +61,27 @@ function loadTopics() {
   return topics;
 }
 
+// Topics that were renamed, merged or split keep answering under their old name,
+// so a client (or an older prompt) asking for one still gets the right text.
+// Value: the topic that now holds the content, optionally with the section.
+const TOPIC_ALIASES = {
+};
+
+// Look a topic up by name or old name. Returns { topic, movedTo } or undefined.
+function resolveTopic(topics, requested) {
+  const name = String(requested || "").replace(/\.md$/, "");
+  if (topics.has(name)) return { topic: topics.get(name) };
+  const alias = TOPIC_ALIASES[name];
+  if (!alias) return undefined;
+  const [target] = alias.split(" § ");
+  const topic = topics.get(target);
+  return topic ? { topic, movedTo: alias } : undefined;
+}
+
+function movedNote(requested, movedTo) {
+  return `<!-- "${requested}" has moved: see ${movedTo}. -->\n\n`;
+}
+
 function allTopicsConcatenated(topics) {
   const parts = [];
   for (const t of topics.values()) {
@@ -103,13 +124,19 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return { resources };
 });
 
+function resolvedText(topics, requested) {
+  const r = resolveTopic(topics, requested);
+  if (!r) return undefined;
+  return (r.movedTo ? movedNote(requested, r.movedTo) : "") + r.topic.content;
+}
+
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const uri = request.params.uri;
   const m = /^luneos:\/\/knowledge\/(.+)$/.exec(uri);
   if (!m) throw new Error(`Unknown resource URI: ${uri}`);
   const topics = loadTopics();
   const text =
-    m[1] === "all" ? allTopicsConcatenated(topics) : topics.get(m[1])?.content;
+    m[1] === "all" ? allTopicsConcatenated(topics) : resolvedText(topics, m[1]);
   if (text === undefined) {
     const known = [...topics.keys()].join(", ");
     throw new Error(`Unknown topic "${m[1]}". Known topics: ${known}`);
@@ -179,8 +206,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "luneos_get_topic") {
-    const t = topics.get(String(args.topic || "").replace(/\.md$/, ""));
-    if (!t) {
+    const text = resolvedText(topics, String(args.topic || "").replace(/\.md$/, ""));
+    if (text === undefined) {
       return {
         content: [{
           type: "text",
@@ -190,7 +217,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: true,
       };
     }
-    return { content: [{ type: "text", text: t.content }] };
+    return { content: [{ type: "text", text }] };
   }
 
   if (name === "luneos_search") {

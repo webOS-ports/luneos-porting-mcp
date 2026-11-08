@@ -14,7 +14,8 @@
     "README.md"
   ],
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node scripts/check-refs.mjs"
   },
   "keywords": [
     "luneos",
