@@ -4,6 +4,8 @@
 //   - every `<topic>.md` named exists in knowledge/ (or is an alias in index.js);
 //   - every `<topic>.md § <Heading>` names a heading of that file (prefix or
 //     substring match, ignoring case and markdown punctuation);
+//   - every TOPIC_ALIASES target and PROMPT_TOPICS entry in index.js is a real
+//     topic (and heading, when it names one);
 //   - every topic has a "# Title" and a first paragraph of at most 200 characters
 //     (the description luneos_list_topics shows).
 //
@@ -40,7 +42,7 @@ for (const f of files) {
 }
 
 function headingFound(file, cand) {
-  const words = norm(cand).split(" ").filter(Boolean);
+  const words = norm(cand).split(" ").map((w) => w.replace(/[,;:]+$/, "")).filter(Boolean);
   for (let k = words.length; k >= Math.min(2, words.length); k--) {
     const n = words.slice(0, k).join(" ");
     if (headings[file].some((h) => h.startsWith(n) || (n.length >= 4 && h.includes(n)))) return true;
@@ -75,15 +77,38 @@ for (const [name, src] of sources) {
       if (["README", "CLAUDE"].includes(m[1].toUpperCase())) continue;
       if (!text[f] && !aliases.has(m[1])) problems.push(`${name}:${line}: no topic ${f}`);
     }
-    // <topic>.md § Heading must resolve
-    for (const m of para.matchAll(/(?<![\w/.-])([a-z0-9][a-z0-9-]*)\.md\s*§\s*/g)) {
-      const f = `${m[1]}.md`;
-      if (!text[f]) continue;
+    // <topic>.md § Heading must resolve; a bare § Heading resolves against this
+    // file or the topic named last before it in the same paragraph.
+    for (const m of para.matchAll(/§\s*/g)) {
+      const before = para.slice(0, m.index);
+      const direct = /(?<![\w/.-])([a-z0-9][a-z0-9-]*)\.md\s*$/.exec(before);
       const rest = para.slice(m.index + m[0].length);
       const cand = rest.split(/\)|;|\s§|, and |\. |, |\||:\s/)[0].trim();
-      if (cand && !headingFound(f, cand)) problems.push(`${name}:${line}: ${f} § "${cand.slice(0, 70)}" not found`);
+      if (!cand) continue;
+      if (direct) {
+        const f = `${direct[1]}.md`;
+        if (text[f] && !headingFound(f, cand)) problems.push(`${name}:${line}: ${f} § "${cand.slice(0, 70)}" not found`);
+        continue;
+      }
+      if (name === "index.js" || name === "README.md") continue;
+      const named = [...before.matchAll(/(?<![\w/.-])([a-z0-9][a-z0-9-]*)\.md\b/g)].map((x) => `${x[1]}.md`).filter((f) => text[f]);
+      const candidates = [name, ...named.slice(-1)];
+      if (!candidates.some((f) => headingFound(f, cand)))
+        problems.push(`${name}:${line}: § "${cand.slice(0, 70)}" not found in ${candidates.join(" or ")}`);
     }
   }
+}
+
+// Alias targets and PROMPT_TOPICS entries in index.js: "topic" or "topic § Heading".
+const aliasTargets = aliasBlock ? [...aliasBlock[1].matchAll(/:\s*"([^"]+)"/g)].map((m) => m[1]) : [];
+const promptBlock = /const PROMPT_TOPICS = \{([\s\S]*?)\n\};/.exec(indexJs);
+if (!promptBlock) problems.push("index.js: no PROMPT_TOPICS block found");
+const promptRefs = promptBlock ? [...promptBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
+for (const [kind, r] of [...aliasTargets.map((r) => ["TOPIC_ALIASES", r]), ...promptRefs.map((r) => ["PROMPT_TOPICS", r])]) {
+  const [topic, heading] = r.split(" § ");
+  const f = `${topic}.md`;
+  if (!text[f]) problems.push(`index.js: ${kind} target "${r}": no topic ${f}`);
+  else if (heading && !headingFound(f, heading)) problems.push(`index.js: ${kind} target "${r}": heading not found`);
 }
 
 for (const f of files) {

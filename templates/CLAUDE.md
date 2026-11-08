@@ -8,7 +8,8 @@ glossary), then pull only what the task needs:
 
 - `luneos_search` for a symptom, config option, file name or tool;
 - `luneos_get_topic` for a whole topic (`luneos_list_topics` lists them);
-- the matching `device-<codename>` topic when working on a known device.
+- the matching `device-<codename>` topic when working on a known device, and
+  `soc-mediatek` or `soc-qualcomm` for its SoC family.
 
 `luneos://knowledge/all` concatenates everything (well over 100k tokens); load it
 only when a task really spans the whole base.

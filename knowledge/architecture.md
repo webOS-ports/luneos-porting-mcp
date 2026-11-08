@@ -156,29 +156,30 @@ https://docs.droidian.org/porting-guide/debugging-tips/)
 
 ## Devices
 
-One row per port; status as recorded in each `device-<codename>.md` (dated in its Status
-section), which holds the detail, sources and open issues.
+One row per port. The State column only summarises the Status table of each
+`device-<codename>.md`, which carries its own date, the per-subsystem detail, sources and
+open issues.
 
-| Device | Product | SoC | Tier | Kernel | Vendor | GSI | Status |
+| Device | Product | SoC | Tier | Kernel | Vendor | GSI | State |
 |---|---|---|---|---|---|---|---|
-| `sargo` | Google Pixel 3a | Qualcomm SDM670 | B | 4.9.124 (linux-google-sargo) | Android 12.1, VNDK 32 | 16.0 (and 14.0) arm64 | full UI, audio, BT, modem, sensors, camera; Wi-Fi not recorded; the GSI pilot |
+| `sargo` | Google Pixel 3a | Qualcomm SDM670 | B | 4.9.124 (linux-google-sargo) | Android 12.1, VNDK 32 | 16.0 (and 14.0) arm64 | full UI; most subsystems work; the GSI pilot |
 | `bluejay` | Google Pixel 6a | Google Tensor gs101 | A | ACK android14-6.1 (linux-halium-gki_6.1) | Android 16 bp4a | 16.0 arm64 | kernel and initramfs boot on hardware; UI on Mali open |
 | `panther` | Google Pixel 7 | Google Tensor G2 gs201 | A | bluejay's kernel binary | Android 16 bp4a | 16.0 arm64 | host-side verified (204/204 modules); never flashed |
-| `sunfish` | Google Pixel 4a | Qualcomm SM7150-AB (730G) | B | 4.14.357 LineageOS, own vendor-module build | LineageOS 23.2 (SDK 36) | 16.0 arm64 | boots to UI; modem partly; Wi-Fi, audio, sensors, BT, NFC unknown; camera, fingerprint broken |
+| `sunfish` | Google Pixel 4a | Qualcomm SM7150-AB (730G) | B | 4.14.357 LineageOS, own vendor-module build | LineageOS 23.2 (SDK 36) | 16.0 arm64 | boots to UI; camera and fingerprint broken; several subsystems unknown |
 | `bramble` | Google Pixel 4a 5G | Qualcomm SM7250 (765G) | B | 4.19.325 LineageOS redbull | LineageOS 23.2 | 16.0 arm64 | built and verified host-side; never booted |
 | `mindphone` | GreenTouch MindPhone | MediaTek MT6739 | B, 32-bit | 4.14.186 vendor tree | Android 11, VNDK 30 | 16.0 arm | UI, Wi-Fi, BT, dual-SIM, audio and T9 work |
-| `q25` | Zinwa Q25 / Q25 Pro | MediaTek MT6789 (G99) | A (mgk; device tree, not ACK) | 5.10.198 LineageOS xelex | Android 12, VNDK 31 | 16.0 arm64 | runs on hardware; keyboard works; audio partly (loudspeaker dead in hardware); radios not recorded |
-| `mp01` | Minimal Phone MP01 | MediaTek MT6789 (G99) | A (mgk) | 5.10.233 vendor source | Android 12, VNDK 31 | 16.0 arm64 | boots to UI (E Ink); battery %, fingerprint, portrait web apps open |
+| `q25` | Zinwa Q25 / Q25 Pro | MediaTek MT6789 (G99) | A (mgk; device tree, not ACK) | 5.10.198 LineageOS xelex | Android 12, VNDK 31 | 16.0 arm64 | runs on hardware; keyboard works; radios not recorded |
+| `mp01` | Minimal Phone MP01 | MediaTek MT6789 (G99) | A (mgk) | 5.10.233 vendor source | Android 12, VNDK 31 | 16.0 arm64 | boots to UI (E Ink); open items in the device file |
 | `brax3` | BraX3 | MediaTek MT6835 (Dimensity 6300) | A (mgk android13-5.15; device tree, not ACK) | 5.15.209 Brax BaseOS | Android 16 (LineageOS 23.2: BaseOS / iodéOS) | 16.0 arm64 | kernel KMI-clean and boot images built; never flashed |
 | `radon` | FuriLabs FuriPhone FLX1s | MediaTek MT6877 | B | 4.19.325 FuriLabs | Android 12L, VNDK 32 | 16.0 arm64 | UI, audio, Wi-Fi, camera work; BT and modem not recorded |
 | `titanpocket` | Unihertz Titan Pocket | MediaTek MT6771 (P70) | B | 4.14.186 ALPS tree | Android 11, VNDK 30 | 16.0 arm64 | boots to UI, keyboard works; audio fails |
 | `sm-t220` | Samsung Galaxy Tab A7 Lite Wi-Fi | MediaTek MT8768T | B | 4.19.191 Samsung | Android 12, VNDK 31 | 16.0 arm64 | boots; audio, media, display, touch, Wi-Fi, camera work |
 | `a3-2015-halium` | Samsung Galaxy A3 (2015) | Qualcomm MSM8916 | B, 32-bit | 3.10.108 | LineageOS 18.1, VNDK 30 | 16.0 arm | UI, modem, Wi-Fi, BT, audio, camera work |
 | `goyavewifi` | Samsung Galaxy Tab 3 Lite 7.0 Wi-Fi (SM-T113) | Spreadtrum SC7730S | B, 32-bit | 3.10.103 community sc8830 | LineageOS 16.0, VNDK 28 | 16.0 arm | UI draws, touch works (tester, 16 Oct); rest untested |
-| `bullhead-halium` | LG Nexus 5X | Qualcomm MSM8992 | B | 3.10.108 LineageOS (arm64) | LineageOS 21, no VNDK | 16.0 arm64 | UI, Wi-Fi, sensors, NFC work; camera HAL streams; modem links; BT and headphone jack in progress |
-| `athena` | BlackBerry KEY2 | Qualcomm SDM660 | B | 4.19.325 | LineageOS 22 (A15) | 16.0 arm64 | lock screen; display, touch, QWERTY, Wi-Fi, audio work; BT, NFC, sensors, camera broken |
+| `bullhead-halium` | LG Nexus 5X | Qualcomm MSM8992 | B | 3.10.108 LineageOS (arm64) | LineageOS 21, no VNDK | 16.0 arm64 | UI; most subsystems work; BT and headphone jack in progress |
+| `athena` | BlackBerry KEY2 | Qualcomm SDM660 | B | 4.19.325 | LineageOS 22 (A15) | 16.0 arm64 | lock screen; BT, NFC, sensors, camera broken |
 | `fajita` | OnePlus 6T | Qualcomm SDM845 | B | 4.9.337 LineageOS | LineageOS 22.2 (A15) | 16.0 arm64 | builds, verified host-side; never run on hardware |
-| `surya` | Xiaomi POCO X3 NFC | Qualcomm SM7150-AC (732G) | B | 4.14.356 LineageOS | /e/OS A15 | 16.0 arm64 | one on-device logcat (container up, sensors broken); otherwise untested |
+| `surya` | Xiaomi POCO X3 NFC | Qualcomm SM7150-AC (732G) | B | 4.14.356 LineageOS | /e/OS A15 | 16.0 arm64 | container up once; otherwise untested |
 | `vince-halium` | Xiaomi Redmi 5 Plus | Qualcomm MSM8953 | B | 4.9.251 third-party LineageOS tree | LineageOS 18.1, VNDK 30 | 16.0 arm64 | builds, verified host-side; never booted |
 
 ## The Halium container handshake
@@ -213,7 +214,7 @@ such a gate, not curtailed by design — see debugging.md § Stage 2.
 | KMI | Kernel Module Interface: the exported symbols and their CRCs that vendor modules are built against; stable within one ACK branch |
 | mgk | MediaTek's GKI derivative kernel; GKI-labelled but not ACK-compatible (device-q25.md) |
 | vermagic | the version string in every `.ko` that must match the running kernel before CRCs are even compared (kmi-crc-matching.md) |
-| poison option | a kernel config option that changes the KMI (moves `module_layout` or struct layouts), so enabling it makes stock vendor modules refuse to load; the list is per KMI (kmi-crc-matching.md) |
+| poison option | a kernel config option that changes the KMI (moves `module_layout` or struct layouts), so enabling it makes stock vendor modules refuse to load; the list is per KMI (kernel-config.md § Poison options) |
 | `vendor_boot` | GKI partition with the vendor ramdisk (first-stage init, early modules), dtb and vendor cmdline |
 | `init_boot` | A13+-launch partition holding the generic ramdisk; `boot` then holds only the kernel |
 | `vendor_dlkm` | logical partition with the rest of the vendor kernel modules |
