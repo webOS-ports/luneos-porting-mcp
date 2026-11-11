@@ -180,13 +180,19 @@ Synchronization Train (soc-mediatek.md § Connectivity combo (WMT/connac)).
 
 ## Yocto
 
-Layer `meta-smartphone/meta-zinwa`, `MACHINE=q25`; the rootfs is the shared
-`MACHINE=halium-arm64` image — **not** a `luneos-dev-image` built for `MACHINE=q25`.
+Layer `meta-smartphone/meta-zinwa`, `MACHINE=q25`. The install is
+`MACHINE=q25 bitbake luneos-dev-fastboot-package` (meta-android `680e6371`), whose
+`luneos-dev-image` is built **for `MACHINE=q25`** and wrapped in `userdata`, so packages
+q25.conf adds do reach the device: the 9 Nov 2026 rootfs manifest lists
+`linux-zinwa-q25-vendor-dlkm-override`. A rootfs built separately as
+`MACHINE=halium-arm64`, the earlier route, would carry none of them
+(kernel-modules.md § The vendor_dlkm set).
 
 | File | Role |
 |---|---|
 | `conf/machine/q25.conf` | boot image only (like bluejay); `GKI_BOOTIMG = "1"`, `GKI_KERNEL_PROVIDER = "linux-zinwa-q25"`, `Image.gz`, header v4, cmdline, ThinLTO, `bbqX0kbd` in the initramfs |
 | `recipes-kernel/linux/linux-zinwa-q25_git.bb` + `files/luneos.cfg`, `vermagic.cfg`, `0001`-`0003` keyboard patches | the kernel |
+| same recipe + `0004-mali-r32p1-*` | the Mali driver fixed for pid namespaces (graphics.md § Mali in a pid namespace), as `linux-zinwa-q25-vendor-dlkm-override`, added in q25.conf via `MACHINE_EXTRA_RRECOMMENDS` |
 | `recipes-core/udev/udev-extraconf/70-q25.rules` | `Q25_keyboard` tagging; `wmtWifi`/`stpbt`/`stpgps`/`conninfra_dev`/`accdet` ownership; installed into the generic rootfs |
 | `recipes-core/luneos-device-config/.../Q25-deviceinfo` | Tier 1: key devices, DPI, pixel ratio, toolbelt keys, mixer init, MediaTek keys; installed as `adaptations/Q25` + lowercase symlink |
 | `recipes-core/android-system/.../stubbed-services-q25` | `stp_dump3` |
@@ -196,7 +202,7 @@ meta-android pieces it relies on: `luneos-bootimg-gki` (gated on `GKI_BOOTIMG`),
 `system:graphics` in `65-android.rules` (without it only root gets a GL context). nyx
 selection is in `nyx-modules-machines.inc` (nyx-modules.md § Module selection: `nyx-modules-machines.inc`).
 kbdscroll ships on the generic rootfs for `halium-arm64`/`halium-arm`, because a
-package gated on `trackpad` in q25.conf could never reach this device
+package gated on `trackpad` in q25.conf could not reach a `halium-arm64`-built rootfs
 (yocto.md § The generic `halium-arm64` machine); its profiles are
 selected at runtime by codename (`by-codename/q25.conf`).
 
@@ -204,7 +210,7 @@ selected at runtime by codename (`by-codename/q25.conf`).
 MACHINE=q25 bitbake linux-zinwa-q25          # Image.gz + Module.symvers + kernel-config
 MACHINE=q25 bitbake initramfs-android-image
 MACHINE=q25 bitbake luneos-bootimg-gki       # boot-q25-luneos.img, -debug.img
-MACHINE=halium-arm64 bitbake luneos-dev-image
+MACHINE=q25 bitbake luneos-dev-fastboot-package   # the install zip, rootfs built for q25
 ```
 
 ## Install

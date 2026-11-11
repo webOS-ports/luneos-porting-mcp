@@ -55,6 +55,36 @@ every other A12+ GSI.
   G68 in Aug 2026 but has no G78 model entry yet — "small mesa patch + GPU DT plumbing"
   away, unaccelerated today.
 
+### Mali in a pid namespace (Waydroid)
+
+`kbase_context_common_init()` stores the caller's global tgid in `kctx->tgid`, then
+looks the task up again with `find_get_pid(kctx->tgid)`, which resolves the number in
+the *caller's* pid namespace. Inside a container with its own pid namespace (Android
+in Waydroid, `PID_NS=y`) the lookup misses, every GPU context fails with `-ESRCH`,
+and SurfaceFlinger aborts with "no suitable EGLConfig found":
+
+```
+mali 13000000.mali: Failed to get pid pointer for surfaceflinger/12594
+mali 13000000.mali: Common context initialization failed error = -3
+```
+
+The LuneOS compositor runs outside a namespace and is unaffected. Fix: take
+`current->group_leader` (the same task, no lookup) and ship the rebuilt module as a
+vendor_dlkm override (kernel-modules.md § The vendor_dlkm set). The rebuilt module
+keeps the stock interface, so check its imported and exported CRCs, vermagic and
+`depends=` against the vendor's `.ko` before shipping it.
+
+| Device | Driver | Source | Status |
+|---|---|---|---|
+| q25 (MT6789) | r32p1 `mali_kbase_mt6789.ko` | kernel tree, `drivers/gpu/mediatek/gpu_mali` | fixed (meta-zinwa `0004`); Waydroid reached `sys.boot_completed` |
+| brax3 (MT6835) | r38p1 `mali_kbase_mt6835.ko` | **out of tree**: BaseOS `vendor/mediatek/kernel_modules` (`gpu/mt6835` → `gpu_mali/mali_valhall/mali-r38p1`) | same code, fixed (meta-brax `0001`); host-side only |
+
+Spot it without source: the stock `.ko` imports `find_get_pid` and `pid_task` and
+contains the string `Failed to get pid pointer`. A second `find_get_pid(kctx->pid)`
+in the OOM notifier only names the task in a log line (`[null task]` on a miss) and
+needs no fix. Droidian solves the same problem in its ACK kernel for the Q25 with a
+gki_quirks `find_get_pid` hook instead (device-q25.md § Kernel).
+
 ## The display smoke-test ladder (SFOS HADK/hadk-hot)
 
 Isolate layers bottom-up with the libhybris test binaries, compositor stopped first (<https://github.com/mer-hybris/hadk-faq>):

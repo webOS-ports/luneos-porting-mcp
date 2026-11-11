@@ -33,9 +33,10 @@ NF_LOG_IPV4/6 and DUMMY, checker quirks listed in tools.md).
   `/sys/kernel/uevent_helper`, which stock GKI does not provide; without it late
   hotplug events are lost (the initial `mdev -s` covers the normal path, but add
   it if by-partlabel links come up empty). Behavioural and KMI-safe.
-- `# CONFIG_MODULE_SIG_PROTECT is not set` on a rebuilt GKI, or the stock vendor
-  modules never load although every CRC matches (kmi-crc-matching.md § A failure
-  class invisible to CRC checks)
+- `# CONFIG_MODULE_SIG_PROTECT is not set` on a rebuilt android14-6.1 GKI, or the
+  stock vendor modules never load although every CRC matches. Per tree, not
+  universal: on mgk android13-5.15 (brax3) its lists are empty and it stays `=y`
+  (kmi-crc-matching.md § A failure class invisible to CRC checks)
 - Also off in stock: `USER_NS`, `PID_NS`, `AUTOFS_FS`, `SQUASHFS`, `CHECKPOINT_RESTORE`
 
 **Not required:** `SYSVIPC` (and with it `IPC_NS`). LuneOS does not use SysV IPC;

@@ -238,6 +238,24 @@ load-compatible, 0 CRC mismatches, and the option confirmed off by reading the b
 kernel's IKCONFIG back. Whether it brings Wi-Fi/BT up on the phone is unrecorded
 (device-bluejay.md).
 
+**What the option does depends on the tree; read it before turning it off.** On
+MediaTek mgk android13-5.15 (brax3) it works the other way round, and stays at the
+stock `=y`:
+
+- the two lists are fixed in-tree files, `android/abi_gki_modules_protected` and
+  `android/abi_gki_modules_exports`, and both hold nothing but the
+  `[abi_symbol_list]` header, so no symbol is protected and no export is reserved;
+- `module_sig_check()` in `kernel/module.c` returns 0 for an unsigned module when
+  the option is on ("Do not prevent loading of unsigned modules; as all modules
+  except GKI modules are not signed"), and asks lockdown when it is off;
+- every stock module is unsigned anyway (0 of 774 BaseOS and 0 of 377 iodéOS carry
+  `~Module signature appended~`), and they load on the stock kernel, which has
+  the same `=y`.
+
+So check three things in the device's own tree: whether `kernel/Makefile` builds
+`gki_module.o` from generated or fixed lists, whether those lists are empty, and
+whether the stock modules are signed at all.
+
 ---
 
 ## Step 3 — measure the CRCs yourself, host-side
@@ -581,7 +599,9 @@ the packaging traps: kernel-modules.md § Building and shipping your own modules
    *(likewise)*
 6. if anything is force-loaded: struct layouts checked against stock
    (§ Struct layouts), and no NETCONSOLE unless stock had `NET_POLL_CONTROLLER`
-7. on a rebuilt GKI: `CONFIG_MODULE_SIG_PROTECT` off
+7. on a rebuilt GKI: `CONFIG_MODULE_SIG_PROTECT` off where its symbol lists are
+   populated (android14-6.1); on a tree whose lists are empty it stays at stock
+   (§ A failure class invisible to CRC checks)
 8. boot-window check passes (kernel end < ramdisk load address) — and remember
    the initramfs grew if it now carries modules
 9. built with the toolchain family the tree's own `build.config.common` names

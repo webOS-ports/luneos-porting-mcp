@@ -483,7 +483,7 @@ Bring-up and debugging detail per radio is in connectivity.md (Wi-Fi incl. the r
 | Wi-Fi works but no 5 GHz networks; `iw reg get` says country 00 | No regulatory.db, or the latched early load | connectivity.md § Regulatory domain |
 | Ping works, TCP hangs | Path problem (often the router's band bridging) | connectivity.md § "Wi-Fi associates, ping works, but TCP hangs" |
 | `Required key not found` on modprobe | Module signature enforcement (Tier B) | kernel-modules.md § Module signing |
-| Vendor modules never load on a rebuilt GKI kernel though the CRC check passes | `CONFIG_MODULE_SIG_PROTECT` must be off | kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT |
+| Vendor modules never load on a rebuilt GKI kernel though the CRC check passes | `CONFIG_MODULE_SIG_PROTECT` must be off where its lists are populated (not on every tree) | kmi-crc-matching.md § A failure class invisible to CRC checks: MODULE_SIG_PROTECT |
 | MTK modem "exception", RIL dead | Wrong fstab → NV partitions unmounted | connectivity.md § Modem failures on the Android side |
 | SIM never detected (Qualcomm) | `/dev/block/bootdevice/by-name` structure missing | connectivity.md § Modem failures on the Android side |
 | BT HAL can't open its node | Container ueventd ownership vs vendor ueventd.rc | connectivity.md § Bluetooth |

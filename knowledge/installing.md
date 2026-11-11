@@ -66,6 +66,19 @@ sidesteps the resize path, since the format sizes the filesystem to the partitio
 kits from current bitbake images: the bitbake initramfs carries every fix the
 flashed-userdata install relies on.
 
+**The bitbake-built kit** is `MACHINE=<device> bitbake luneos-dev-fastboot-package`
+(meta-webos-ports `luneos-fastboot-package.inc`): a zip with `boot.img`,
+`boot-debug.img`, `vbmeta.img`, `userdata.img` (a `luneos-dev-image` built for that
+machine, plus the pinned GSI as `android-rootfs.img`) and a generated `flash.sh`. Boot
+partitions come from `FASTBOOT_BOOT_PARTITIONS` (`boot` = current slot only, for
+devices that keep Android on the other slot). **On an A13-launch device the kit must
+carry `init_boot` too**: `FASTBOOT_INIT_BOOT_IMAGE`, defaulted by meta-android's
+`meta-android-halium.inc` when `ANDROID_BOOTIMG_INIT_BOOT = "1"`, adds
+`init_boot.img` and flashes `init_<partition>` next to every boot partition. Before
+that existed the kit wrote `boot` alone, which on such a device leaves the stock
+`init_boot`, so our kernel starts Android's generic ramdisk (found preparing brax3;
+device-brax3.md § Yocto).
+
 ## Flash steps per layout class
 
 The classes are defined in boot-images.md.

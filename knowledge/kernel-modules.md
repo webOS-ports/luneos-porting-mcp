@@ -86,6 +86,17 @@ builds of vendor modules go in `/usr/lib/modules/vendor_dlkm-override/` under th
 vendor's file name: they are loaded first, and the vendor's `modprobe -a` skips a
 module that is already loaded.
 
+**How an override module reaches the device.** It is machine-specific (built
+against that machine's kernel), so it goes in a `<kernel recipe>-vendor-dlkm-override`
+package added with `MACHINE_EXTRA_RRECOMMENDS` in the machine conf (q25, brax3). That
+reaches the device because the install is `MACHINE=<device> bitbake
+luneos-dev-fastboot-package`, whose `luneos-dev-image` is built for the device
+machine and wrapped in the `userdata` image (the 9 Nov 2026 q25 rootfs manifest lists
+`linux-zinwa-q25-vendor-dlkm-override`). It does **not** reach a rootfs built
+separately as `MACHINE=halium-arm64`, which never reads the device's machine conf.
+The initramfs is not an alternative for a large module on an `init_boot` device:
+brax3's Mali is ~595 KiB LZ4-compressed against ~364 KiB of `init_boot` headroom.
+
 **Who is affected:** any Android 12+ / GKI device with a `vendor_dlkm`
 partition (MP01, Q25, bluejay). **Not** affected: pre-dynamic-partition devices,
 which have only one module set (mindphone, sargo).
@@ -341,6 +352,7 @@ This is upstream behaviour on every machine, not a recipe bug. Repack from
   signing key in the layer, so a kernel rebuild and an out-of-tree module recipe
   still agree: sargo commits `module-signing/luneos-module-signing-key.pem`, fajita
   carries the same key byte for byte, vince keeps `MODULE_SIG_FORCE=y`.
-- **On a rebuilt GKI**, `CONFIG_MODULE_SIG_PROTECT` must be off or the stock vendor
-  modules count as unsigned (kmi-crc-matching.md § A failure class invisible to CRC
-  checks).
+- **On a rebuilt android14-6.1 GKI**, `CONFIG_MODULE_SIG_PROTECT` must be off or the
+  stock vendor modules count as unsigned; on a tree whose protected lists are empty
+  (mgk android13-5.15, brax3) it stays at stock (kmi-crc-matching.md § A failure
+  class invisible to CRC checks).

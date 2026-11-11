@@ -7,12 +7,14 @@ The first android13-5.15 MediaTek port and the first MediaTek device with an
 and **`SYSVIPC` poisons, `USER_NS` is clean** (soc-mediatek.md § Kernel). Same
 `meta-zinwa` shape otherwise: device tree kernel, stock vendor modules, boot images only.
 
-## Status (as of 26 Oct 2026)
+## Status (as of 11 Nov 2026)
 
 | Area | State | Notes |
 |---|---|---|
 | Kernel | built, KMI-verified host-side | 0/774 BaseOS and 0/377 Iode stock modules fail; `kernel.release` exact |
 | Boot images | built (bitbake), both vendors | boot + init_boot + debug; never flashed |
+| Mali in Waydroid | patched module built host-side | r38p1 pid-namespace fix, interface identical to stock; not run |
+| Fastboot package | `init_boot` support added | the kit used to write `boot` only (§ Install) |
 | Everything on hardware | not run | no device attached yet |
 
 ## Platform facts
@@ -25,7 +27,7 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
 | Fact | Value |
 |---|---|
 | Codename | `brax3` (`PRODUCT_DEVICE` in `baseos_brax3.mk`); board `k6835v1_64`. The UBports port calls it `prithvi` — unverified which `ro.product.vendor.device` reports |
-| SoC / GPU | MediaTek Dimensity 6300 = **MT6835**, Mali (`mali_kbase_mt6835.ko`) |
+| SoC / GPU | MediaTek Dimensity 6300 = **MT6835**, Mali r38p1 (`mali_kbase_mt6835.ko`, built out of tree from BaseOS's `vendor/mediatek/kernel_modules`, not from the kernel tree) |
 | CPU | arm64 only (no 32-bit ABI in BaseOS), cortex-a55 variant, armv8.2-a+dotprod |
 | Panel | 720x1612, 67.93 x 152.09 mm (6.56", 269 ppi) in all four panel drivers shipped: huayin ft8057s, huike/huashi ili9883, truly td4160c (90 Hz). LineageOS density 280 |
 | Touch | FocalTech ft8057s (`focaltech_ft8057s.ko`), plus ilitek_v3 on other panel variants |
@@ -95,8 +97,27 @@ Iode trees (`Brax3_IodeOs/*`) and the UBports port (`Brax3_UbuntuTouchOs/*`).
   (`BRAX3_VENDOR`, `vermagic-<vendor>.cfg`); `do_deploy` fails if
   `kernel.release` differs from the vendor's. The `.211` is only a label: Iode
   publishes no kernel source.
-- `v4l2loopback` is wanted but is not in the tree; it needs adding as a commit
-  once the kernel moves to an shr-distribution branch.
+- **`MODULE_SIG_PROTECT` stays at the stock `=y`.** The general rule to turn it
+  off on a rebuilt GKI does not apply to this tree: its protected and exported
+  symbol lists are empty, and with the option on `module_sig_check()` lets
+  unsigned modules load, which every stock module is
+  (kmi-crc-matching.md § A failure class invisible to CRC checks).
+- **Mali (Waydroid):** the stock r38p1 driver has the `find_get_pid(kctx->tgid)`
+  pid-namespace bug (graphics.md § Mali in a pid namespace). The recipe also fetches
+  `Brax3_BaseOs/android_vendor_mediatek_kernel_modules` (`baseos-1.0`, SRCREV
+  `724de3483929a68439d15a9815f2c53783058f98`), applies `0001-mali-r38p1-*`, builds
+  `gpu/mt6835/mali_valhall/mali-r38p1/drivers/gpu/arm/midgard` with `M=` and the
+  vendor's arguments (`MTK_PLATFORM_VERSION=mt6835`,
+  `LOCAL_MTK_GPU_VERSION=mali_valhall_r38p1_mt6835`, `BUILD_RULE=OOT`), and ships it as
+  `linux-brax-brax3-vendor-dlkm-override`. Against both vendors' stock `.ko`: all 397
+  imported and 134 exported CRCs identical, same `depends=`; the iodéOS and BaseOS
+  binaries share one interface and differ only in vermagic, which each machine's
+  kernel supplies.
+- **v4l2loopback** is wanted but not built. The shared `v4l2loopback` recipe
+  (`inherit module`, `DEPENDS = "virtual/kernel"`) cannot serve a GKI machine, whose
+  `virtual/kernel` is `linux-dummy`, and the `vendor_dlkm-override` directory ignores
+  modules the vendor does not ship. It needs building in the kernel recipe like Mali,
+  plus a rootfs path that `systemd-modules-load` reads.
 
 ## Boot image
 
@@ -131,20 +152,31 @@ vendor keys).
 
 ## Yocto
 
-Layer `meta-smartphone/meta-brax`, `MACHINE=brax3`; rootfs `MACHINE=halium-arm64`.
+Layer `meta-smartphone/meta-brax`, `MACHINE=brax3` (BaseOS) or `brax3-iode`. The
+install is `luneos-dev-fastboot-package` built for that machine, so its rootfs
+carries the machine's packages (the Mali override); a separate `MACHINE=halium-arm64`
+rootfs would not (kernel-modules.md § The vendor_dlkm set).
 
 | File | Role |
 |---|---|
 | `conf/machine/include/brax3.inc` | shared: boot images only; `GKI_BOOTIMG`, `linux-brax-brax3`, `Image.lz4`, v4 + init_boot, lz4-legacy |
 | `conf/machine/brax3.conf`, `brax3-iode.conf` | `BRAX3_VENDOR = baseos / iode`; iode adds `MACHINEOVERRIDES =. "brax3:"` |
 | `recipes-kernel/linux/linux-brax-brax3_git.bb` + `files/luneos.cfg`, `vermagic-{baseos,iode}.cfg` | the kernel; `DEPENDS += pahole-native`; native headers via `-idirafter` |
+| same recipe + `files/0001-mali-r38p1-*.patch` | the Mali override (`${PN}-vendor-dlkm-override`), added in `brax3.inc` via `MACHINE_EXTRA_RRECOMMENDS` |
 | `recipes-core/luneos-device-config/.../brax3-deviceinfo` | Tier 1: key devices, hwc2, 48 kHz |
 
 ```sh
-MACHINE=brax3 bitbake luneos-bootimg-gki        # BaseOS vendor
-MACHINE=brax3-iode bitbake luneos-bootimg-gki   # iodéOS vendor
-MACHINE=halium-arm64 bitbake luneos-dev-image
+MACHINE=brax3 bitbake luneos-dev-fastboot-package        # BaseOS vendor
+MACHINE=brax3-iode bitbake luneos-dev-fastboot-package   # iodéOS vendor
 ```
+
+The zip holds `boot.img`, `boot-debug.img`, `init_boot.img`, `vbmeta.img`,
+`userdata.img` and `flash.sh`. **`init_boot` support was missing from the shared
+fastboot package**: it shipped and flashed `boot` alone, which on this layout would
+have left the stock `init_boot`, so our kernel would have started Android's generic
+ramdisk. `FASTBOOT_INIT_BOOT_IMAGE` (meta-webos-ports `luneos-fastboot-package.inc`,
+default from meta-android's `meta-android-halium.inc` when `ANDROID_BOOTIMG_INIT_BOOT
+= "1"`) now copies it and flashes `init_<partition>` beside every boot partition.
 
 ## Install
 
@@ -168,11 +200,12 @@ steps per layout class), with `init_boot` flashed beside `boot` on the inactive 
   the flashed `boot_a` header (os_version), whether `fastboot boot` works.
 - AIDL radio (`InterfaceType = aidl`): check ofono-binder-plugin and the RIL
   derivation in hal-userspace.md before expecting telephony.
-- Mali in a pid namespace (Waydroid): Droidian's ACK kernel for the Q25 carries a gki_quirks
-  `find_get_pid` hook so `mali_kbase` resolves pids globally under `PID_NS=y` (device-q25.md § Kernel);
-  whether mt6835's r25p0 driver needs the same is unchecked.
-- Move the kernel to `shr-distribution/linux` as `brax3/5.15.209/lune`; add
-  v4l2loopback there.
+- Mali in Waydroid: the patched module is built and interface-checked, not run;
+  confirm on the device that `mali_kbase_mt6835` is ours (`vendor_dlkm: our own
+  build of mali_kbase_mt6835.ko` in the journal) and Android reaches
+  `sys.boot_completed`.
+- v4l2loopback (§ Kernel).
+- Move the kernel to `shr-distribution/linux` as `brax3/5.15.209/lune`.
 
 ## Sources
 
@@ -185,6 +218,7 @@ steps per layout class), with `init_boot` flashed beside `boot` on the inactive 
 - https://git.os-source.co/Brax3_BaseOs/android_manifest (BaseOS 1.0)
 - https://git.os-source.co/Brax3_BaseOs/android_device_brax_brax3
 - https://git.os-source.co/Brax3_BaseOs/android_kernel_mt6835
+- https://git.os-source.co/Brax3_BaseOs/android_vendor_mediatek_kernel_modules (Mali r38p1)
 - https://git.os-source.co/Brax3_BaseOs/android_device_brax_brax3-kernel
 - https://git.os-source.co/Brax3_IodeOs/device_brax_brax3-kernel
 - https://git.os-source.co/Brax3_UbuntuTouchOs/brax3-ubports

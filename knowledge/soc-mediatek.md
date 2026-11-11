@@ -178,6 +178,11 @@ This is MediaTek-specific in practice: on the Qualcomm and Tensor ports the watc
   under cgroup_mutex while connmand holds rtnl waiting on an events work item whose
   kworkers wait on cgroup_mutex (measured on mp01; q25 carries it pre-emptively; see
   device-mp01.md § Kernel).
+- **Mali's pid lookup breaks Waydroid** on r32p1 (q25) and r38p1 (brax3) alike: a
+  patched rebuild ships as a vendor_dlkm override (graphics.md § Mali in a pid
+  namespace). Where the driver lives varies: in the kernel tree on MT6789
+  (`drivers/gpu/mediatek/gpu_mali`), out of tree on MT6835 (BaseOS
+  `vendor/mediatek/kernel_modules`); the stock `.ko`'s debug paths name the source.
 - **The watchdog driver is a module** (`mtk_wdt.ko`), unlike Qualcomm and Tensor (§ The
   hardware watchdog).
 - **4.x BSPs force-load the connectivity modules** (§ Connectivity combo); that is only safe
